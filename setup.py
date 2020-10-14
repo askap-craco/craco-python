@@ -50,7 +50,7 @@ if __name__ == '__main__':
         author_email='keith.bannister@csiro.au',
         maintainer='Keith Bannister',
         maintainer_email='keith.bannister@csiro.au',
-        install_requires=requirements,
+        install_requires=['astropy','numpy','matplotlib'],
         keywords=['craco'],
         package_dir={'': 'src'},
         packages=find_packages('src'),
