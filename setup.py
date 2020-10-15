@@ -55,6 +55,9 @@ if __name__ == '__main__':
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
+        entry_points = {
+            'console_scripts': ['corrsim=craco.corrsim:_main']
+        },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',
                      'Programming Language :: Python :: 3.6',

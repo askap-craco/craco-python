@@ -1,5 +1,2 @@
-"""
-Python utilities for the CRACO project
-"""
-
 __version__ = "0.0.1"
+__author__ = "Keith Bannister <keith.bannister@csiro.au>"
