@@ -42,7 +42,7 @@ INFO:root:First time is UTC=2020-10-15T04:26:47.160285+00:00 utc_back=2020-10-15
 Sent 8704 packets
 ```
 
-Command line Arguments
+Command line help:
 ```
 $ corrsim -h
 usage: corrsim [-h] -d DESTINATION [-b BEAMID] [-p POLID] [-t TSAMP] [-v]
