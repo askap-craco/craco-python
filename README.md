@@ -45,6 +45,15 @@ pip install -e .
 
 ```
 
+# To run the test suite
+
+It uses [pytest](http://www.pytest.org) to find and run tests. It uses the
+`addopts = --doctest-modules` is in the `pytest.ini` file, so it will also find
+and execute doctests if you have them.
+
+```
+python setup.py test
+```
 
 
 # Command-line Utilities

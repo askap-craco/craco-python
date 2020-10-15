@@ -5,7 +5,7 @@ i.e., find the number of seconds that must be added to UTC to compute
 TAI for any timestamp at or after the given time[1].
 
   >>> from datetime import datetime
-  >>> import leapseconds
+  >>> import craco.leapseconds as leapseconds
   >>> leapseconds.dTAI_UTC_from_utc(datetime(2005, 1, 1))
   datetime.timedelta(seconds=32)
   >>> leapseconds.utc_to_tai(datetime(2015, 7, 1))
