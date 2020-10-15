@@ -14,10 +14,36 @@ packages in  your $PYTHONPATH environment variable
 python3.8 -m venv venv --prompt craco
 source venv/bin/activate
 
+# Install craco-python directly from bitbucket
 pip install git+https://bitbucket.csiro.au/scm/crac/craco-python.git
 
 ```
 
+# To install for development
+
+If you want to develop craco-python then it's best to clone the repository and install it as "editable" with PIP.
+
+If you make any changes to the python files, it should be reflected immediately when you run another command.
+
+If you change the package (e.g. add dependancies or change `setup.py`) you'll need to run `pip install -e .` again.
+
+```
+
+# clone the repository
+git clone https://bitbucket.csiro.au/scm/crac/craco-python.git
+cd craco-python
+
+# Create a virtual env if you don't have one already
+python3.8 -m venv venv --prompt craco
+
+# Activate the virtualenv.
+source venv/bin/activate
+
+# Install craco-python as "editable" - this means you don't have to install every time you make a change
+pip install -e .
+
+
+```
 
 
 
@@ -71,5 +97,5 @@ optional arguments:
                         Number of times to loop through the file (default: 1)
 ```
 
-# Documentation
-
+# API Documentation
+You're looking at it! Maybe we'll be clever and build it to put on gitlab

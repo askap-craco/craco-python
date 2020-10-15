@@ -45,6 +45,8 @@ if __name__ == '__main__':
         long_description='\n\n'.join([readme, changes]),
         license='Not open source',
         url='https://github.com/strocode/craco',
+        tests_require=['nose'],
+        test_suite='nose.collector',
         version=version,
         author='Keith Bannister',
         author_email='keith.bannister@csiro.au',
