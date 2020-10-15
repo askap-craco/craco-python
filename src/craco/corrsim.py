@@ -24,7 +24,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 # Header format see;https://confluence.csiro.au/display/CRACO/Correlator+packet+format
 # BAT, FREQ, BeamID, PolID, reserved, reserve
-HEADER_FORMAT = "<QfBBxx"
+HEADER_FORMAT = "<QIBBxx"
 
 class CorrelatorSimulator:
 
@@ -39,12 +39,16 @@ class CorrelatorSimulator:
         assert 0 <= self.beamid < 36, 'Invalid Beam ID'
         
         self.polid = values.polid
-        assert 0 <= self.polid < 4, 'Invalid Pol ID'
+        for p in self.polid:
+            assert 0 <= p < 4, f'Invalid Pol ID:{p}'
 
         self.tsamp = values.tsamp
-        assert 0 < self.tsamp, 'Invalid tsamp'
+        assert 0 < self.tsamp, f'Invalid tsamp:{selftsamp}'
+
+        self.nloops = values.nloops
+        self.nsent = 0
         
-        logging.info('Sending data from %s to %s with beamID=%d and polID=%d tsamp=%dus',
+        logging.info('Sending data from %s to %s with beamID=%d and polID=%s tsamp=%dus',
                      fin, self.dest_address, self.beamid, self.polid, self.tsamp)
 
         
@@ -57,6 +61,7 @@ class CorrelatorSimulator:
 
     def send(self, message):
         self.sock.sendto(message, self.dest_address.hostport)
+        self.nsent += 1
 
     def send_block(self, iblk, blk):
         '''
@@ -78,12 +83,12 @@ class CorrelatorSimulator:
         # Need to think about the baseline ordering here, but let's assume it's right for now.
         bat = 0
         for c in range(nchan):
-            freq = float(c)
-            beamid = self.beamid
-            polid = self.polid # TODO: Support multiple polarisations in file. 
-            hdr = struct.pack(HEADER_FORMAT, bat, freq, beamid, polid)
-            packet = hdr + data[:, c].tobytes()
-            self.send(packet)
+            for polid in self.polid:
+                freq = float(c)
+                beamid = self.beamid
+                hdr = struct.pack(HEADER_FORMAT, bat, c, beamid, polid)
+                packet = hdr + data[:, c].tobytes()
+                self.send(packet)
             
     def run(self):
         '''
@@ -101,7 +106,7 @@ class CorrelatorSimulator:
 
         bat_blk = bat_now
 
-        while True:
+        for iloop in range(self.nloops):
             for iblk, blk in enumerate(time_blocks(d, nt=1)):
                 self.send_block(iblk, blk)
 
@@ -112,9 +117,10 @@ def _main():
     parser = ArgumentParser(description='Simulate the ASKAP Correlator in CRACO mode', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-d','--destination', help='Desintation UDP adddress:port e.g. localhost:1234', required=True, type=cmdline.Hostport)
     parser.add_argument('-b','--beamid', help='Beamid to put in headers, 0-35', default=0, type=int)
-    parser.add_argument('-p','--polid', help='PolID to put in headers. 0-3', default=0, type=int)
-    parser.add_argument('-t','--tsamp', help='Sampling iterval in microseconds', default=1728, type=int)
+    parser.add_argument('-p','--polid', help='PolIDs. If input file has 1 polarisation, it duplicates it with given pol IDs', default=[0, 1], type=cmdline.strrange)
+    parser.add_argument('-t','--tsamp', help='Sampling interval in microseconds', default=1728, type=int)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('-n','--nloops', type=int, help='Number of times to loop through the file', default=1)
     parser.add_argument(dest='uvfits', nargs=1, type=str)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -125,6 +131,7 @@ def _main():
 
     sim = CorrelatorSimulator.from_args(values)
     sim.run()
+    print(f'Sent {sim.nsent} packets')
 
     
 
