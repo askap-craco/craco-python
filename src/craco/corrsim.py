@@ -12,9 +12,13 @@ import sys
 import logging
 import socket
 import struct
+import datetime
+import leapseconds
 
 from craco.utils import time_blocks, bl2ant
 import craco.cmdline as cmdline
+import craco.aktime as aktime
+
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
@@ -25,8 +29,8 @@ HEADER_FORMAT = "<QfBBxx"
 class CorrelatorSimulator:
 
     def __init__(self, values):
-        fin = values.files[0]
-        self.hdu = fits.open(fin)
+        fin = values.uvfits[0]
+        self.hdu = fits.open(fin, mode='readonly')
         self.hdu.info()
         self.sock = socket.socket(socket.AF_INET,
                                   socket.SOCK_DGRAM) # UDP socket
@@ -36,8 +40,12 @@ class CorrelatorSimulator:
         
         self.polid = values.polid
         assert 0 <= self.polid < 4, 'Invalid Pol ID'
+
+        self.tsamp = values.tsamp
+        assert 0 < self.tsamp, 'Invalid tsamp'
         
-        logging.info('Sending data from %s to %s with beamID=%d and polID=%d', fin, self.dest_address, self.beamid, self.polid)
+        logging.info('Sending data from %s to %s with beamID=%d and polID=%d tsamp=%dus',
+                     fin, self.dest_address, self.beamid, self.polid, self.tsamp)
 
         
     @classmethod
@@ -82,9 +90,22 @@ class CorrelatorSimulator:
         Run the simulator - it might return or it might not
         '''
         d = self.hdu['PRIMARY'].data
+        utc_now = aktime.utc_now()
+        dutc_now = leapseconds.dTAI_UTC_from_utc(utc_now.replace(tzinfo=None)).total_seconds()
+        bat_now = aktime.utcDt2bat(utc_now, dutc=dutc_now)
+        jd_now = aktime.bat2utc(bat_now, dutc=dutc_now)
+        utcdt_back = aktime.bat2utcDt(bat_now)
+        logging.info('First time is UTC=%s utc_back=%s dutc=%d bat=0x%x jd=%f ', utc_now.isoformat(),
+                      utcdt_back,
+                     dutc_now, bat_now, jd_now)
+
+        bat_blk = bat_now
+
         while True:
             for iblk, blk in enumerate(time_blocks(d, nt=1)):
                 self.send_block(iblk, blk)
+
+            bat_blk += self.tsamp
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -92,8 +113,9 @@ def _main():
     parser.add_argument('-d','--destination', help='Desintation UDP adddress:port e.g. localhost:1234', required=True, type=cmdline.Hostport)
     parser.add_argument('-b','--beamid', help='Beamid to put in headers, 0-35', default=0, type=int)
     parser.add_argument('-p','--polid', help='PolID to put in headers. 0-3', default=0, type=int)
+    parser.add_argument('-t','--tsamp', help='Sampling iterval in microseconds', default=1728, type=int)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument(dest='files', nargs='+')
+    parser.add_argument(dest='uvfits', nargs=1, type=str)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
