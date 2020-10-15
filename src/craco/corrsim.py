@@ -13,8 +13,7 @@ import logging
 import socket
 import struct
 import datetime
-import leapseconds
-
+import craco.leapseconds
 from craco.utils import time_blocks, bl2ant
 import craco.cmdline as cmdline
 import craco.aktime as aktime

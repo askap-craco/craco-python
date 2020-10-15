@@ -19,10 +19,10 @@ with open(init_file, 'r') as f:
         raise RuntimeError(
             'Cannot find __version__ in {}'.format(init_file))
 
-with open('README.rst', 'r') as f:
+with open('README.md', 'r') as f:
     readme = f.read()
 
-with open('CHANGELOG.rst', 'r') as f:
+with open('CHANGELOG.m', 'r') as f:
     changes = f.read()
 
 def parse_requirements(filename):
