@@ -22,7 +22,7 @@ with open(init_file, 'r') as f:
 with open('README.md', 'r') as f:
     readme = f.read()
 
-with open('CHANGELOG.m', 'r') as f:
+with open('CHANGELOG.md', 'r') as f:
     changes = f.read()
 
 def parse_requirements(filename):
