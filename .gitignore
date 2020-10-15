@@ -1,7 +1,12 @@
+# Emacs and other backups
+*~
+*.bak
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
 
 # C extensions
 *.so
