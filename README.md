@@ -107,4 +107,5 @@ optional arguments:
 ```
 
 # API Documentation
-You're looking at it! Maybe we'll be clever and build it to put on gitlab
+API Documentation can be found [https://craft-group.gitlab.io/craco-python/]
+
