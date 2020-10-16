@@ -1,26 +1,26 @@
 stages:
-	- test
-	- deploy
+    - test
+    - deploy
 
 test:
-	stage: test
-	script:
-		- apt-get update -qy
-		- apt-get install -y python3.8-dev python3.8-pip
-		- python setup.py test
-	artifacts:
-		when: always
-		reports:
-			junit: test_results.xml
+    stage: test
+    script:
+        - apt-get update -qy
+        - apt-get install -y python3.8-dev python3.8-pip
+        - python setup.py test
+    artifacts:
+        when: always
+        reports:
+            junit: test_results.xml
 
 production:
-	stage: deploy
-	script:
-		- apt-get update -qy
-		- apt-get install -y python3.8-dev python3.8-pip
-		- python setup.py build_sphinx
-	artifacts:
-		paths:
-			- docs/build/html
+    stage: deploy
+    script:
+        - apt-get update -qy
+        - apt-get install -y python3.8-dev python3.8-pip
+        - python setup.py build_sphinx
+    artifacts:
+        paths:
+            - docs/build/html
 
-		
+        
