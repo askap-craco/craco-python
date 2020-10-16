@@ -62,13 +62,9 @@ python setup.py test
 We use [coverage.py](https://coverage.readthedocs.io)
 
 ```
-coverage run -m pytest
-coverage report
+python -m pytest --cov-report html --cov craco tests
 
-# For nicer presentation do
-coverage html
-
-# And oen htmlcov/index.html
+# And open htmlcov/index.html
 ```
 
 
