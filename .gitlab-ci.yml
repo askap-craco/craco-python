@@ -43,7 +43,6 @@ pages:
     script:
         - python setup.py build_sphinx
         - ls
-        - ls docs/build
         - mv build/sphinx/html public
     artifacts:
         paths:
