@@ -45,7 +45,7 @@ if __name__ == '__main__':
         long_description='\n\n'.join([readme, changes]),
         license='Not open source',
         url='https://github.com/strocode/craco',
-        setup_requires=['pytest-runner', 'sphinx'],
+        setup_requires=['pytest-runner', 'sphinx', 'recommonmark'],
         tests_require=['pytest'],
         version=version,
         author='Keith Bannister',

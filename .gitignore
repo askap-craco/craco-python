@@ -42,6 +42,7 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
+test_results.xml
 htmlcov/
 .tox/
 .nox/
@@ -75,6 +76,8 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/source/api
+
 
 # PyBuilder
 .pybuilder/
