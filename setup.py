@@ -46,7 +46,7 @@ if __name__ == '__main__':
         license='Not open source',
         url='https://github.com/strocode/craco',
         setup_requires=['pytest-runner', 'sphinx', 'recommonmark'],
-        tests_require=['pytest'],
+        tests_require=['pytest', 'coverage', 'pytest-cov'],
         version=version,
         author='Keith Bannister',
         author_email='keith.bannister@csiro.au',

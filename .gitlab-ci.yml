@@ -37,6 +37,7 @@ test:
         when: always
         reports:
             junit: test_results.xml
+            cobertura: coverage.xml
 
 
 pages:
