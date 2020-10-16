@@ -51,8 +51,24 @@ It uses [pytest](http://www.pytest.org) to find and run tests. It uses the
 `addopts = --doctest-modules` is in the `pytest.ini` file, so it will also find
 and execute doctests if you have them.
 
+This also creates a coverage report xml for use in glatb.ci
+
 ```
 python setup.py test
+```
+
+# To view test coverage
+
+We use [coverage.py](https://coverage.readthedocs.io)
+
+```
+coverage run -m pytest
+coverage report
+
+# For nicer presentation do
+coverage html
+
+# And oen htmlcov/index.html
 ```
 
 
