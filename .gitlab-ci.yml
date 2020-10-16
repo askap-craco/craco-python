@@ -38,7 +38,9 @@ test:
 pages:
     script:
         - python setup.py build_sphinx
-        -  mv docs/build/html public
+        - ls
+        - ls docs/build
+        - mv build/sphinx/html public
     artifacts:
         paths:
             - public
