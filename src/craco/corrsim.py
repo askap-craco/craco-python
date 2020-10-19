@@ -62,9 +62,13 @@ class CorrelatorSimulator:
         self.sock.sendto(message, self.dest_address.hostport)
         self.nsent += 1
 
-    def send_block(self, iblk, blk):
+    def send_block(self, iblk, blk, bat):
         '''
         Builds packets and sends them
+
+        :iblk: Block id (starts at zero)
+        :blk: Block data
+        :bat: Binary atomic time
         '''
 
         blkeys = sorted(blk.keys())
@@ -80,7 +84,6 @@ class CorrelatorSimulator:
             data[ibl, :] = visdata[:, 0]
 
         # Need to think about the baseline ordering here, but let's assume it's right for now.
-        bat = 0
         for c in range(nchan):
             for polid in self.polid:
                 freq = float(c)
@@ -107,7 +110,7 @@ class CorrelatorSimulator:
 
         for iloop in range(self.nloops):
             for iblk, blk in enumerate(time_blocks(d, nt=1)):
-                self.send_block(iblk, blk)
+                self.send_block(iblk, blk, bat_blk)
 
             bat_blk += self.tsamp
 
