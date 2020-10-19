@@ -112,7 +112,7 @@ class CorrelatorSimulator:
             for iblk, blk in enumerate(time_blocks(d, nt=1)):
                 self.send_block(iblk, blk, bat_blk)
 
-            bat_blk += self.tsamp
+                bat_blk += self.tsamp
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
