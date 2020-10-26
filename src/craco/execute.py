@@ -28,6 +28,10 @@ class ExecuteCommand(object):
                  popup         = None,
                  process_index = None):
 
+        # Get log setup
+        self._log = logging.getLogger(__name__)
+        #self._log = logging.getLogger(None)
+        
         # stdout here includes stdout and stderr
         # some applications do use stderr as stdout
         self.stdout_callbacks     = set()
@@ -78,9 +82,9 @@ class ExecuteCommand(object):
             except Exception as error:
                 self.failed_launch = True
                 self.returncode = self._command + "; RETURNCODE is: ' 1'"
-                log.exception("Error while launching command: "
-                              "{} with error "
-                              "{}".format(self._command, error)) 
+                self._log.exception("Error while launching command: "
+                                    "{} with error "
+                                    "{}".format(self._command, error)) 
                 
             # Start monitors
             self._monitor_threads.append(
