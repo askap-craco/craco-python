@@ -31,6 +31,12 @@ class Etcd3Wrapper(object):
         self._etcd = etcd3.client(host=self._server.split(":")[0],
                                   port=self._server.split(":")[1])
 
+    def reset(self):
+        '''
+        only reset given directory
+        '''
+        self._etcd.delete_prefix(self._root)
+        
     def get_keys(self, key_root, keys):
         self._log.info("Parsing '{}' ETCD key values".format(key_root))
         values = {}

@@ -41,7 +41,12 @@ class Yaml2Etcd():
                         "{}".format(self._etcd_server))
         try:
             #self._etcd = etcd3.client(host=host, port=port)
-            self._etcd = Etcd3Wrapper(self._etcd_server, self._etcd_root)
+            self._etcd = Etcd3Wrapper(self._etcd_server,
+                                      self._etcd_root)
+
+            # Reset first before load new configurations
+            # Only reset current directory
+            self._etcd.reset()
         except:
             raise Exception("Can not create etcd client with "
                             "'{}'".format(self._etcd_server))
