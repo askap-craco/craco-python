@@ -37,8 +37,8 @@ class TestUdpdb(unittest.TestCase):
         '''
         # Setup the test configuration first
         config = Namespace(etcd_server=["localhost:2379"],
-                           etcd_root=["/test"],
-                           yaml_fname=["etcd_test_udpdb.yaml"],
+                           etcd_root=["/test_udpdb"],
+                           yaml_fname=["test_udpdb.yaml"],
                            execution=[False])
     
         # Load ETCD configuration

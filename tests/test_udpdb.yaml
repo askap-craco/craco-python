@@ -1,0 +1,54 @@
+# The pipeline is designed to build around a ring buffer.
+# A ring buffer is created at the startup of a pipeline.
+# The parameters in this section 1) defines the ring buffer.
+#                                2) defines pipeline behaviours.
+# Some of them are used by applications to build the pipeline.
+
+basic:
+  # Application to run for this section, including directory and fixed options
+  # Any application configuration which are not shared with other applications
+  app:    dada_db -p -n 2
+  key:    dada       # The ring buffer key in hex
+  
+  writer:    udpdb_simulator  # Ring buffer writer, only one writer
+  reader:    dbdisk  # We can have multiple readers, split with space
+
+  # Additional applications to rn the pipeline
+  # These applications are related with specific reader or writer
+  # For example, only 'search' needs average/calibration/uvgrid
+  # ETCD configuration script does not check the correctness of accessory
+  # pipeline script checks it and errors out when anything is wrong
+  reader_accessory: null
+  writer_accessory: null
+  
+  ntime:    256 # Number of time stamps in each ring buffer block
+  nchan:    256 # Number of frequency channels
+  nbl:      190 # Number of baselines 
+  npol:     2   # Number of polarisations 
+  nbyte:    8   # Number of bytes of each sample
+    
+# Configuration of simulator when it is used to generate data
+simulator:
+  app: corrsim -b 3 -p 0,1 --nloops 100
+  
+  # File name when a file is used a signal source, including directory
+  file_name: /data/craco/ban115/test_data/frb_d0_t0_a1_sninf_lm00/frb_d0_t0_a1_sninf_lm00.fits
+  # A directory to put files when we use random generated data 
+  directory: /data/craco/den15c/craco-python/dada/
+    
+# Configuration of udpdb when it is used as a writer
+udpdb:
+  app: /data/craco/den15c/end2end_sept/pipeline/udpdb
+  
+  udp_nic:        127.0.0.1:10174        # UDP interface to receive raw data
+  dada_hdr_fname: ../config/dada_hdr.txt # PSRDADA header template
+  tsamp:          1728                   # Sampleing time in microseconds
+  centre_freq:    1340.5                 # Center frequency in MHz
+  bw:             256                    # Bandwidth in MHz
+  status_zmq:     127.0.0.1:10175        # ZeroMQ interface to send udpdb status
+  tout:           10                     # UDP socket timeout in seconds
+  
+# Configuration of dbdisk when it is used as a reader
+dbdisk:
+  app: dada_dbdisk -W -o -z -s
+  directory: /data/craco/den15c/craco-python/dada # Directory to put dada file when dbdisk is used as a reader
