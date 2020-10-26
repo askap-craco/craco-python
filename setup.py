@@ -52,13 +52,16 @@ if __name__ == '__main__':
         author_email='keith.bannister@csiro.au',
         maintainer='Keith Bannister',
         maintainer_email='keith.bannister@csiro.au',
-        install_requires=['astropy','numpy','matplotlib', 'pytz', 'wheel', 'grpcio', 'etcd3'],
+        install_requires=['astropy','numpy','matplotlib',
+                          'pytz', 'wheel', 'grpcio',
+                          'etcd3', 'coloredlogs', 'pyyaml'],
         keywords=['craco'],
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
         entry_points = {
-            'console_scripts': ['corrsim=craco.corrsim:_main']
+            'console_scripts': ['corrsim=craco.corrsim:_main'],
+            'console_scripts': ['yaml2etcd=craco.yaml2etcd:_main']
         },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',
