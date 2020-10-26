@@ -60,8 +60,8 @@ if __name__ == '__main__':
         packages=find_packages('src'),
         zip_safe=False,
         entry_points = {
-            'console_scripts': ['corrsim=craco.corrsim:_main'],
-            'console_scripts': ['yaml2etcd=craco.yaml2etcd:_main']
+            'console_scripts': ['corrsim=craco.corrsim:_main',
+                                'yaml2etcd=craco.yaml2etcd:_main']
         },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',
