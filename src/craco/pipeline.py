@@ -54,35 +54,56 @@ class Pipeline(object):
         
         etcd_keys = {"writer", "reader", "key",   "ntime",
                      "nchan",  "nbl",    "npol",   "nbyte",
-                     "app", "reader_accessory", "writer_accessory"}
+                     "app", "reader_accessory", "writer_accessory",
+                     "tsamp", "centre_freq", "bw"}
+        try:
+            etcd_values = self._etcd.get_keys("basic", etcd_keys)
+        except Exception as error:
+            self._log.exception(error)
 
-        etcd_values = self._etcd.get_keys("basic", etcd_keys)
-
-        # Shared configurations, part of basic section in ETCD
+            self._terminate_executions()
+            self._reset()
+            
+            raise PipelineError(error)
+            
+        # Not shared with other functions for sure
+        app = etcd_values["app"]
+        
+        # Shared configurations for sure
         self._key    = etcd_values["key"]
         self._writer = etcd_values["writer"]
         self._reader = etcd_values["reader"].split(" ")
         self._writer_accessory = etcd_values["writer_accessory"].split(" ")
         self._reader_accessory = etcd_values["reader_accessory"].split(" ")
         
-        nreader = len(self._reader)
+        nreader = len(self._reader) # Not shared for sure
         self._log.debug("reader list is {}".format(self._reader))
+        self._log.debug("writer list is {}".format(self._writer))
+        self._log.debug("reader accessory list is {}".format(self._reader_accessory))
+        self._log.debug("writer accessory list is {}".format(self._writer_accessory))
         self._log.debug("We have {} readers".format(nreader))
 
-        ntime  = int(etcd_values["ntime"])
-        nchan  = int(etcd_values["nchan"])
-        nbl    = int(etcd_values["nbl"])
-        npol   = int(etcd_values["npol"])        
-        nbyte  = int(etcd_values["nbyte"])
-        app    = etcd_values["app"]
+        # May shared 
+        self._ntime  = int(etcd_values["ntime"])
+        self._nchan  = int(etcd_values["nchan"])
+        self._nbl    = int(etcd_values["nbl"])
+        self._npol   = int(etcd_values["npol"])        
+        self._nbyte  = int(etcd_values["nbyte"])
         
-        self._log.debug("ntime is {}".format(ntime))
-        self._log.debug("nchan is {}".format(nchan))
-        self._log.debug("nbl is   {}".format(nbl))
-        self._log.debug("npol is  {}".format(npol))
+        self._tsamp        = float(etcd_values["tsamp"])
+        self._centre_freq  = float(etcd_values["centre_freq"])
+        self._bw           = float(etcd_values["bw"])
+        
+        self._log.debug("ntime is {}".format(self._ntime))
+        self._log.debug("nchan is {}".format(self._nchan))
+        self._log.debug("nbl is   {}".format(self._nbl))
+        self._log.debug("npol is  {}".format(self._npol))
+        self._log.debug("tsamp is       {} microsecond".format(self._tsamp))
+        self._log.debug("centre_freq is {} MHz".format(self._centre_freq))
+        self._log.debug("bw is          {} MHz".format(self._bw))
         
         # build dada_db command line
-        blksz = npol*ntime*nbl*nchan*nbyte
+        blksz = self._npol*self._ntime*self._nbl*self._nchan*self._nbyte
         command = "{} -k {} -r {} -b {}".format(app,
                                                 self._key,
                                                 nreader, 
@@ -167,9 +188,17 @@ class Pipeline(object):
 
     def _diskdb(self):
         self._log.info("Parse 'diskdb' keys from ETCD")
-        etcd_keys   = {"app", "file_name"}
-        etcd_values = self._etcd.get_keys("diskdb", etcd_keys)
+        etcd_keys = {"app", "file_name"}
+        try:
+            etcd_values = self._etcd.get_keys("diskdb", etcd_keys)
+        except Exception as error:
+            self._log.exception(error)
 
+            self._terminate_executions()
+            self._reset()
+            
+            raise PipelineError(error)
+        
         app       = etcd_values["app"]
         file_name = etcd_values["file_name"]
 
@@ -269,10 +298,22 @@ class Pipeline(object):
     def _udpdb(self):
         # Build udpdb command line
         self._log.info("Parse 'udpdb' keys from ETCD")
-        etcd_keys   = {"app"}
-        etcd_values = self._etcd.get_keys("udpdb", etcd_keys)
+        etcd_keys = {"app", "udpdb_zmq"}
+        try:
+            etcd_values = self._etcd.get_keys("udpdb", etcd_keys)
+        except Exception as error:
+            self._log.exception(error)
 
+            self._terminate_executions()
+            self._reset()
+            
+            raise PipelineError(error)
+
+        # Not shared for sure
         app = etcd_values["app"]
+
+        # Shared with its accessory
+        self._udpdb_zmq = etcd_values["udpdb_zmq"]
         
         command = "{} -a {} -b {}".format(app,
                                           self._etcd_server,
@@ -286,8 +327,16 @@ class Pipeline(object):
             
     def _dbdisk(self):
         self._log.info("Parse 'dbdisk' keys from ETCD")
-        etcd_keys   = {"app", "directory"}
-        etcd_values = self._etcd.get_keys("dbdisk", etcd_keys)
+        etcd_keys = {"app", "directory"}
+        try:
+            etcd_values = self._etcd.get_keys("dbdisk", etcd_keys)
+        except Exception as error:
+            self._log.exception(error)
+
+            self._terminate_executions()
+            self._reset()
+            
+            raise PipelineError(error)
 
         app       = etcd_values["app"]
         directory = etcd_values["directory"]
@@ -306,10 +355,26 @@ class Pipeline(object):
         
     def _search(self):        
         self._log.info("Parse 'search' keys from ETCD")
-        etcd_keys   = {"app"}
-        etcd_values = self._etcd.get_keys("search", etcd_keys)
+        etcd_keys = {"app",         "uvgrid_zmq", "calibration_zmq",
+                     "average_zmq", "candidate_zmq"}
+        try:
+            etcd_values = self._etcd.get_keys("search", etcd_keys)
+        except Exception as error:
+            self._log.exception(error)
 
+            self._terminate_executions()
+            self._reset()
+            
+            raise PipelineError(error)
+
+        # Not shared for sure
         app = etcd_values["app"]
+
+        # May shared
+        self._uvgrid_zmq      = etcd_values["uvgrid_zmq"]
+        self._calibration_zmq = etcd_values["calibration_zmq"]
+        self._average_zmq     = etcd_values["average_zmq"]
+        self._candidate_zmq   = etcd_values["candidate_zmq"]
         
         # Build search command line
         command = "{} -a {} -b {}".format(app,

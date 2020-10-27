@@ -7,11 +7,11 @@
 basic:
   # Application to run for this section, including directory and fixed options
   # Any application configuration which are not shared with other applications
-  app:    dada_db -p -n 2
-  key:    dada       # The ring buffer key in hex
+  app: dada_db -p -n 2
+  key: dada       # The ring buffer key in hex
   
-  writer:    udpdb_simulator  # Ring buffer writer, only one writer
-  reader:    dbdisk  # We can have multiple readers, split with space
+  writer: udpdb_simulator  # Ring buffer writer, only one writer
+  reader: dbdisk  # We can have multiple readers, split with space
 
   # Additional applications to rn the pipeline
   # These applications are related with specific reader or writer
@@ -21,12 +21,16 @@ basic:
   reader_accessory: null
   writer_accessory: null
   
-  ntime:    256 # Number of time stamps in each ring buffer block
-  nchan:    256 # Number of frequency channels
-  nbl:      190 # Number of baselines 
-  npol:     2   # Number of polarisations 
-  nbyte:    8   # Number of bytes of each sample
-    
+  ntime: 256 # Number of time stamps in each ring buffer block
+  nchan: 256 # Number of frequency channels
+  nbl:   190 # Number of baselines 
+  npol:  2   # Number of polarisations 
+  nbyte: 8   # Number of bytes of each sample
+
+  tsamp:       1728   # Sampleing time in microseconds
+  centre_freq: 1340.5 # Center frequency in MHz
+  bw:          256    # Bandwidth in MHz
+  
 # Configuration of simulator when it is used to generate data
 simulator:
   app: corrsim -b 3 -p 0,1 --nloops 100
@@ -42,10 +46,7 @@ udpdb:
   
   udp_nic:        127.0.0.1:10174        # UDP interface to receive raw data
   dada_hdr_fname: ../config/dada_hdr.txt # PSRDADA header template
-  tsamp:          1728                   # Sampleing time in microseconds
-  centre_freq:    1340.5                 # Center frequency in MHz
-  bw:             256                    # Bandwidth in MHz
-  status_zmq:     127.0.0.1:10175        # ZeroMQ interface to send udpdb status
+  udpdb_zmq:      127.0.0.1:10175        # ZeroMQ interface to send udpdb status
   tout:           10                     # UDP socket timeout in seconds
   
 # Configuration of dbdisk when it is used as a reader
