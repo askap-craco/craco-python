@@ -8,24 +8,36 @@
 # reader and writer section may also have shared configuration
 # theese configurations may be shared with read and writer accessory
 
+# If the keyword has no value, leave it blank
+# If the keyword can only have one value, put the value follow :
+# For reader, writer and their accessory, put the value under start with "-"
+
 basic:
   # Application to run for this section, including directory and fixed options
   # Any application configuration which are not shared with other applications
   app: dada_db -p -n 2
   key: dada       # The ring buffer key in hex
   
-  writer: udpdb_simulator  # Ring buffer writer, only one writer
-  #writer: udpdb_correlator  # Ring buffer writer, only one writer
-  #writer: diskdb # Ring buffer writer, only one writer
-  reader: dbdisk  # We can have multiple readers, split with space
-
+  writer:
+    - udpdb
+    - simulator  
+  #writer:
+  #  - udpdb
+  #  - correlator  
+  #writer:
+  #  - diskdb
+  reader:
+    - dbdisk # We can have multiple readers
+    - search
+    
   # Additional applications to rn the pipeline
   # These applications are related with specific reader or writer
   # For example, only 'search' needs average/calibration/uvgrid
   # ETCD configuration script does not check the correctness of accessory
   # pipeline script checks it and errors out when anything is wrong
-  reader_accessory: average
-  writer_accessory: null
+  reader_accessory:
+    - average
+  writer_accessory:
   
   ntime: 256 # Number of time stamps in each ring buffer block
   nchan: 256 # Number of frequency channels
@@ -55,7 +67,7 @@ simulator:
   
 # Configuration of correlator when it is use to generate data
 correlator:
-  app: null 
+  app: 
   
 # Configuration of udpdb when it is used as a writer
 # interface here shared with its accessory
@@ -65,7 +77,7 @@ udpdb:
   udp_nic:        127.0.0.1:10174        # UDP interface to receive raw data
   dada_hdr_fname: ../config/dada_hdr.txt # PSRDADA header template
   udbdp_zmq:     127.0.0.1:10175        # ZeroMQ interface to send udpdb status
-  tout:           10                     # UDP socket timeout in seconds
+  timeout:       10                     # UDP socket timeout in seconds
   
 # Configuration of dbdisk when it is used as a reader
 dbdisk:
@@ -89,26 +101,25 @@ search:
   ndm:       1024 # Number of DM trials
   dm_res:    2.0  # The resolution of DM trials
   threshold: 10   # The candidate detection threshold
-  nuv:       4096 # Number of UV samples
 
 # functions for end-to-end pipeline
 uvgrid:
-  app: null
+  app: 
 
 calibration:
-  app: null
+  app: 
 
   threshold: 10 # Calibration average time in seconds
 
 trigger:
-  app: null
+  app: 
 
 # functions for test and end-to-end pipelines
 average:
-  app: null
+  app: 
 
 candidate:
-  app: null
+  app: 
 
 uvgrid_receiver:
-  app: null
+  app: 

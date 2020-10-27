@@ -21,7 +21,7 @@ class Namespace:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
-class TestUdpdb(unittest.TestCase):
+class TestPipeline(unittest.TestCase):
     def setUp(self):
         """Call before every test case."""
         pass
@@ -38,16 +38,16 @@ class TestUdpdb(unittest.TestCase):
         # Setup the test configuration first
         config = Namespace(etcd_server=["localhost:2379"],
                            etcd_root=["/test_udpdb"],
-                           yaml_fname=["test_udpdb.yaml"],
+                           yaml_fname=["tests/test_udpdb.yaml"],
                            execution=[False])
     
         # Load ETCD configuration
         yaml2etcd = Yaml2Etcd.from_args(config)
         yaml2etcd.run()
 
-        # Run essential applications to generate files
-        pipeline = Pipeline.from_args(config)
-        pipeline.run()
+        ## Run applications to generate files
+        #pipeline = Pipeline.from_args(config)
+        #pipeline.run()
         
         # details to check result
         # need to parse ETCD values also

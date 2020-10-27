@@ -72,14 +72,8 @@ class Yaml2Etcd():
         # Setup key words for all readers
         try:
             reader = basic["reader"]
-            if " " not in reader:
-                self._etcd.put_keys(reader,
-                                    self._yaml_dict[reader])
-            else:
-                reader_parts = reader.split(" ")
-                for reader_part in reader_parts:
-                    self._etcd.put_keys(reader_part,
-                                        self._yaml_dict[reader_part])
+            for r in reader:
+                self._etcd.put_keys(r, self._yaml_dict[r])
         except:
             self._log.error("Failed to setup 'reader' from 'basic' section")
             raise Exception("Failed to setup 'reader' from 'basic' section")
@@ -88,14 +82,9 @@ class Yaml2Etcd():
         try:
             reader_accessory = basic["reader_accessory"]
             if reader_accessory != None:
-                if " " not in reader_accessory:
-                    self._etcd.put_keys(reader_accessory,
-                                        self._yaml_dict[reader_accessory])
-                else:
-                    reader_accessory_parts = reader_accessory.split(" ")
-                    for reader_accessory_part in reader_accessory_parts:
-                        self._etcd.put_keys(reader_accessory_part,
-                                            self._yaml_dict[reader_accessory_part])
+                for r_accessory in reader_accessory:
+                    self._etcd.put_keys(r_accessory,
+                                        self._yaml_dict[r_accessory])
         except:
             self._log.error("Failed to setup 'reader_accessory' from 'basic' section")
             raise Exception("Failed to setup 'reader_accessory' from 'basic' section")
@@ -103,14 +92,8 @@ class Yaml2Etcd():
         # Check and load writer key words
         try:
             writer = basic["writer"]
-            if "_" not in writer:
-                self._etcd.put_keys(writer,
-                                    self._yaml_dict[writer])
-            else:
-                writer_parts = writer.split("_")
-                for writer_part in writer_parts:
-                    self._etcd.put_keys(writer_part,
-                                        self._yaml_dict[writer_part])
+            for w in writer:
+                self._etcd.put_keys(w, self._yaml_dict[w])
         except:
             self._log.error("Failed to setup 'writer' from 'basic' section")
             raise Exception("Failed to setup 'writer' from 'basic' section")
@@ -119,14 +102,9 @@ class Yaml2Etcd():
         try:
             writer_accessory = basic["writer_accessory"]
             if writer_accessory != None:
-                if " " not in writer_accessory:
-                    self._etcd.put_keys(writer_accessory,
-                                        self._yaml_dict[writer_accessory])
-                else:
-                    writer_accessory_parts = writer_accessory.split(" ")
-                    for writer_accessory_part in writer_accessory_parts:
-                        self._etcd.put_keys(writer_accessory_part,
-                                            self._yaml_dict[writer_accessory_part])
+                for waccessory in writer_accessory:
+                    self._etcd.put_keys(w_accessory,
+                                        self._yaml_dict[w_accessory])
         except:
             self._log.error("Failed to setup 'writer_accessory' from 'basic' section")
             raise Exception("Failed to setup 'writer_accessory' from 'basic' section")

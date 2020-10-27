@@ -10,16 +10,19 @@ basic:
   app: dada_db -p -n 2
   key: dada       # The ring buffer key in hex
   
-  writer: udpdb_simulator  # Ring buffer writer, only one writer
-  reader: dbdisk  # We can have multiple readers, split with space
+  writer:
+    - udpdb
+    - simulator  
+  reader:
+    - dbdisk  # We can have multiple readers, split with space
 
   # Additional applications to rn the pipeline
   # These applications are related with specific reader or writer
   # For example, only 'search' needs average/calibration/uvgrid
   # ETCD configuration script does not check the correctness of accessory
   # pipeline script checks it and errors out when anything is wrong
-  reader_accessory: null
-  writer_accessory: null
+  reader_accessory: 
+  writer_accessory: 
   
   ntime: 256 # Number of time stamps in each ring buffer block
   nchan: 256 # Number of frequency channels
@@ -47,7 +50,7 @@ udpdb:
   udp_nic:        127.0.0.1:10174        # UDP interface to receive raw data
   dada_hdr_fname: ../config/dada_hdr.txt # PSRDADA header template
   udpdb_zmq:      127.0.0.1:10175        # ZeroMQ interface to send udpdb status
-  tout:           10                     # UDP socket timeout in seconds
+  timeout:        10                     # UDP socket timeout in seconds
   
 # Configuration of dbdisk when it is used as a reader
 dbdisk:

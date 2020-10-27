@@ -72,17 +72,19 @@ class Pipeline(object):
         # Shared configurations for sure
         self._key    = etcd_values["key"]
         self._writer = etcd_values["writer"]
-        self._reader = etcd_values["reader"].split(" ")
-        self._writer_accessory = etcd_values["writer_accessory"].split(" ")
-        self._reader_accessory = etcd_values["reader_accessory"].split(" ")
+        self._reader = etcd_values["reader"]
+        self._writer_accessory = etcd_values["writer_accessory"]
+        self._reader_accessory = etcd_values["reader_accessory"]
         
-        nreader = len(self._reader) # Not shared for sure
+        nreader = 1 
+        if type(self._reader) is list:
+            nreader = len(self._reader) # Not shared for sure
         self._log.debug("reader list is {}".format(self._reader))
         self._log.debug("writer list is {}".format(self._writer))
         self._log.debug("reader accessory list is {}".format(self._reader_accessory))
         self._log.debug("writer accessory list is {}".format(self._writer_accessory))
         self._log.debug("We have {} readers".format(nreader))
-
+                
         # May shared 
         self._ntime  = int(etcd_values["ntime"])
         self._nchan  = int(etcd_values["nchan"])
@@ -131,7 +133,7 @@ class Pipeline(object):
         # writer_worker, writer_accessory_worker
         # are order sensitivity
         # We do not initialise all values at the startup, 
-        # instead, we do that at seperate functions to enable
+        # instead, we do that at seperate functions to
         # make sure that the dependence of these functions is meet
         
         # When the pipeline object initialized,
@@ -157,31 +159,28 @@ class Pipeline(object):
         self._sync_executions()
         
     def _run_reader(self):
-        for r in self._reader:
-            if r == "search":
-                self._search()
-            if r == "dbdisk":
-                self._dbdisk()
-                
-    def _run_reader_accessory(self):
-        for a in self._reader_accessory:
-            if a == "average":
-                self._average()
-            if a == "uvgrid":
-                self._uvgrid()
-            if a == "calibration":
-                self._calibration()
+        if "search" in self._reader:
+            self._search()
+        if "dbdisk" in self._reader:
+            self._dbdisk()            
+               
+    def _run_reader_accessory(self):        
+        if "average" in self._reader_accessory:
+            self._average()
+        if "uvgrid" in self._reader_accessory:
+            self._uvgrid()
+        if "calibration" in self._reader_accessory:
+            self._calibration()
 
-    def _run_writer(self):        
-        if self._writer == "diskdb":
+    def _run_writer(self):
+        if "diskdb" in self._writer:
             self._diskdb()
-        else:
-            if "simulator" in self._writer:
-                self._udpdb()
-                self._simulator()
-            if "correlator" in self._writer:
-                self._udpdb()
-                self._correlator()
+        if "udpdb" in self._writer:
+            self._udpdb()
+        if "simulator" in self._writer:
+            self._simulator()
+        if "correlator" in self._writer:
+            self._correlator()
         
     def _run_writer_accessory(self):
         pass
@@ -324,7 +323,7 @@ class Pipeline(object):
         self._execution_instances.append(execution_instance)
         execution_instance.returncode_callbacks.add(self._returncode_handle)
         execution_instance.stdout_callbacks.add(self._stdout_handle)
-            
+        
     def _dbdisk(self):
         self._log.info("Parse 'dbdisk' keys from ETCD")
         etcd_keys = {"app", "directory"}
