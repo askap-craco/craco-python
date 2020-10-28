@@ -33,9 +33,6 @@ test:
     script:
         - python setup.py test
 
-    tags:
-      - vitis2020.1
-      
     artifacts:
         when: always
         reports:
