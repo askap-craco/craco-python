@@ -56,11 +56,10 @@ We also need to install Python modules from [realtime_pipeline](https://gitlab.a
 # clone the repository
 git clone https://gitlab.atnf.csiro.au:8443/craft/realtime_pipeline.git
 
-# with a python3.6 virtual enviroment
-
+# and then
 cd realtime_pipeline/python/
 
-# and then
+# with a python3.6 virtual enviroment, then 
 pip install -e .
 
 ```
