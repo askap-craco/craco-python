@@ -10,12 +10,12 @@ This will be on pyPI in future. For now do:
 packages in  your $PYTHONPATH environment variable
 
 ```
-# Create a virtual env if you don't have one already
-python3.8 -m venv venv --prompt craco
+# Create a virtual env if you don't have one already - note we need python3.6 for XRT compatibility - this will be improved in future
+python3.6 -m venv venv --prompt craco
 source venv/bin/activate
 
-# Install craco-python directly from bitbucket
-pip install git+https://bitbucket.csiro.au/scm/crac/craco-python.git
+# Install craco-python directly from github
+pip install https://github.com/askap-craco/craco-python.git
 
 ```
 
@@ -30,11 +30,11 @@ If you change the package (e.g. add dependancies or change `setup.py`) you'll ne
 ```
 
 # clone the repository
-git clone https://bitbucket.csiro.au/scm/crac/craco-python.git
+git clone https://github.com/askap-craco/craco-python.git
 cd craco-python
 
 # Create a virtual env if you don't have one already
-python3.8 -m venv venv --prompt craco
+python3.6 -m venv venv --prompt craco
 
 # Activate the virtualenv.
 source venv/bin/activate
