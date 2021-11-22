@@ -2,7 +2,17 @@
  # Trick from here: 
  # installs dependencies from ./setup.py, and the package itself,
  # in editable mode
- -e .
+ # KB - I'm not sure we want to do this, as setup.py references this file for the dependencies
+ #  -e .
+ numpy
+ matplotlib
+ astropy
+ pytz
+ wheel
+ grpcio
+ etcd3
+ pyyaml
+ coloredlogs
 
  # (the -e above is optional). you could also just install the package
  # normally with just the line below (after uncommenting)
