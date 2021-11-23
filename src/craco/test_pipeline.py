@@ -5,6 +5,7 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
+import pickle
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -147,6 +148,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
+    parser.add_argument('-p', '--pickle', default='pipeline.obj', type=str, action='store', help='pickle file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
