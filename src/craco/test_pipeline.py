@@ -5,11 +5,12 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
-import pickle
+import dill
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
     return mode
+
 class AddInstruction(object):
     def __init__(self, plan, target_slot, cell_coords, uvpix):
         self.plan = plan
@@ -34,357 +35,6 @@ class AddInstruction(object):
         return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
 
     __repr__ = __str__
-
-class PipelinePlan(object):
-    def __init__(self, f, values):
-        self.values = values
-        logging.info('making Plan values=%s', values)
-
-        umax, vmax = f.get_max_uv()
-        lres, mres = 1./umax, 1./vmax
-        baselines = f.baselines
-        nbl = len(baselines)
-        freqs = f.channel_frequencies
-
-        # Cant handle inverted bands - this is assumed all over the code. It's boring
-        assert freqs.min() == freqs[0]
-        assert freqs.max() == freqs[-1]
-        Npix = values.npix
-
-        if values.cell is not None:
-            lcell, mcell = map(craco.arcsec2rad, values.cell.split(','))
-            los, mos = lres/lcell, mres/mcell
-        else:
-            los, mos = map(float, values.os.split(','))
-            lcell = lres/los
-            mcell = mres/mos
-            
-        lfov = lcell*Npix
-        mfov = mcell*Npix
-        ucell, vcell = 1./lfov, 1./mfov
-        fmax = freqs.max()
-        foff = freqs[1] - freqs[0]
-        lambdamin = 3e8/fmax
-        umax_km = umax*lambdamin/1e3
-        vmax_km = vmax*lambdamin/1e3
-        
-        logging.info('Nbl=%d Fch1=%f foff=%f nchan=%d lambdamin=%f uvmax=%s max baseline=%s resolution=%sarcsec uvcell=%s arcsec uvcell= %s lambda FoV=%s deg oversampled=%s',
-                 nbl, freqs[0], foff, len(freqs), lambdamin, (umax, vmax), (umax_km, vmax_km), np.degrees([lres, mres])*3600, np.degrees([lcell, mcell])*3600., (ucell, vcell), np.degrees([lfov, mfov]), (los, mos))
-
-        #print(baselines)
-        
-        uvcells = get_uvcells(baselines, (ucell, vcell), freqs, Npix)
-        logging.info('Got Ncells=%d uvcells', len(uvcells))
-        d = np.array([(v.a1, v.a2, v.uvpix[0], v.uvpix[1], v.chan_start, v.chan_end) for v in uvcells], dtype=np.int32)
-        np.savetxt(values.uv+'.uvgrid.txt', d, fmt='%d',  header='ant1, ant2, u(pix), v(pix), chan1, chan2')
-
-        self.uvcells = uvcells
-        self.nd = values.ndm
-        self.nt = values.nt
-        self.freqs = freqs
-        self.npix = Npix
-        self.nbox = values.nbox
-        self.boxcar_weight = values.boxcar_weight
-        self.nuvwide = values.nuvwide
-        self.nuvmax = values.nuvmax
-        assert self.nuvmax % self.nuvwide == 0
-        self.nuvrest = self.nuvmax // self.nuvwide
-        self.ncin = values.ncin
-        self.ndout = values.ndout
-        self.foff = foff
-        self.dtype = np.complex64 # working data type
-        self.threshold = values.threshold
-        self.nbl = nbl
-        self.fdmt_scale = self.values.fdmt_scale
-        self.fft_scale = self.values.fft_scale
-        self.fft_ssr = 16 # number of FFT pixels per clock - "super sample rate"
-        self.ngridreg = 16 # number of grid registers to do
-        assert self.threshold >= 0, 'Invalid threshold'
-        self.fdmt_plan = FdmtPlan(uvcells, self)
-        self.save_fdmt_plan_lut()
-
-        
-        if self.fdmt_plan.nuvtotal >= values.nuvmax:
-            raise ValueError("Too many UVCELLS")
-
-        self.upper_instructions = calc_grid_luts(self, True)
-        self.lower_instructions = calc_grid_luts(self, False)
-        self.save_grid_instructions(self.upper_instructions, 'upper')
-        self.save_grid_instructions(self.lower_instructions, 'lower')
-        self.upper_idxs, self.upper_shifts, self.lower_idxs, self.lower_shifts = calc_pad_lut(self, self.fft_ssr)
-        self.save_pad_lut(self.upper_idxs, self.upper_shifts, 'upper')
-        self.save_pad_lut(self.lower_idxs, self.lower_shifts, 'lower')
-
-        filehandler = open("pipeline.obj", 'wb') 
-        pickle.dump(self, filehandler)
-        filehandler.close()
-        
-    def save_lut(self, data, lutname, header, fmt='%d'):
-        filename = '{uvfile}.{lutname}.txt'.format(uvfile=self.values.uv, lutname=lutname)
-        logging.info('Saving {lutname} shape={d.shape} type={d.dtype} to {filename} header={header}'.format(lutname=lutname, d=data, filename=filename, header=header))
-        np.savetxt(filename, data, fmt=fmt, header=header)
-
-    def save_fdmt_plan_lut(self):
-        fruns = self.fdmt_plan.runs
-        d = []
-        for irun, run in enumerate(fruns):
-            for icell, cell in enumerate(run.cells):
-                d.append([cell.a1,
-                          cell.a2,
-                          cell.uvpix[0],
-                          cell.uvpix[1],
-                          cell.chan_start,
-                          cell.chan_end,
-                          irun,
-                          icell,
-                          run.total_overlap,
-                          run.max_idm,
-                          run.max_offset,
-                          run.offset_cff,
-                          run.idm_cff,
-                          run.fch1])
-
-        d = np.array(d)
-
-        header='ant1, ant2, u(pix), v(pix), chan1, chan2, irun, icell, total_overlap, max_idm, max_offset, offset_cff, idm_cff, fch1'
-        fmt = '%d ' * 8 + ' %d '*3 + ' %f '*3
-        self.save_lut(d, 'uvgrid.split', header, fmt=fmt)
-        
-
-        
-    def save_grid_instructions(self, instructions, name):
-        logging.info('Got %d %s grid instructions', len(instructions), name)
-        d = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
-        header ='target_slot, uvidx, shift_flag, upix, vpix'
-        self.save_lut(d, 'gridlut.'+name, header)
-
-    def save_pad_lut(self, idxs, shifts, name):
-        d = np.array(idxs, dtype=np.int32)
-        header ='upix, vpix, regidx'
-        self.save_lut(d, 'padlut.'+name, header)
-
-        d = np.array(shifts, dtype=np.int32)
-        header = 'doshift'
-        self.save_lut(d, 'doshift.'+name, header)
-        
-
-
-    @property
-    def nf(self):
-        '''Returns number of frequency channels'''
-        return len(self.freqs)
-
-
-    @property
-    def fmin(self):
-        '''
-        Returns maximum frequency
-        '''
-        return self.freqs[0]
-
-    @property
-    def fmax(self):
-        '''
-        Returns minimum frequency
-        '''
-        return self.freqs[-1]
-
-    @property
-    def dmax(self):
-        '''
-        Returns maximum DM - placeholder for when we do DM gaps
-        '''
-        return self.nd
-      
-class FdmtRun(object):
-    def __init__(self, cells, plan):
-        self.plan = plan
-        mincell = min(cells, key=lambda cell:cell.chan_start)
-        self.cells = cells
-        self.chan_start = mincell.chan_start
-        self.fch1 = mincell.fch1
-        self.total_overlap = 0
-        for uv in cells:
-            overlap = calc_overlap(uv, self.chan_start, plan.pipeline_plan.ncin)
-            logging.debug('Cell chan_start %s %s %s-%s overlap=%d', self.chan_start, uv, uv.chan_start, uv.chan_end, overlap)
-            assert overlap > 0
-            self.total_overlap += overlap
-
-        assert self.max_idm <= plan.pipeline_plan.ndout, 'NDOUT is too small - needs to be at least %s' % self.max_idm
-
-    @property
-    def offset_cff(self):
-        return craco_kernels.offset_cff(self.fch1, self.plan.pipeline_plan)
-
-    @property
-    def idm_cff(self):
-        return craco_kernels.idm_cff(self.fch1, self.plan.pipeline_plan)
-
-    @property
-    def max_idm(self):
-        dmax = self.plan.pipeline_plan.dmax
-        return int(np.ceil(dmax*self.idm_cff))
-
-    @property
-    def max_offset(self):
-        dmax = self.plan.pipeline_plan.dmax
-        return int(np.ceil(dmax*self.offset_cff))
-
-    def __str__(self):
-        ncells = len(self.cells)
-        return 'ncells={ncells} fch1={self.fch1} chan_start={self.chan_start} total_overlap={self.total_overlap}'.format(self=self, ncells=ncells)
-        
-
-class FdmtPlan(object):
-    def __init__(self, uvcells, pipeline_plan):
-        self.pipeline_plan = pipeline_plan
-        nuvwide = self.pipeline_plan.nuvwide
-        ncin = self.pipeline_plan.ncin
-        uvcells_remaining = uvcells[:] # copy array
-        fdmt_runs = []
-        run_chan_starts = []
-        run_fch1 = []
-        runs = []
-        while len(uvcells_remaining) > 0:
-            logging.debug('Got %d/%d uvcells remaining', len(uvcells_remaining), len(uvcells))
-            minchan = min(uvcells_remaining, key=lambda uv:(uv.chan_start, uv.blid)).chan_start
-            possible_cells = filter(lambda uv:calc_overlap(uv, minchan, ncin) > 0, uvcells_remaining)
-
-            # Do not know how to get a length of iterator in python3, comment it out here
-            #logging.debug('Got %d possible cells', len(possible_cells))
-
-            # sort as best we can so that it's stable - I.e. we get hte same answer every time
-            best_cells = sorted(possible_cells, key=lambda uv:(calc_overlap(uv, minchan, ncin), uv.blid, uv.upper_idx), reverse=True)
-            logging.debug('Got %d best cells. Best=%s overlap=%s', len(best_cells), best_cells[0], calc_overlap(best_cells[0], minchan, ncin))
-            used_cells = best_cells[0:min(nuvwide, len(best_cells))]
-            full_cells, leftover_cells = split_cells(used_cells, minchan, ncin)
-            run = FdmtRun(full_cells, self)
-            run_chan_starts.append(run.chan_start)
-            run_fch1.append(run.fch1)
-            fdmt_runs.append(full_cells)
-            runs.append(run)
-            # create lookup table for each run
-            
-            total_overlap = run.total_overlap
-            # Do not know how to get a length of iterator in python3, comment it out here
-            #logging.debug('minchan=%d npossible=%d used=%d full=%d leftover=%d total_overlap=%d', minchan, len(possible_cells), len(used_cells), len(full_cells), len(leftover_cells), total_overlap)
-            
-            # Remove used cells
-            uvcells_remaining = [cell for cell in uvcells_remaining if cell not in used_cells]
-
-            # Add split cells
-            uvcells_remaining.extend(leftover_cells)
-            
-        nruns = len(fdmt_runs)
-        nuvtotal = nruns*nuvwide
-
-        ndout = self.pipeline_plan.ndout
-        nd = self.pipeline_plan.nd
-        nt = self.pipeline_plan.nt
-        #square_history_size = ndout*nuvtotal*(nt + nd)
-        square_history_size = sum(nuvwide*(nd + nt)*ndout for run in runs)
-        minimal_history_size = sum(nuvwide*(run.max_offset+ nt)*run.max_idm for run in runs)
-        efficiency = float(len(uvcells))/float(nuvtotal)
-        required_efficiency = float(nuvtotal)/8192.0
-        
-        logging.info('FDMT plan has ntotal=%d of %d runs with packing efficiency %f. Grid read requires efficiency of > %f of NUV=8192. History size square=%d minimal=%d =%d 256MB HBM banks', nuvtotal, nruns, efficiency, required_efficiency, square_history_size, minimal_history_size, minimal_history_size*4/256/1024/1024)
-        self.fdmt_runs = fdmt_runs
-        self.run_chan_starts = run_chan_starts
-        self.run_fch1 = run_fch1
-        self.runs = runs
-
-        # create an FDMT object for each run so  we can use it to calculate the lookup tbales
-        #     def __init__(self, f_min, f_off, n_f, max_dt, n_t, history_dtype=None):
-
-        fdmts = [fdmt.Fdmt(fch1, self.pipeline_plan.foff, ncin, ndout, 1) for fch1 in self.run_fch1]
-        fdmt_luts = np.array([thefdmt.calc_lookup_table() for thefdmt in fdmts])
-        niter = int(np.log2(ncin))
-        # final LUTs we need to copy teh same LUT for every NUVWIDE
-        assert fdmt_luts.shape == (nruns, ncin-1, 2)
-        self.fdmt_lut = np.repeat(fdmt_luts[:,:,np.newaxis, :], nuvwide, axis=2)
-        expected_lut_shape = (nruns, ncin-1, nuvwide, 2)
-        assert self.fdmt_lut.shape == expected_lut_shape, 'Incorrect shape for LUT=%s expected %s' % (self.fdmt_lut.shape, expected_lut_shape)
-        
-
-        self.nruns = nruns
-        self.nuvtotal = nuvtotal
-        self.total_nuvcells = sum([len(p) for p in fdmt_runs])
-
-        # find a cell with zero in it
-        self.zero_cell = None
-        for irun, run in enumerate(self.runs):
-            if len(run.cells) < nuvwide:
-                self.zero_cell = (irun, len(run.cells))
-
-        if self.zero_cell is None:
-            self.zero_cell = (len(self.runs), 0)
-
-        assert self.zero_cell != None
-        assert self.zero_cell[0] < self.pipeline_plan.nuvrest, 'Not enough room for FDMT zero cell'
-        assert self.zero_cell[1] < nuvwide
-
-        assert self.zero_cell[0] < self.nruns
-        assert self.zero_cell[1] < ncin
-        #assert self.get_cell(self.zero_cell) != None
-
-        logging.info("FDMT zero cell is %s=%s", self.zero_cell, self.zero_cell[0]*nuvwide+self.zero_cell[1])
-
-        uvmap = {}
-        for irun, run in enumerate(self.runs):
-            for icell, cell in enumerate(run.cells):
-                irc = (irun, icell)
-                uvmap[cell.uvpix_upper] = uvmap.get(cell.uvpix_upper, [])
-                uvmap[cell.uvpix_upper].append(irc)
-
-        self.__uvmap = uvmap
-
-    def cell_iter(self):
-        '''
-        Iteration over all the cells
-        '''
-        for run in self.runs:
-            for cell in run.cells:
-                yield cell
-
-    def find_uv(self, uvpix):
-        '''
-        Returns the run and cell index of FDMT Cells that have the given UV pixel
-
-        uvpix must be upper hermetian
-        
-        Returns a list of tuples
-        irun = run index
-        icell = cellindex inside the run
-
-        You can find the cell with 
-        self.get_cell((irun, icell))
-        
-        :uvpix: 2-tuple of (u, v)
-        :returns: 2-typle (irun, icell)
-        '''
-
-        assert uvpix[0] >= uvpix[1], 'Uvpix must be upper hermetian'
-        # speed optimisation
-        cell_coords2 = self.__uvmap.get(uvpix,[])
-        
-        #cell_coords = []
-        #for irun, run in enumerate(self.runs):
-        #    for icell, cell in enumerate(run.cells):
-        #        if cell.uvpix_upper == uvpix:
-        #            cell_coords.append((irun, icell))
-
-
-        #print(uvpix, 'Version1', cell_coords, 'Verion2', cell_coords2)
-        #assert cell_coords == cell_coords2
-
-        return cell_coords2
-
-    def get_cell(self, cell_coord):
-        irun, icell = cell_coord
-        if cell_coord == self.zero_cell:
-            return None
-        else:
-            return self.runs[irun].cells[icell]
 
 NDOUT = 186
 NT = 256
@@ -421,7 +71,16 @@ class FdmtCu(Kernel):
         
         
 class Pipeline:
-    def __init__(self, device, xbin, lut):
+    def __init__(self, device, xbin, plan_fname):
+        print(plan_fname)
+        filehandler = open(plan_fname, 'rb')
+        self.plan = dill.load(filehandler)
+        self.upper_instructions = self.plan.upper_instructions
+        self.lower_instructions = self.plan.lower_instructions
+
+        print(self.upper_instructions)
+        exit()
+        
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -522,7 +181,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--pickle', default='pipeline.obj', type=str, action='store', help='pickle file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -553,7 +212,7 @@ def _main():
     print(f'Using lut binary file {lutbin}')
     lut = np.fromfile(lutbin, dtype=np.uint32)
     print(f'LUT size is {len(lut)}')
-    p = Pipeline(device, xbin, lut)
+    p = Pipeline(device, xbin, values.plan)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
@@ -583,8 +242,8 @@ def _main():
     #show()
 
 
-    filehandler = open(values.pickle, 'rb')
-    craco_plan = pickle.load(filehandler)
+    #filehandler = open(values.plan, 'rb')
+    #craco_plan = dill.load(filehandler)
     #print(craco_plan.values)
 
     p.candidates.copy_from_device()
