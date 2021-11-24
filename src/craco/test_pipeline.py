@@ -7,6 +7,8 @@ from craco_testing.pyxrtutil import *
 import time
 import pickle
 from craft.craco_plan import PipelinePlan
+from craft.craco_plan import FdmtPlan
+from craft.craco_plan import FdmtRun
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -74,10 +76,13 @@ class FdmtCu(Kernel):
 class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         print(plan_fname)
-        filehandler = open(plan_fname, 'rb')
-        plan = PipelinePlan
+
+        self.plan = PipelinePlan.load_plan(plan_fname)
         
-        self.plan = plan.load_plan(filehandler)
+        #filehandler = open(plan_fname, 'rb')
+        #plan = PipelinePlan
+        
+        #self.plan = plan.load_plan(filehandler)
         self.upper_instructions = self.plan.upper_instructions
         self.lower_instructions = self.plan.lower_instructions
 
