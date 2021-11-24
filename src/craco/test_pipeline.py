@@ -5,7 +5,8 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
-import dill
+import pickle
+from craft.craco_plan import PipelinePlan
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -74,7 +75,9 @@ class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         print(plan_fname)
         filehandler = open(plan_fname, 'rb')
-        self.plan = dill.load(filehandler)
+        plan = PipelinePlan
+        
+        self.plan = plan.load_plan(filehandler)
         self.upper_instructions = self.plan.upper_instructions
         self.lower_instructions = self.plan.lower_instructions
 
@@ -243,7 +246,7 @@ def _main():
 
 
     #filehandler = open(values.plan, 'rb')
-    #craco_plan = dill.load(filehandler)
+    #craco_plan = pickle.load(filehandler)
     #print(craco_plan.values)
 
     p.candidates.copy_from_device()
