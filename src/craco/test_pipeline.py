@@ -45,9 +45,9 @@ class AddInstruction(object):
     __repr__ = __str__
 
 NDOUT = 186
-NT = 256
+#NT = 256
 NBLK = 3
-NT_OUTBUF = NBLK*NT
+#NT_OUTBUF = NBLK*NT
 NUV = 4800
 NUVWIDE = 8
 NUREST = NUV // NUVWIDE
@@ -145,7 +145,7 @@ class Pipeline:
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
 
-        self.inbuf = Buffer((NUV, self.plan.ncin, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        self.inbuf = Buffer((NUV, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -161,7 +161,8 @@ class Pipeline:
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        nt_outbuf = NBLK*self.plan.nt
+        self.mainbuf = Buffer((NUREST, NDOUT, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
@@ -230,7 +231,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_long.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
