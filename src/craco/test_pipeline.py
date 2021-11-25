@@ -43,19 +43,19 @@ class AddInstruction(object):
         return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
 
     __repr__ = __str__
-
-NBLK = 3
-
 NDOUT = 186
+NT = 256
+NBLK = 3
+NT_OUTBUF = NBLK*NT
+NCIN = 32
 NUV = 4800
-
 NUVWIDE = 8
-NUREST  = NUV // NUVWIDE
+NUREST = NUV // NUVWIDE
+
 
 NDM_MAX = 1024
-NPIX    = 256
-NSMP_2DFFT = (NPIX*NPIX)
-
+NPIX = 256
+NSMP_2DFFT  = (NPIX*NPIX)
 MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
 MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
@@ -146,7 +146,7 @@ class Pipeline:
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
 
-        self.inbuf = Buffer((NUV, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -155,7 +155,7 @@ class Pipeline:
         self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((NUV*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
 
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
