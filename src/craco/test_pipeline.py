@@ -11,6 +11,9 @@ from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
 
+'''
+we have a lot of hard-code number here, which is very dangerous
+'''
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -51,7 +54,11 @@ NUVWIDE = 8
 NUREST = NUV // NUVWIDE
 NDM_MAX = 1024
 NPIX = 256
-   
+NSMP_2DFFT = (NPIX*NPIX)
+
+MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
+MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
+
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -73,16 +80,57 @@ class BoxcarCu(Kernel):
 class FdmtCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
-        
-        
-class Pipeline:
-    def __init__(self, device, xbin, plan_fname, lut):
-        self.plan = load_plan(plan_fname)
-        self.upper_instructions = self.plan.upper_instructions
-        self.lower_instructions = self.plan.lower_instructions
 
-        print(self.upper_instructions)
-        
+def instructions2grid_lut(instructions):
+    data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
+    
+    nuv = len(data[:,0])
+
+    output_index = data[:,0]
+    input_index  = data[:,1]
+    send_marker  = data[:,2][1::2]
+
+    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuv), 'constant')
+    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuv), 'constant')
+    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuv//2)), 'constant')
+    
+    return input_index_hw, output_index_hw, send_marker_hw
+
+def instructions2pad_lut(instructions):
+    location = np.zeros(NSMP_2DFFT, dtype=int)
+
+    data = np.array(instructions, dtype=np.int32)
+    upix = data[:,0]
+    vpix = data[:,1]
+
+    location_index = vpix*NPIX+upix    
+    location_value = data[:,2]+1
+
+    location[location_index] = location_value
+
+    return location
+    
+def get_grid_lut_from_plan(plan):
+    
+    upper_instructions = plan.upper_instructions
+    lower_instructions = plan.lower_instructions
+    
+    input_index, output_index, send_marker       = instructions2grid_lut(upper_instructions)
+    h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
+    
+    location   = instructions2pad_lut(plan.upper_idxs)
+    h_location = instructions2pad_lut(plan.lower_idxs)
+    
+    shift_marker   = np.array(plan.upper_shifts, dtype=np.int32)
+    h_shift_marker = np.array(plan.lower_shifts, dtype=np.int32)
+    
+    return np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
+    
+class Pipeline:
+    def __init__(self, device, xbin, plan_fname):
+        self.plan = load_plan(plan_fname)
+        lut = get_grid_lut_from_plan(self.plan)
+
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -183,7 +231,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline_long.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -214,7 +262,7 @@ def _main():
     print(f'Using lut binary file {lutbin}')
     lut = np.fromfile(lutbin, dtype=np.uint32)
     print(f'LUT size is {len(lut)}')
-    p = Pipeline(device, xbin, values.plan, lut)
+    p = Pipeline(device, xbin, values.plan)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
