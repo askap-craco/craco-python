@@ -5,54 +5,23 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
-import pickle
-from craft.craco_plan import PipelinePlan
-from craft.craco_plan import FdmtPlan
-from craft.craco_plan import FdmtRun
-from craft.craco_plan import load_plan
-
-'''
-we have a lot of hard-code number here, which is very dangerous
-'''
-# These are minimum constants we need 
-NBLK = 3
-NDM_MAX = 1024
-
-# This should match the number in pipeline krnl.hpp file
-NPIX = 256
-NSMP_2DFFT = (NPIX*NPIX)
-MAX_NSMP_UV = 8190 
-MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
     return mode
 
-class AddInstruction(object):
-    def __init__(self, plan, target_slot, cell_coords, uvpix):
-        self.plan = plan
-        self.target_slot = target_slot
-        self.cell_coords = cell_coords
-        self.uvpix = uvpix
-        self.shift = False
 
-    @property
-    def shift_flag(self):
-        return 1 if self.shift else 0
-
-    @property
-    def uvidx(self):
-        irun, icell = self.cell_coords
-        c = icell + self.plan.nuvwide*irun
-        return c
-
-    def __str__(self):
-        irun, icell = self.cell_coords
-        cell = self.plan.fdmt_plan.get_cell(self.cell_coords)
-        return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
-
-    __repr__ = __str__
-
+NDOUT = 186
+NT = 256
+NBLK = 3
+NT_OUTBUF = NBLK*NT
+NCIN = 32
+NUV = 4800
+NUVWIDE = 8
+NUREST = NUV // NUVWIDE
+NDM_MAX = 1024
+NPIX = 256
+   
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -74,61 +43,10 @@ class BoxcarCu(Kernel):
 class FdmtCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
-
-def instructions2grid_lut(instructions):
-    '''
-    probably better to get array from plan, not instructions
-    means plan needs to save array, not instructions
-    '''
-    data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
-    
-    nuv = len(data[:,0])
-
-    output_index = data[:,0]
-    input_index  = data[:,1]
-    send_marker  = data[:,2][1::2]
-
-    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuv), 'constant')
-    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuv), 'constant')
-    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuv//2)), 'constant')
-    
-    return input_index_hw, output_index_hw, send_marker_hw
-
-def instructions2pad_lut(instructions):
-    location = np.zeros(NSMP_2DFFT, dtype=int)
-
-    data = np.array(instructions, dtype=np.int32)
-    upix = data[:,0]
-    vpix = data[:,1]
-
-    location_index = vpix*NPIX+upix    
-    location_value = data[:,2]+1
-
-    location[location_index] = location_value
-
-    return location
-    
-def get_grid_lut_from_plan(plan):
-    
-    upper_instructions = plan.upper_instructions
-    lower_instructions = plan.lower_instructions
-    
-    input_index, output_index, send_marker       = instructions2grid_lut(upper_instructions)
-    h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
-    
-    location   = instructions2pad_lut(plan.upper_idxs)
-    h_location = instructions2pad_lut(plan.lower_idxs)
-    
-    shift_marker   = np.array(plan.upper_shifts, dtype=np.int32)
-    h_shift_marker = np.array(plan.lower_shifts, dtype=np.int32)
-    
-    return np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
-    
-class Pipeline:
-    def __init__(self, device, xbin, plan_fname):
-        self.plan = load_plan(plan_fname)
-        lut = get_grid_lut_from_plan(self.plan)
         
+        
+class Pipeline:
+    def __init__(self, device, xbin, lut):
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -143,10 +61,8 @@ class Pipeline:
         
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
-        nt   = self.plan.nt
-        ncin = self.plan.ncin
-        nuv  = self.plan.fdmt_plan.nuvtotal
-        self.inbuf = Buffer((nuv, ncin, nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+
+        self.inbuf = Buffer((NUV, NCIN, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -155,25 +71,17 @@ class Pipeline:
         self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((nuv*5*ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-        print(f'FDMT LUT shape {self.plan.fdmt_plan.fdmt_lut.shape}')
-        
-        #self.fdmt_config_buf.nparr[:] = self.plan.fdmt_plan.fdmt_lut
-        
+        self.fdmt_config_buf = Buffer((NUV*5*NCIN), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        nuvrest = self.plan.nuvrest
-        ndout   = self.plan.ndout
-        nuvwide = self.plan.nuvwide
-        nt_outbuf = NBLK*nt
-        
-        self.mainbuf = Buffer((nuvrest, ndout, nt_outbuf, nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
         self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')    
@@ -239,7 +147,6 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -264,18 +171,24 @@ def _main():
     for ip in iplist:
         print(ip.get_name())
 
-        
-    p = Pipeline(device, xbin, values.plan)
+    
+    #lutbin = os.path.join(os.path.dirname(xclbin), '../../', 'none_duplicate_long.uvgrid.txt.bin')
+    lutbin = 'none_duplicate_long.uvgrid.txt.bin'
+    print(f'Using lut binary file {lutbin}')
+    lut = np.fromfile(lutbin, dtype=np.uint32)
+    print(f'LUT size is {len(lut)}')
+    p = Pipeline(device, xbin, lut)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
+
 
     if values.wait:
         input('Press any key to continue...')
         
     for blk in range(values.nblocks):
         call_start = time.perf_counter()
-        starts     = run(p, blk, values)
+        starts = run(p, blk, values)
         wait_start = time.perf_counter()
     
         for istart, start in enumerate(starts):
@@ -289,6 +202,11 @@ def _main():
 
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
+#            self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+#imshow(p.mainbuf.nparr[0,:,:,0,0])
+    #show()
+
+    
 
     p.candidates.copy_from_device()
     print(np.all(p.candidates.nparr == 0))
@@ -300,6 +218,9 @@ def _main():
     print('mainbuf', hex(p.mainbuf.buf.address()))
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
+
+
+
 
 if __name__ == '__main__':
     _main()
