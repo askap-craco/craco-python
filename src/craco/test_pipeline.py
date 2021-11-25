@@ -44,15 +44,16 @@ class AddInstruction(object):
 
     __repr__ = __str__
 
-NDOUT = 186
-#NT = 256
 NBLK = 3
-#NT_OUTBUF = NBLK*NT
+
+NDOUT = 186
 NUV = 4800
+
 NUVWIDE = 8
-NUREST = NUV // NUVWIDE
+NUREST  = NUV // NUVWIDE
+
 NDM_MAX = 1024
-NPIX = 256
+NPIX    = 256
 NSMP_2DFFT = (NPIX*NPIX)
 
 MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
@@ -162,7 +163,7 @@ class Pipeline:
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
         nt_outbuf = NBLK*self.plan.nt
-        self.mainbuf = Buffer((NUREST, NDOUT, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer((NUREST, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
