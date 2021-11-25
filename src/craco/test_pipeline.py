@@ -185,8 +185,8 @@ def run(p, blk, values):
     #ndm = values.ndm
     ndm = self.plan.nd
     nchunk_time = self.plan.nt//NTIME_PARALLEL
-    
-    nchunk_time = values.nchunk_time
+
+    #nchunk_time = values.nchunk_time
     tblk = (values.tblk + blk ) % NBLK
     nuv = values.nuv
     nparallel_uv = nuv//2
@@ -241,7 +241,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
