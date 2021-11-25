@@ -128,6 +128,8 @@ class Pipeline:
         self.plan = load_plan(plan_fname)
         lut = get_grid_lut_from_plan(self.plan)
 
+        #np.savetxt("lut.txt", lut, fmt="%d");
+
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
