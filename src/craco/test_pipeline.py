@@ -179,7 +179,9 @@ class Pipeline:
 def run(p, blk, values):
     self = p
     threshold = values.threshold
-    ndm = values.ndm
+    #ndm = values.ndm
+    ndm = self.plan.nd
+    
     nchunk_time = values.nchunk_time
     tblk = (values.tblk + blk ) % NBLK
     nuv = values.nuv
