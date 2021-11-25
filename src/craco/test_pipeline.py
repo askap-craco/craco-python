@@ -49,10 +49,9 @@ class AddInstruction(object):
 #NCIN  = 32  # self.plan.ncin
 #NUVWIDE = 8  # self.plan.nuvwide
 #NT_OUTBUF = NBLK*NT
-
-NUV     = 4800 # ???
-NUVWIDE = 8
-NUREST  = NUV // NUVWIDE
+#NUV     = 4800 # ???
+#NUVWIDE = 8
+#NUREST  = NUV // NUVWIDE
 
 NBLK  = 3
 NDM_MAX = 1024
@@ -165,10 +164,12 @@ class Pipeline:
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
         nt_outbuf = NBLK*self.plan.nt
-        self.mainbuf = Buffer((NUREST, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        # WE should NOT use self.plan.nuvrest here, we need to calculate nuvrest as follow
+        nuvrest = self.plan.fdmt_plan.nuvtotal//self.plan.nuvwide
+        self.mainbuf = Buffer((nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
         self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')    
