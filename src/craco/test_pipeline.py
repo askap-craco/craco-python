@@ -264,24 +264,18 @@ def _main():
     for ip in iplist:
         print(ip.get_name())
 
-    
-    #lutbin = os.path.join(os.path.dirname(xclbin), '../../', 'none_duplicate_long.uvgrid.txt.bin')
-    lutbin = 'none_duplicate_long.uvgrid.txt.bin'
-    print(f'Using lut binary file {lutbin}')
-    lut = np.fromfile(lutbin, dtype=np.uint32)
-    print(f'LUT size is {len(lut)}')
+        
     p = Pipeline(device, xbin, values.plan)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
-
 
     if values.wait:
         input('Press any key to continue...')
         
     for blk in range(values.nblocks):
         call_start = time.perf_counter()
-        starts = run(p, blk, values)
+        starts     = run(p, blk, values)
         wait_start = time.perf_counter()
     
         for istart, start in enumerate(starts):
@@ -295,14 +289,6 @@ def _main():
 
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
-#            self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-#imshow(p.mainbuf.nparr[0,:,:,0,0])
-    #show()
-
-
-    #filehandler = open(values.plan, 'rb')
-    #craco_plan = pickle.load(filehandler)
-    #print(craco_plan.values)
 
     p.candidates.copy_from_device()
     print(np.all(p.candidates.nparr == 0))
@@ -314,9 +300,6 @@ def _main():
     print('mainbuf', hex(p.mainbuf.buf.address()))
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
-
-
-
 
 if __name__ == '__main__':
     _main()
