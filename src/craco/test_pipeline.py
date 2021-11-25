@@ -54,6 +54,9 @@ class AddInstruction(object):
 #NUREST  = NUV // NUVWIDE
 
 NBLK  = 3
+NCU = 4
+NTIME_PARALLEL = (NCU*2)
+
 NDM_MAX = 1024
 NPIX = 256
 NSMP_2DFFT  = (NPIX*NPIX)
@@ -181,6 +184,7 @@ def run(p, blk, values):
     threshold = values.threshold
     #ndm = values.ndm
     ndm = self.plan.nd
+    nchunk_time = self.plan.nt//NTIME_PARALLEL
     
     nchunk_time = values.nchunk_time
     tblk = (values.tblk + blk ) % NBLK
