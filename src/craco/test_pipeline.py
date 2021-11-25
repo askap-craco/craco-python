@@ -48,7 +48,6 @@ NDOUT = 186
 NT = 256
 NBLK = 3
 NT_OUTBUF = NBLK*NT
-NCIN = 32
 NUV = 4800
 NUVWIDE = 8
 NUREST = NUV // NUVWIDE
@@ -146,7 +145,7 @@ class Pipeline:
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
 
-        self.inbuf = Buffer((NUV, NCIN, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        self.inbuf = Buffer((NUV, self.plan.ncin, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -155,7 +154,7 @@ class Pipeline:
         self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((NUV*5*NCIN), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.fdmt_config_buf = Buffer((NUV*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
 
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
