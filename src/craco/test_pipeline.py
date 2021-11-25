@@ -147,11 +147,13 @@ class Pipeline:
         print(f'lut.shape {lut.shape}')
         print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
-        print('Allocating grid LUTs')        
-        self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.group_id(3)).clear() for g in self.grids]
+        print('Allocating grid LUTs')
+        print(lut.shape[0])
+        self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(3)).clear() for g in self.grids]
         for l in self.grid_luts:
             l.nparr[:] = lut
             l.copy_to_device()
+        #exit()
         
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
@@ -270,7 +272,7 @@ def _main():
     mode = get_mode()
     version = values.version
     #xclbin = f'{mode}.xilinx_u280_xdma_201920_3{version}/binary_container_1/binary_container_1.xclbin'
-    xclbin = 'binary_container_1.xclbin'
+    xclbin = 'binary_container_1.xclbin.CRACO-42'
 
 
     device = pyxrt.device(0)
