@@ -14,6 +14,15 @@ from craft.craco_plan import load_plan
 '''
 we have a lot of hard-code number here, which is very dangerous
 '''
+# These are minimum constants we need 
+NBLK = 3
+NDM_MAX = 1024
+
+# This should match the number in pipeline krnl.hpp file
+NPIX = 256
+NSMP_2DFFT = (NPIX*NPIX)
+MAX_NSMP_UV = 8190 
+MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -43,21 +52,6 @@ class AddInstruction(object):
         return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
 
     __repr__ = __str__
-
-NDOUT = 186
-NT = 256
-NBLK = 3
-NT_OUTBUF = NBLK*NT
-NCIN = 32
-NUV = 4800
-NUVWIDE = 8
-NUREST = NUV // NUVWIDE
-NDM_MAX = 1024
-NPIX = 256
-NSMP_2DFFT = (NPIX*NPIX)
-
-MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
-MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
@@ -134,7 +128,7 @@ class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         self.plan = load_plan(plan_fname)
         lut = get_grid_lut_from_plan(self.plan)
-
+        
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -149,8 +143,10 @@ class Pipeline:
         
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
-
-        self.inbuf = Buffer((NUV, NCIN, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        nt   = self.plan.nt
+        ncin = self.plan.ncin
+        nuv  = self.plan.fdmt_plan.nuvtotal
+        self.inbuf = Buffer((nuv, ncin, nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -159,20 +155,25 @@ class Pipeline:
         self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((NUV*5*NCIN), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.fdmt_config_buf = Buffer((nuv*5*ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
         print(f'FDMT LUT shape {self.plan.fdmt_plan.fdmt_lut.shape}')
         
-        self.fdmt_config_buf.nparr[:] = self.plan.fdmt_plan.fdmt_lut
+        #self.fdmt_config_buf.nparr[:] = self.plan.fdmt_plan.fdmt_lut
         
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        nuvrest = self.plan.nuvrest
+        ndout   = self.plan.ndout
+        nuvwide = self.plan.nuvwide
+        nt_outbuf = NBLK*nt
+        
+        self.mainbuf = Buffer((nuvrest, ndout, nt_outbuf, nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
         self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')    
