@@ -5,11 +5,41 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
+import pickle
+from craft.craco_plan import PipelinePlan
+from craft.craco_plan import FdmtPlan
+from craft.craco_plan import FdmtRun
+from craft.craco_plan import load_plan
+
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
     return mode
 
+class AddInstruction(object):
+    def __init__(self, plan, target_slot, cell_coords, uvpix):
+        self.plan = plan
+        self.target_slot = target_slot
+        self.cell_coords = cell_coords
+        self.uvpix = uvpix
+        self.shift = False
+
+    @property
+    def shift_flag(self):
+        return 1 if self.shift else 0
+
+    @property
+    def uvidx(self):
+        irun, icell = self.cell_coords
+        c = icell + self.plan.nuvwide*irun
+        return c
+
+    def __str__(self):
+        irun, icell = self.cell_coords
+        cell = self.plan.fdmt_plan.get_cell(self.cell_coords)
+        return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
+
+    __repr__ = __str__
 
 NDOUT = 186
 NT = 256
@@ -46,7 +76,13 @@ class FdmtCu(Kernel):
         
         
 class Pipeline:
-    def __init__(self, device, xbin, lut):
+    def __init__(self, device, xbin, plan_fname, lut):
+        self.plan = load_plan(plan_fname)
+        self.upper_instructions = self.plan.upper_instructions
+        self.lower_instructions = self.plan.lower_instructions
+
+        print(self.upper_instructions)
+        
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -147,6 +183,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
+    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -177,7 +214,7 @@ def _main():
     print(f'Using lut binary file {lutbin}')
     lut = np.fromfile(lutbin, dtype=np.uint32)
     print(f'LUT size is {len(lut)}')
-    p = Pipeline(device, xbin, lut)
+    p = Pipeline(device, xbin, values.plan, lut)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
@@ -206,7 +243,10 @@ def _main():
 #imshow(p.mainbuf.nparr[0,:,:,0,0])
     #show()
 
-    
+
+    #filehandler = open(values.plan, 'rb')
+    #craco_plan = pickle.load(filehandler)
+    #print(craco_plan.values)
 
     p.candidates.copy_from_device()
     print(np.all(p.candidates.nparr == 0))
