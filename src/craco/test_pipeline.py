@@ -43,16 +43,18 @@ class AddInstruction(object):
         return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
 
     __repr__ = __str__
-NDOUT = 186
-NT = 256
-NBLK = 3
-NT_OUTBUF = NBLK*NT
-NCIN = 32
-NUV = 4800
+    
+#NDOUT = 186 # self.plan.ndout
+#NT    = 256 # self.plan.nt
+#NCIN  = 32  # self.plan.ncin
+#NUVWIDE = 8  # self.plan.nuvwide
+#NT_OUTBUF = NBLK*NT
+
+NUV     = 4800 # ???
 NUVWIDE = 8
-NUREST = NUV // NUVWIDE
+NUREST  = NUV // NUVWIDE
 
-
+NBLK  = 3
 NDM_MAX = 1024
 NPIX = 256
 NSMP_2DFFT  = (NPIX*NPIX)
@@ -300,8 +302,8 @@ def _main():
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
 
-
-
+    print(f'{p.plan.fdmt_plan.nuvtotal}')
+    
 
 if __name__ == '__main__':
     _main()
