@@ -162,7 +162,7 @@ class Pipeline:
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
@@ -287,14 +287,6 @@ def _main():
 
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
-#            self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-#imshow(p.mainbuf.nparr[0,:,:,0,0])
-    #show()
-
-
-    #filehandler = open(values.plan, 'rb')
-    #craco_plan = pickle.load(filehandler)
-    #print(craco_plan.values)
 
     p.candidates.copy_from_device()
     print(np.all(p.candidates.nparr == 0))
