@@ -51,7 +51,11 @@ NUVWIDE = 8
 NUREST = NUV // NUVWIDE
 NDM_MAX = 1024
 NPIX = 256
-   
+NSMP_2DFFT = (NPIX*NPIX)
+
+MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
+MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
+
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -73,15 +77,51 @@ class BoxcarCu(Kernel):
 class FdmtCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
-        
-        
+
+def instructions2grid_lut(instructions):
+    data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
+    
+    nuv = len(data[:,0])
+
+    output_index = data[:,0]
+    input_index  = data[:,1]
+    send_marker  = data[:,2][1::2]
+
+    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuv), 'constant')
+    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuv), 'constant')
+    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuv//2)), 'constant')
+    
+    return input_index_hw, output_index_hw, send_marker_hw
+
+def instructions2pad_lut(instructions):
+    location = np.zeros(NSMP_2DFFT, dtype=int)
+
+    data = np.array(instructions, dtype=np.int32)
+    upix = data[:,0]
+    vpix = data[:,1]
+
+    location_index = vpix*NPIX+upix    
+    location_value = data[:,2]+1
+
+    location[location_index] = location_value
+
+    return location
+    
+
 class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         self.plan = load_plan(plan_fname)
         self.upper_instructions = self.plan.upper_instructions
         self.lower_instructions = self.plan.lower_instructions
 
-        print(self.upper_instructions)
+        self.input_index, self.output_index, self.send_marker       = instructions2grid_lut(self.upper_instructions)
+        self.h_input_index, self.h_output_index, self.h_send_marker = instructions2grid_lut(self.lower_instructions)
+
+        self.location   = instructions2pad_lut(self.plan.upper_idxs)
+        self.h_location = instructions2pad_lut(self.plan.lower_idxs)
+        
+        self.shift_marker   = np.array(self.plan.upper_shifts, dtype=np.int32)
+        self.h_shift_marker = np.array(self.plan.lower_shifts, dtype=np.int32)
         exit()
         
         self.grid_reader = DdgridCu(device, xbin)
