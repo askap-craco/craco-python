@@ -82,6 +82,10 @@ class FdmtCu(Kernel):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
 
 def instructions2grid_lut(instructions):
+    '''
+    probably better to get array from plan, not instructions
+    means plan needs to save array, not instructions
+    '''
     data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
     
     nuv = len(data[:,0])
@@ -156,7 +160,10 @@ class Pipeline:
         
         print('Allocating FDMT fdmt_config_buf')
         self.fdmt_config_buf = Buffer((NUV*5*NCIN), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-
+        print(f'FDMT LUT shape {self.plan.fdmt_plan.fdmt_lut.shape}')
+        
+        self.fdmt_config_buf.nparr[:] = self.plan.fdmt_plan.fdmt_lut
+        
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
 
