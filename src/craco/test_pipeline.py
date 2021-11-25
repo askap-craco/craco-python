@@ -107,23 +107,27 @@ def instructions2pad_lut(instructions):
 
     return location
     
-
+def get_grid_lut_from_plan(plan):
+    
+    upper_instructions = plan.upper_instructions
+    lower_instructions = plan.lower_instructions
+    
+    input_index, output_index, send_marker       = instructions2grid_lut(upper_instructions)
+    h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
+    
+    location   = instructions2pad_lut(plan.upper_idxs)
+    h_location = instructions2pad_lut(plan.lower_idxs)
+    
+    shift_marker   = np.array(plan.upper_shifts, dtype=np.int32)
+    h_shift_marker = np.array(plan.lower_shifts, dtype=np.int32)
+    
+    return np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
+    
 class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         self.plan = load_plan(plan_fname)
-        self.upper_instructions = self.plan.upper_instructions
-        self.lower_instructions = self.plan.lower_instructions
+        lut = get_grid_lut_from_plan(self.plan)
 
-        self.input_index, self.output_index, self.send_marker       = instructions2grid_lut(self.upper_instructions)
-        self.h_input_index, self.h_output_index, self.h_send_marker = instructions2grid_lut(self.lower_instructions)
-
-        self.location   = instructions2pad_lut(self.plan.upper_idxs)
-        self.h_location = instructions2pad_lut(self.plan.lower_idxs)
-        
-        self.shift_marker   = np.array(self.plan.upper_shifts, dtype=np.int32)
-        self.h_shift_marker = np.array(self.plan.lower_shifts, dtype=np.int32)
-        exit()
-        
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
