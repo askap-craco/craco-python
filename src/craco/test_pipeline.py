@@ -60,7 +60,8 @@ NTIME_PARALLEL = (NCU*2)
 NDM_MAX = 1024
 NPIX = 256
 NSMP_2DFFT  = (NPIX*NPIX)
-MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
+#MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
+MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
 MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
 class DdgridCu(Kernel):
@@ -135,13 +136,18 @@ class Pipeline:
         self.plan = load_plan(plan_fname)
         lut = get_grid_lut_from_plan(self.plan)
 
+        np.savetxt("lut_4800.txt", lut, fmt='%d')
+        
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
         self.boxcarcu = BoxcarCu(device, xbin)
         self.fdmtcu = FdmtCu(device, xbin)
+
+        print(f'lut.shape {lut.shape}')
+        print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
-        print('Allocating grid LUTs')
+        print('Allocating grid LUTs')        
         self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.group_id(3)).clear() for g in self.grids]
         for l in self.grid_luts:
             l.nparr[:] = lut
@@ -159,8 +165,13 @@ class Pipeline:
         self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-
+        #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+        
+        fdmt_luts = self.plan.fdmt_plan.fdmt_lut
+        self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.fdmt_config_buf.nparr[:] = fdmt_luts
+        self.fdmt_config_buf.copy_to_device()
+        
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
 
@@ -188,7 +199,9 @@ def run(p, blk, values):
 
     #nchunk_time = values.nchunk_time
     tblk = (values.tblk + blk ) % NBLK
-    nuv = values.nuv
+    #nuv = values.nuv
+    nuv = self.plan.fdmt_plan.nuvtotal
+    
     nparallel_uv = nuv//2
     nurest = nuv//8
     load_luts = 1
@@ -199,15 +212,16 @@ def run(p, blk, values):
     fft_cfg = (nplane << 16) + (shift2 << 6) + (shift1 << 3)
 
     print(f'ndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}')
-    run_pipeline = True
-    run_fdmt = True
+
+    values.run_pipeline = False #True
+    values.run_fdmt = True
 
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
     starts = []
 
     if values.run_pipeline:
-        assert nuv == 3440 # NUV and the LUT need to agree - if not you get in trouble
+        #assert nuv == 3440 # NUV and the LUT need to agree - if not you get in trouble
         for cu in self.ffts:
             starts.append(cu(fft_cfg, fft_cfg))
             
@@ -241,7 +255,7 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
