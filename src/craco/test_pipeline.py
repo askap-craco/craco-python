@@ -122,21 +122,37 @@ def get_grid_lut_from_plan(plan):
     
     input_index, output_index, send_marker       = instructions2grid_lut(upper_instructions)
     h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
-    
+
     location   = instructions2pad_lut(plan.upper_idxs)
     h_location = instructions2pad_lut(plan.lower_idxs)
     
     shift_marker   = np.array(plan.upper_shifts, dtype=np.int32)
     h_shift_marker = np.array(plan.lower_shifts, dtype=np.int32)
     
-    return np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
+    nuv   = np.sort(input_index)[-1]   # This is the real number of UV
+    h_nuv = np.sort(h_input_index)[-1] # This is the real number of UV
+    assert nuv == h_nuv # Real number of UV should be the same from upper and lower file
+    
+    nuv_round = nuv+(8-nuv%8) # Round to 8
+    assert nuv_round <= MAX_NSMP_UV # WE can not go above MAX_NSMP_UV
+
+    # out here is misleading, which is actually the input to accumulation
+    nuvout   = len(input_index)
+    h_nuvout = len(h_input_index)
+    
+    return nuv_round//2, nuvout//2, h_nuvout//2, np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
     
 class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         self.plan = load_plan(plan_fname)
-        lut = get_grid_lut_from_plan(self.plan)
+        # If we are on new version of pipeline
+        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
 
-        np.savetxt("lut_4800.txt", lut, fmt='%d')
+        ## if we are on old version of pipeline, which grid does not have accumulation function
+        #lutbin = 'none_duplicate_long.uvgrid.txt.bin'
+        #print(f'Using lut binary file {lutbin}')
+        #lut = np.fromfile(lutbin, dtype=np.uint32)
+        #print(f'LUT size is {len(lut)}')
         
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
@@ -148,8 +164,11 @@ class Pipeline:
         print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
         print('Allocating grid LUTs')
-        print(lut.shape[0])
-        self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(3)).clear() for g in self.grids]
+        # For grid with new version pipeline
+        self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(5)).clear() for g in self.grids]
+
+        # For grid with old version pipeline
+        #self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(3)).clear() for g in self.grids]
         for l in self.grid_luts:
             l.nparr[:] = lut
             l.copy_to_device()
@@ -222,6 +241,7 @@ def run(p, blk, values):
 
     starts = []
 
+    assert nparallel_uv == self.nparallel_uvin # the number from pipeline plan should be the same as we calculated based on indexs from pipeline plan
     if values.run_pipeline:
         #assert nuv == 3440 # NUV and the LUT need to agree - if not you get in trouble
         for cu in self.ffts:
@@ -231,7 +251,11 @@ def run(p, blk, values):
         starts.append(self.grid_reader(self.mainbuf, ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
 
         for cu, grid_lut in zip(self.grids, self.grid_luts):
-            starts.append(cu(ndm, nchunk_time, nparallel_uv, grid_lut, load_luts))
+            # For grid with new pipeline
+            starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
+
+            ## For grid with old pipeline
+            #starts.append(cu(ndm, nchunk_time, nparallel_uv, grid_lut, load_luts))
 
     if values.run_fdmt:
         starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
@@ -253,46 +277,35 @@ def _main():
     parser.add_argument('-k','--tblk', default=0, type=int, help='Block number to execute')
     parser.add_argument('--no-fdmt', default=True, action='store_false', help='Dont run FDMT pipeline', dest='run_fdmt')
     parser.add_argument('--no-image', default=True, action='store_false', help='Dont run Image pipeline', dest='run_pipeline')
-    parser.add_argument('-e', '--version', default='', help='Version of fw to load. e.g. ".v14"')
-    parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
+    parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load.', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file name which has pipeline configurations')
+    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file which has pipeline configurations')
+
     parser.set_defaults(verbose=False)
+    parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-46")
+    
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
 
-
     print(f'Values={values}')
 
 
-    mode = get_mode()
-    version = values.version
-    #xclbin = f'{mode}.xilinx_u280_xdma_201920_3{version}/binary_container_1/binary_container_1.xclbin'
-    xclbin = 'binary_container_1.xclbin.CRACO-42'
-
-
+    mode   = get_mode()
     device = pyxrt.device(0)
-    xbin = pyxrt.xclbin(xclbin)
+    xbin = pyxrt.xclbin(values.xclbin)
     uuid = device.load_xclbin(xbin)
     iplist = xbin.get_ips()
     for ip in iplist:
         print(ip.get_name())
 
-    
-    #lutbin = os.path.join(os.path.dirname(xclbin), '../../', 'none_duplicate_long.uvgrid.txt.bin')
-    lutbin = 'none_duplicate_long.uvgrid.txt.bin'
-    print(f'Using lut binary file {lutbin}')
-    lut = np.fromfile(lutbin, dtype=np.uint32)
-    print(f'LUT size is {len(lut)}')
     p = Pipeline(device, xbin, values.plan)
     
     p.inbuf.nparr[:] = 1
     p.inbuf.copy_to_device()
-
 
     if values.wait:
         input('Press any key to continue...')
