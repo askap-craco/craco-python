@@ -246,7 +246,8 @@ def run(p, blk, values):
 
     #values.run_pipeline = False #True
     values.run_pipeline = True
-    values.run_fdmt     = False
+    #values.run_fdmt     = False
+    values.run_fdmt     = True
 
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
