@@ -98,11 +98,16 @@ def instructions2grid_lut(instructions):
     input_index  = data[:,1]
     send_marker  = data[:,2][1::2]
 
+    nuvin = np.sort(input_index)[-1]   # This is the real number of UV
+    
+    # out here is misleading, which is actually the input to accumulation
+    nuvout = len(input_index)
+
     output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuv), 'constant')
     input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuv), 'constant')
     send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuv//2)), 'constant')
     
-    return input_index_hw, output_index_hw, send_marker_hw
+    return nuvin, nuvout, input_index_hw, output_index_hw, send_marker_hw
 
 def instructions2pad_lut(instructions):
     location = np.zeros(NSMP_2DFFT, dtype=int)
@@ -123,8 +128,13 @@ def get_grid_lut_from_plan(plan):
     upper_instructions = plan.upper_instructions
     lower_instructions = plan.lower_instructions
     
-    input_index, output_index, send_marker       = instructions2grid_lut(upper_instructions)
-    h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
+    nuv, nuvout, input_index, output_index, send_marker           = instructions2grid_lut(upper_instructions)
+    h_nuv, h_nuvout, h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
+
+    assert nuv == h_nuv # These two should equal
+
+    nuv_round = nuv+(8-nuv%8)       # Round to 8
+    assert nuv_round <= MAX_NSMP_UV # WE can not go above MAX_NSMP_UV
 
     location   = instructions2pad_lut(plan.upper_idxs)
     h_location = instructions2pad_lut(plan.lower_idxs)
@@ -132,17 +142,6 @@ def get_grid_lut_from_plan(plan):
     shift_marker   = np.array(plan.upper_shifts, dtype=np.uint16)
     h_shift_marker = np.array(plan.lower_shifts, dtype=np.uint16)
     
-    nuv   = np.sort(input_index)[-1]   # This is the real number of UV
-    h_nuv = np.sort(h_input_index)[-1] # This is the real number of UV
-    assert nuv == h_nuv # Real number of UV should be the same from upper and lower file
-    
-    nuv_round = nuv+(8-nuv%8) # Round to 8
-    assert nuv_round <= MAX_NSMP_UV # WE can not go above MAX_NSMP_UV
-
-    # out here is misleading, which is actually the input to accumulation
-    nuvout   = len(input_index)
-    h_nuvout = len(h_input_index)
-
     lut = np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker)).astype(np.uint16)
     
     return nuv_round//2, nuvout//2, h_nuvout//2, lut
@@ -155,6 +154,7 @@ class Pipeline:
             # If we are on new version of pipeline
             self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
             print(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
+            print(f'{lut.shape}')
             
             np.savetxt("lut.txt", lut, fmt="%d")
             #np.savetxt("lut.txt", lut)
