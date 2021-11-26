@@ -249,7 +249,7 @@ def run(p, blk, values):
     shift2 = 7 # FFT CONFIG Register - not sure what this means
     fft_cfg = (nplane << 16) + (shift2 << 6) + (shift1 << 3)
 
-    print(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
+    print(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
 
     #values.run_pipeline = False #True
     values.run_pipeline = True
@@ -292,7 +292,7 @@ def _main():
     parser.add_argument('-b','--nblocks', default=1, type=int, help='Number of blocks')
     parser.add_argument('-u','--nuv', type=int, help='Number of NUV must match LUTS otherwise lockup', default=3440)
     parser.add_argument('-m','--ndm', default=1, type=int, help='Number of DMs')
-    parser.add_argument('-t','--threshold', default=1, type=int, help='Threshold for boxcar')
+    parser.add_argument('-t','--threshold', default=200, type=int, help='Threshold for boxcar')
     parser.add_argument('-c','--nchunk-time', default=32, type=int, help='Nchunks of time to do')
     parser.add_argument('-k','--tblk', default=0, type=int, help='Block number to execute')
     parser.add_argument('--no-fdmt', default=True, action='store_false', help='Dont run FDMT pipeline', dest='run_fdmt')
@@ -335,6 +335,8 @@ def _main():
     #p.inbuf.copy_to_device()
 
     # mainbuf is the input to pipeline
+    #(nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)
+    
     p.mainbuf.nparr[:,:,:,:,0] = 1
     p.mainbuf.nparr[:,:,:,:,1] = 0
     p.mainbuf.copy_to_device()
@@ -372,7 +374,7 @@ def _main():
 
     #print(np.all(p.candidates.nparr == 0))
     p.candidates.copy_from_device()
-    print(p.candidates.nparr[0:10])
+    print(p.candidates.nparr[0:100])
     
 if __name__ == '__main__':
     _main()
