@@ -217,8 +217,11 @@ class Pipeline:
         self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
         self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        print('Allocating candidates')    
-        self.candidates = Buffer(256*1024*1024, np.int8, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+        print('Allocating candidates')
+
+        candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint8)])
+        #self.candidates = Buffer(256*1024*1024, np.int8, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+        self.candidates = Buffer(1024*8, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
 
 def run(p, blk, values):
@@ -246,8 +249,8 @@ def run(p, blk, values):
 
     #values.run_pipeline = False #True
     values.run_pipeline = True
-    #values.run_fdmt     = False
-    values.run_fdmt     = True
+    values.run_fdmt     = False
+    #values.run_fdmt     = True
 
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
@@ -321,9 +324,16 @@ def _main():
         print(ip.get_name())
 
     p = Pipeline(device, xbin, values.plan)
-    
-    p.inbuf.nparr[:] = 1
-    p.inbuf.copy_to_device()
+
+    # inbuf is the input to FDMT
+    #p.inbuf.nparr[:][0] = 1
+    #p.inbuf.nparr[:][1] = 0
+    #p.inbuf.copy_to_device()
+
+    # mainbuf is the input to pipeline
+    p.mainbuf.nparr[:,:,:,:,0] = 1
+    p.mainbuf.nparr[:,:,:,:,1] = 0
+    p.mainbuf.copy_to_device()
 
     if values.wait:
         input('Press any key to continue...')
@@ -356,8 +366,9 @@ def _main():
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
 
-    print(f'{p.plan.fdmt_plan.nuvtotal}')
+    #print(np.all(p.candidates.nparr == 0))
+    p.candidates.copy_from_device()
+    print(p.candidates.nparr[0:10])
     
-
 if __name__ == '__main__':
     _main()
