@@ -92,20 +92,17 @@ class FdmtCu(Kernel):
 def instructions2grid_lut(instructions):
     data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
     
-    nuv = len(data[:,0])
+    nuvout = len(data[:,0]) # This is the number of output UV, there are zeros in between
 
     output_index = data[:,0]
     input_index  = data[:,1]
     send_marker  = data[:,2][1::2]
 
-    nuvin = np.sort(input_index)[-1]   # This is the real number of UV
+    nuvin = np.sort(input_index)[-1]   # This is the real number of input UV
     
-    # out here is misleading, which is actually the input to accumulation
-    nuvout = len(input_index)
-
-    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuv), 'constant')
-    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuv), 'constant')
-    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuv//2)), 'constant')
+    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuvout), 'constant')
+    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuvout), 'constant')
+    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuvout//2)), 'constant')
     
     return nuvin, nuvout, input_index_hw, output_index_hw, send_marker_hw
 
