@@ -216,7 +216,10 @@ class Pipeline:
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
-        self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        #self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        ndm = 1 # hard code for initial tests
+        nboxc = 8
+        self.boxcar_history = Buffer((ndm, nboxc - 1, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')
 
         candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
@@ -292,7 +295,7 @@ def _main():
     parser.add_argument('-b','--nblocks', default=1, type=int, help='Number of blocks')
     parser.add_argument('-u','--nuv', type=int, help='Number of NUV must match LUTS otherwise lockup', default=3440)
     parser.add_argument('-m','--ndm', default=1, type=int, help='Number of DMs')
-    parser.add_argument('-t','--threshold', default=200, type=int, help='Threshold for boxcar')
+    parser.add_argument('-t','--threshold', default=100, type=int, help='Threshold for boxcar')
     parser.add_argument('-c','--nchunk-time', default=32, type=int, help='Nchunks of time to do')
     parser.add_argument('-k','--tblk', default=0, type=int, help='Block number to execute')
     parser.add_argument('--no-fdmt', default=True, action='store_false', help='Dont run FDMT pipeline', dest='run_fdmt')
