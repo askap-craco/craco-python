@@ -245,7 +245,7 @@ def run(p, blk, values):
     shift2 = 7 # FFT CONFIG Register - not sure what this means
     fft_cfg = (nplane << 16) + (shift2 << 6) + (shift1 << 3)
 
-    print(f'ndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}')
+    print(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
 
     #values.run_pipeline = False #True
     values.run_pipeline = True
@@ -254,7 +254,7 @@ def run(p, blk, values):
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
     starts = []
-
+    
     if NEW_GRID:
         assert nparallel_uv == self.nparallel_uvin # the number from pipeline plan should be the same as we calculated based on indexs from pipeline plan
         
@@ -342,7 +342,7 @@ def _main():
             wait_end = time.perf_counter()
             print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
             
-    print(values)
+    #print(values)
 
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
