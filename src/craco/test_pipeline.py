@@ -129,8 +129,8 @@ def get_grid_lut_from_plan(plan):
     location   = instructions2pad_lut(plan.upper_idxs)
     h_location = instructions2pad_lut(plan.lower_idxs)
     
-    shift_marker   = np.array(plan.upper_shifts, dtype=np.int32)
-    h_shift_marker = np.array(plan.lower_shifts, dtype=np.int32)
+    shift_marker   = np.array(plan.upper_shifts, dtype=np.uint16)
+    h_shift_marker = np.array(plan.lower_shifts, dtype=np.uint16)
     
     nuv   = np.sort(input_index)[-1]   # This is the real number of UV
     h_nuv = np.sort(h_input_index)[-1] # This is the real number of UV
@@ -142,8 +142,10 @@ def get_grid_lut_from_plan(plan):
     # out here is misleading, which is actually the input to accumulation
     nuvout   = len(input_index)
     h_nuvout = len(h_input_index)
+
+    lut = np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker)).astype(np.uint16)
     
-    return nuv_round//2, nuvout//2, h_nuvout//2, np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker))
+    return nuv_round//2, nuvout//2, h_nuvout//2, lut
     
 class Pipeline:
     def __init__(self, device, xbin, plan_fname):
@@ -152,7 +154,10 @@ class Pipeline:
         if NEW_GRID:
             # If we are on new version of pipeline
             self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+            print(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
+            
             np.savetxt("lut.txt", lut, fmt="%d")
+            #np.savetxt("lut.txt", lut)
             #exit()
         else:
             # if we are on old version of pipeline, which grid does not have accumulation function
@@ -173,7 +178,7 @@ class Pipeline:
         print('Allocating grid LUTs')
         if NEW_GRID:
             # For grid with new version pipeline
-            self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(5)).clear() for g in self.grids]
+            self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
         else:
             # For grid with old version pipeline
             self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(3)).clear() for g in self.grids]
@@ -244,7 +249,7 @@ def run(p, blk, values):
 
     #values.run_pipeline = False #True
     values.run_pipeline = True
-    values.run_fdmt     = True
+    values.run_fdmt     = False
 
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
@@ -290,14 +295,16 @@ def _main():
     parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load.', required=False)
     parser.add_argument('-d','--device', default=0, type=int,help='Device number')
     parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', default='pipeline_short.pickle', type=str, action='store', help='plan file which has pipeline configurations')
+    parser.add_argument('-p', '--plan', type=str, action='store', help='plan file which has pipeline configurations')
 
     parser.set_defaults(verbose=False)
     if NEW_GRID:
         parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-46")
+        parser.set_defaults(plan="pipeline.pickle")
     else:
         parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-42")
-        
+        parser.set_defaults(plan="pipeline_short.pickle")
+
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
