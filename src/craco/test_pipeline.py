@@ -60,12 +60,12 @@ NTIME_PARALLEL = (NCU*2)
 NDM_MAX = 1024
 NPIX = 256
 NSMP_2DFFT  = (NPIX*NPIX)
-#MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
-MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
+MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
+#MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
 MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
-#NEW_GRID = True
-NEW_GRID = False
+NEW_GRID = True
+#NEW_GRID = False
 
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
@@ -152,6 +152,8 @@ class Pipeline:
         if NEW_GRID:
             # If we are on new version of pipeline
             self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+            np.savetxt("lut.txt", lut, fmt="%d")
+            #exit()
         else:
             # if we are on old version of pipeline, which grid does not have accumulation function
             lutbin = 'none_duplicate_long.uvgrid.txt.bin'
