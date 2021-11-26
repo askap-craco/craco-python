@@ -219,7 +219,7 @@ class Pipeline:
         self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')
 
-        candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint8)])
+        candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
         #self.candidates = Buffer(256*1024*1024, np.int8, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
         self.candidates = Buffer(1024*8, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
@@ -227,8 +227,12 @@ class Pipeline:
 def run(p, blk, values):
     self = p
     threshold = values.threshold
+
+    # ndm should be from plan, but for now we set it as 1
+    ndm = 1
     #ndm = values.ndm
-    ndm = self.plan.nd
+    #ndm = self.plan.nd
+
     nchunk_time = self.plan.nt//NTIME_PARALLEL
 
     #nchunk_time = values.nchunk_time
@@ -356,7 +360,7 @@ def _main():
     print(p.mainbuf.nparr.shape)
 
     p.candidates.copy_from_device()
-    print(np.all(p.candidates.nparr == 0))
+    #print(np.all(p.candidates.nparr == 0))
     p.boxcar_history.copy_from_device()
     print(np.all(p.boxcar_history.nparr == 0))
 
