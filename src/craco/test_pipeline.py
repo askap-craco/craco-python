@@ -59,6 +59,7 @@ NTIME_PARALLEL = (NCU*2)
 
 NDM_MAX = 1024
 NPIX = 256
+NPIX_HALF = NPIX//2
 NSMP_2DFFT  = (NPIX*NPIX)
 MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
 #MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
@@ -113,7 +114,11 @@ def instructions2pad_lut(instructions):
     upix = data[:,0]
     vpix = data[:,1]
 
-    location_index = vpix*NPIX+upix    
+    location_index = vpix*NPIX+upix
+    #location_index = ((NPIX_HALF+vpix)%NPIX)*NPIX + (NPIX_HALF+upix)%NPIX
+    #((FFT_SIZE/2+vpix)%FFT_SIZE)*FFT_SIZE +
+    #(FFT_SIZE/2+upix)%FFT_SIZE;
+
     location_value = data[:,2]+1
 
     location[location_index] = location_value
@@ -288,6 +293,16 @@ def run(p, blk, values):
     return starts
 
 
+def print_candidates(candidates):
+    
+    print(f"snr\tloc_2dfft\tboxc_width\ttime\tdm")
+    for candidate in np.sort(candidates):
+        location = candidate['loc_2dfft']
+        #vpix = location//FFT_SIZE
+        #upix =
+        
+        print(f"{candidate['snr']}\t{candidate['loc_2dfft']}\t\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+    
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -375,9 +390,18 @@ def _main():
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
 
-    #print(np.all(p.candidates.nparr == 0))
+    # Copy data from device
     p.candidates.copy_from_device()
-    print(p.candidates.nparr[0:100])
-    
+    candidates = p.candidates.nparr[:]
+
+    # Find first zero output
+    last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
+    candidates = candidates[0:last_candidate_index]
+
+    #p.candidates.nparr[:]['time'] = p.candidates.nparr[:]['time']//8*8+8-1-p.candidates.nparr[:]['time']%8
+    #p.candidates.nparr[:]['boxc_width'] += 1 # C code count from 0
+
+    print_candidates(candidates)
+                     
 if __name__ == '__main__':
     _main()
