@@ -293,15 +293,28 @@ def run(p, blk, values):
     return starts
 
 
+def location2pix(location):
+
+    vpix = (location//NPIX)%NPIX - NPIX_HALF
+    if (vpix<0):
+        vpix = NPIX+vpix
+        
+    upix = location%NPIX - NPIX_HALF
+    if (upix<0):
+        upix = NPIX+upix
+        
+    #location_index = ((NPIX_HALF+vpix)%NPIX)*NPIX + (NPIX_HALF+upix)%NPIX
+    return vpix, upix
+
 def print_candidates(candidates):
     
-    print(f"snr\tloc_2dfft\tboxc_width\ttime\tdm")
+    print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
     for candidate in np.sort(candidates):
         location = candidate['loc_2dfft']
-        #vpix = location//FFT_SIZE
-        #upix =
+        vpix, upix = location2pix(location)
         
-        print(f"{candidate['snr']}\t{candidate['loc_2dfft']}\t\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+        #print(f"{candidate['snr']}\t{candidate['loc_2dfft']}\t\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+        print(f"{candidate['snr']}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
