@@ -64,6 +64,9 @@ NSMP_2DFFT  = (NPIX*NPIX)
 MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
 #MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
 MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
+NBOXC = 8
+HBM_SIZE = int(256*1024*1024)
+NBINARY_POINT = 6
 
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
@@ -182,7 +185,7 @@ class Pipeline:
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
         
         print('Allocating FDMT history')
-        self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
+        self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
         #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
@@ -205,29 +208,37 @@ class Pipeline:
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
-        #self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        ndm = 1 # hard code for initial tests
-        nboxc = 8
-        self.boxcar_history = Buffer((ndm, nboxc - 1, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+
+        #self.boxcar_history = Buffer((self.plan.nd, NBOXC - 1, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        self.boxcar_history = Buffer((self.plan.nd, NBOXC - 1, NPIX, NPIX), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')
 
         candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
-        #self.candidates = Buffer(256*1024*1024, np.int8, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
-        self.candidates = Buffer(1024*8, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+
+        # The buffer size here should match the one declared in C code
+        self.candidates = Buffer(NDM_MAX*NBOXC, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
 
 def run(p, blk, values):
     self = p
-    threshold = values.threshold
-    ndm = self.plan.nd
+
+    ## To do it properly we need to get number from plan
+    #threshold = self.plan.threshold/2
+    #threshold = np.uint16(threshold*(1<<NBINARY_POINT))
+    #ndm       = self.plan.nd
+
+    threshold = 5.0
+    threshold = np.uint16(threshold*(1<<NBINARY_POINT))
+    ndm       = 2
 
     nchunk_time = self.plan.nt//NTIME_PARALLEL
+    nuv         = self.plan.fdmt_plan.nuvtotal
 
     tblk = (values.tblk + blk ) % NBLK
-    nuv = self.plan.fdmt_plan.nuvtotal
     
     nparallel_uv = nuv//2
-    nurest = nuv//8
+    nurest       = nuv//8
+    
     load_luts = 1
 
     nplane = ndm*nchunk_time
@@ -273,13 +284,14 @@ def location2pix(location):
     return vpix, upix
 
 def print_candidates(candidates):
-    
     print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
-    for candidate in np.sort(candidates):
+    #for candidate in np.sort(candidates):
+    for candidate in candidates:
         location = candidate['loc_2dfft']
         vpix, upix = location2pix(location)
-        
-        print(f"{candidate['snr']}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+
+        snr = float(candidate['snr'])/float(1<<NBINARY_POINT) 
+        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -290,7 +302,6 @@ def _main():
     parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
-    parser.add_argument('-t', '--threshold', action='store', type=int, help='Threshold for boxcar')
     parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
@@ -302,7 +313,6 @@ def _main():
     parser.set_defaults(wait      = False)
     
     parser.set_defaults(nblocks   = 1)
-    parser.set_defaults(threshold = 100)
     parser.set_defaults(tblk      = 0)
     parser.set_defaults(device    = 0)    
     parser.set_defaults(xclbin    = "binary_container_1.xclbin.tuned")
@@ -315,7 +325,6 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     print(f'Values={values}')
-
 
     mode   = get_mode()
     device = pyxrt.device(0)
