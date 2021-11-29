@@ -12,8 +12,16 @@ from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
 
 '''
-we have a lot of hard-code number here, which is very dangerous
+Most hard-coded numebrs are updated
 '''
+
+NBLK  = 3
+NCU = 4
+NTIME_PARALLEL = (NCU*2)
+
+NDM_MAX = 1024
+HBM_SIZE = int(256*1024*1024)
+NBINARY_POINT = 6
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -44,30 +52,6 @@ class AddInstruction(object):
 
     __repr__ = __str__
     
-#NDOUT = 186 # self.plan.ndout
-#NT    = 256 # self.plan.nt
-#NCIN  = 32  # self.plan.ncin
-#NUVWIDE = 8  # self.plan.nuvwide
-#NT_OUTBUF = NBLK*NT
-#NUV     = 4800 # ???
-#NUVWIDE = 8
-#NUREST  = NUV // NUVWIDE
-
-NBLK  = 3
-NCU = 4
-NTIME_PARALLEL = (NCU*2)
-
-NDM_MAX = 1024
-NPIX = 256
-NPIX_HALF = NPIX//2
-NSMP_2DFFT  = (NPIX*NPIX)
-MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
-#MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
-MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
-NBOXC = 8
-HBM_SIZE = int(256*1024*1024)
-NBINARY_POINT = 6
-
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -90,7 +74,7 @@ class FdmtCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
 
-def instructions2grid_lut(instructions):
+def instructions2grid_lut(instructions, max_nsmp_uv):
     data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
     
     nuvout = len(data[:,0]) # This is the number of output UV, there are zeros in between
@@ -100,22 +84,23 @@ def instructions2grid_lut(instructions):
     send_marker  = data[:,2][1::2]
 
     nuvin = np.sort(input_index)[-1]   # This is the real number of input UV
-    
-    output_index_hw = np.pad(output_index, (0, MAX_NSMP_UV-nuvout), 'constant')
-    input_index_hw  = np.pad(input_index,  (0, MAX_NSMP_UV-nuvout), 'constant')
-    send_marker_hw  = np.pad(send_marker,  (0, MAX_NPARALLEL_UV-int(nuvout//2)), 'constant')
+
+    max_nparallel_uv = max_nsmp_uv//2
+    output_index_hw = np.pad(output_index, (0, max_nsmp_uv-nuvout), 'constant')
+    input_index_hw  = np.pad(input_index,  (0, max_nsmp_uv-nuvout), 'constant')
+    send_marker_hw  = np.pad(send_marker,  (0, max_nparallel_uv-int(nuvout//2)), 'constant')
     
     return nuvin, nuvout, input_index_hw, output_index_hw, send_marker_hw
 
-def instructions2pad_lut(instructions):
-    location = np.zeros(NSMP_2DFFT, dtype=int)
+def instructions2pad_lut(instructions, npix):
+    location = np.zeros(npix*npix, dtype=int)
 
     data = np.array(instructions, dtype=np.int32)
     upix = data[:,0]
     vpix = data[:,1]
 
-    location_index = vpix*NPIX+upix
-    #location_index = ((NPIX_HALF+vpix)%NPIX)*NPIX + (NPIX_HALF+upix)%NPIX
+    location_index = vpix*npix+upix
+    #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
     #((FFT_SIZE/2+vpix)%FFT_SIZE)*FFT_SIZE +
     #(FFT_SIZE/2+upix)%FFT_SIZE;
 
@@ -129,17 +114,17 @@ def get_grid_lut_from_plan(plan):
     
     upper_instructions = plan.upper_instructions
     lower_instructions = plan.lower_instructions
-    
-    nuv, nuvout, input_index, output_index, send_marker           = instructions2grid_lut(upper_instructions)
-    h_nuv, h_nuvout, h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions)
+
+    # careful here as craco_plan define nuvmax to be multiple times 8, but we need 2 extra space to pack
+    max_nsmp_uv = plan.nuvmax-2
+    nuv, nuvout, input_index, output_index, send_marker           = instructions2grid_lut(upper_instructions, max_nsmp_uv)
+    h_nuv, h_nuvout, h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions, max_nsmp_uv)
 
     assert nuv == h_nuv # These two should equal
 
     nuv_round = nuv+(8-nuv%8)       # Round to 8
-    assert nuv_round <= MAX_NSMP_UV # WE can not go above MAX_NSMP_UV
-
-    location   = instructions2pad_lut(plan.upper_idxs)
-    h_location = instructions2pad_lut(plan.lower_idxs)
+    location   = instructions2pad_lut(plan.upper_idxs, plan.npix)
+    h_location = instructions2pad_lut(plan.lower_idxs, plan.npix)
     
     shift_marker   = np.array(plan.upper_shifts, dtype=np.uint16)
     h_shift_marker = np.array(plan.lower_shifts, dtype=np.uint16)
@@ -185,6 +170,7 @@ class Pipeline:
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
         
         print('Allocating FDMT history')
+        # Use a whole HBM for history FDMT
         self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
@@ -209,14 +195,14 @@ class Pipeline:
         self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
 
-        #self.boxcar_history = Buffer((self.plan.nd, NBOXC - 1, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        self.boxcar_history = Buffer((self.plan.nd, NBOXC - 1, NPIX, NPIX), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        npix = self.plan.npix
+        self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')
 
         candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
 
         # The buffer size here should match the one declared in C code
-        self.candidates = Buffer(NDM_MAX*NBOXC, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+        self.candidates = Buffer(NDM_MAX*self.plan.nbox, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
 
 def run(p, blk, values):
@@ -226,10 +212,6 @@ def run(p, blk, values):
     threshold = self.plan.threshold
     threshold = np.uint16(threshold*(1<<NBINARY_POINT))
     ndm       = self.plan.nd
-
-    #threshold = 5.0
-    #threshold = np.uint16(threshold*(1<<NBINARY_POINT))
-    #ndm       = 2
 
     nchunk_time = self.plan.nt//NTIME_PARALLEL
     nuv         = self.plan.fdmt_plan.nuvtotal
@@ -270,25 +252,27 @@ def run(p, blk, values):
     return starts
 
 
-def location2pix(location):
+def location2pix(location, npix):
 
-    vpix = (location//NPIX)%NPIX - NPIX_HALF
+    npix_half = npix//2
+    
+    vpix = (location//npix)%npix - npix_half
     if (vpix<0):
-        vpix = NPIX+vpix
+        vpix = npix+vpix
         
-    upix = location%NPIX - NPIX_HALF
+    upix = location%npix - npix_half
     if (upix<0):
-        upix = NPIX+upix
+        upix = npix+upix
         
-    #location_index = ((NPIX_HALF+vpix)%NPIX)*NPIX + (NPIX_HALF+upix)%NPIX
+    #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
     return vpix, upix
 
-def print_candidates(candidates):
+def print_candidates(candidates, npix):
     print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
     #for candidate in np.sort(candidates):
     for candidate in candidates:
         location = candidate['loc_2dfft']
-        vpix, upix = location2pix(location)
+        vpix, upix = location2pix(location, npix)
 
         snr = float(candidate['snr'])/float(1<<NBINARY_POINT) 
         print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
@@ -384,7 +368,7 @@ def _main():
     last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
     candidates = candidates[0:last_candidate_index]
 
-    print_candidates(candidates)
+    print_candidates(candidates, p.plan.npix)
                      
 if __name__ == '__main__':
     _main()
