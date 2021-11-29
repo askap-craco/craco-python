@@ -65,9 +65,6 @@ MAX_NSMP_UV = 8190 # This should match the number in pipeline krnl.hpp file
 #MAX_NSMP_UV = 4800 # This should match the number in pipeline krnl.hpp file
 MAX_NPARALLEL_UV = (MAX_NSMP_UV//2)
 
-NEW_GRID = True
-#NEW_GRID = False
-
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -152,22 +149,13 @@ class Pipeline:
     def __init__(self, device, xbin, plan_fname):
         self.plan = load_plan(plan_fname)
 
-        if NEW_GRID:
-            # If we are on new version of pipeline
-            self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
-            print(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
-            print(f'{lut.shape}')
-            
-            np.savetxt("lut.txt", lut, fmt="%d")
-            #np.savetxt("lut.txt", lut)
-            #exit()
-        else:
-            # if we are on old version of pipeline, which grid does not have accumulation function
-            lutbin = 'none_duplicate_long.uvgrid.txt.bin'
-            print(f'Using lut binary file {lutbin}')
-            lut = np.fromfile(lutbin, dtype=np.uint32)
-            print(f'LUT size is {len(lut)}')
+        # If we are on new version of pipeline
+        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+        print(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
+        print(f'{lut.shape}')
         
+        np.savetxt("lut.txt", lut, fmt="%d")
+                
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -178,13 +166,9 @@ class Pipeline:
         print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
         print('Allocating grid LUTs')
-        if NEW_GRID:
-            # For grid with new version pipeline
-            self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
-        else:
-            # For grid with old version pipeline
-            self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.krnl.group_id(3)).clear() for g in self.grids]
-
+        # For grid with new version pipeline
+        self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
+        
         for l in self.grid_luts:
             l.nparr[:] = lut
             l.copy_to_device()
@@ -235,17 +219,11 @@ class Pipeline:
 def run(p, blk, values):
     self = p
     threshold = values.threshold
-
-    # ndm should be from plan, but for now we set it as 1
-    ndm = 1
-    #ndm = values.ndm
-    #ndm = self.plan.nd
+    ndm = self.plan.nd
 
     nchunk_time = self.plan.nt//NTIME_PARALLEL
 
-    #nchunk_time = values.nchunk_time
     tblk = (values.tblk + blk ) % NBLK
-    #nuv = values.nuv
     nuv = self.plan.fdmt_plan.nuvtotal
     
     nparallel_uv = nuv//2
@@ -259,20 +237,13 @@ def run(p, blk, values):
 
     print(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
 
-    #values.run_pipeline = False #True
-    values.run_pipeline = True
-    values.run_fdmt     = False
-    #values.run_fdmt     = True
-
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
     starts = []
     
-    if NEW_GRID:
-        assert nparallel_uv == self.nparallel_uvin # the number from pipeline plan should be the same as we calculated based on indexs from pipeline plan
+    assert nparallel_uv == self.nparallel_uvin # the number from pipeline plan should be the same as we calculated based on indexs from pipeline plan
         
-    if values.run_pipeline:
-        #assert nuv == 3440 # NUV and the LUT need to agree - if not you get in trouble
+    if values.run_image:
         for cu in self.ffts:
             starts.append(cu(fft_cfg, fft_cfg))
             
@@ -280,13 +251,8 @@ def run(p, blk, values):
         starts.append(self.grid_reader(self.mainbuf, ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
 
         for cu, grid_lut in zip(self.grids, self.grid_luts):
-            if NEW_GRID:
-                # For grid with new pipeline
-                starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
-            else:
-                # For grid with old pipeline
-                starts.append(cu(ndm, nchunk_time, nparallel_uv, grid_lut, load_luts))
-
+            starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
+            
     if values.run_fdmt:
         starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
 
@@ -313,7 +279,6 @@ def print_candidates(candidates):
         location = candidate['loc_2dfft']
         vpix, upix = location2pix(location)
         
-        #print(f"{candidate['snr']}\t{candidate['loc_2dfft']}\t\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
         print(f"{candidate['snr']}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
     
 def _main():
@@ -327,27 +292,22 @@ def _main():
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
     parser.add_argument('-t', '--threshold', action='store', type=int, help='Threshold for boxcar')
     parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
-    parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
+    parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('-p', '--plan',      action='store', type=str, help='plan file which has pipeline configurations')
 
-    parser.set_defaults(verbose=False)
-    parser.set_defaults(run_fdmt=False)
-    parser.set_defaults(run_image=False)
-    parser.set_defaults(wait=False)
+    parser.set_defaults(verbose   = False)
+    parser.set_defaults(run_fdmt  = False)
+    parser.set_defaults(run_image = False)
+    parser.set_defaults(wait      = False)
     
-    parser.set_defaults(nblocks=1)
-    parser.set_defaults(threshold=100)
-    parser.set_defaults(tblk=0)
-    parser.set_defaults(device=0)
+    parser.set_defaults(nblocks   = 1)
+    parser.set_defaults(threshold = 100)
+    parser.set_defaults(tblk      = 0)
+    parser.set_defaults(device    = 0)    
+    parser.set_defaults(xclbin    = "binary_container_1.xclbin.tuned")
+    parser.set_defaults(plan      = "pipeline.pickle")
     
-    if NEW_GRID:
-        parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-46")
-        parser.set_defaults(plan="pipeline.pickle")
-    else:
-        parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-42")
-        parser.set_defaults(plan="pipeline_short.pickle")
-
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
@@ -394,13 +354,10 @@ def _main():
             wait_end = time.perf_counter()
             print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
             
-    #print(values)
-
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
 
     p.candidates.copy_from_device()
-    #print(np.all(p.candidates.nparr == 0))
     p.boxcar_history.copy_from_device()
     print(np.all(p.boxcar_history.nparr == 0))
 
@@ -417,9 +374,6 @@ def _main():
     # Find first zero output
     last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
     candidates = candidates[0:last_candidate_index]
-
-    #p.candidates.nparr[:]['time'] = p.candidates.nparr[:]['time']//8*8+8-1-p.candidates.nparr[:]['time']%8
-    #p.candidates.nparr[:]['boxc_width'] += 1 # C code count from 0
 
     print_candidates(candidates)
                      
