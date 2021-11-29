@@ -319,21 +319,28 @@ def print_candidates(candidates):
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-b','--nblocks', default=1, type=int, help='Number of blocks')
-    parser.add_argument('-u','--nuv', type=int, help='Number of NUV must match LUTS otherwise lockup', default=3440)
-    parser.add_argument('-m','--ndm', default=1, type=int, help='Number of DMs')
-    parser.add_argument('-t','--threshold', default=100, type=int, help='Threshold for boxcar')
-    parser.add_argument('-c','--nchunk-time', default=32, type=int, help='Nchunks of time to do')
-    parser.add_argument('-k','--tblk', default=0, type=int, help='Block number to execute')
-    parser.add_argument('--no-fdmt', default=True, action='store_false', help='Dont run FDMT pipeline', dest='run_fdmt')
-    parser.add_argument('--no-image', default=True, action='store_false', help='Dont run Image pipeline', dest='run_pipeline')
-    parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load.', required=False)
-    parser.add_argument('-d','--device', default=0, type=int,help='Device number')
-    parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.add_argument('-p', '--plan', type=str, action='store', help='plan file which has pipeline configurations')
+    parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
+    parser.add_argument('-f', '--run_fdmt',  action='store_true', help='Run FDMT pipeline')
+    parser.add_argument('-i', '--run_image', action='store_true', help='Run Image pipeline')
+    parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
+    
+    parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
+    parser.add_argument('-t', '--threshold', action='store', type=int, help='Threshold for boxcar')
+    parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
+    parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
+    parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
+    parser.add_argument('-p', '--plan',      action='store', type=str, help='plan file which has pipeline configurations')
 
     parser.set_defaults(verbose=False)
+    parser.set_defaults(run_fdmt=False)
+    parser.set_defaults(run_image=False)
+    parser.set_defaults(wait=False)
+    
+    parser.set_defaults(nblocks=1)
+    parser.set_defaults(threshold=100)
+    parser.set_defaults(tblk=0)
+    parser.set_defaults(device=0)
+    
     if NEW_GRID:
         parser.set_defaults(xclbin="binary_container_1.xclbin.CRACO-46")
         parser.set_defaults(plan="pipeline.pickle")
