@@ -222,14 +222,14 @@ class Pipeline:
 def run(p, blk, values):
     self = p
 
-    ## To do it properly we need to get number from plan
-    #threshold = self.plan.threshold/2
-    #threshold = np.uint16(threshold*(1<<NBINARY_POINT))
-    #ndm       = self.plan.nd
-
-    threshold = 5.0
+    # To do it properly we need to get number from plan
+    threshold = self.plan.threshold
     threshold = np.uint16(threshold*(1<<NBINARY_POINT))
-    ndm       = 2
+    ndm       = self.plan.nd
+
+    #threshold = 5.0
+    #threshold = np.uint16(threshold*(1<<NBINARY_POINT))
+    #ndm       = 2
 
     nchunk_time = self.plan.nt//NTIME_PARALLEL
     nuv         = self.plan.fdmt_plan.nuvtotal
