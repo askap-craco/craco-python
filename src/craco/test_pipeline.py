@@ -11,13 +11,15 @@ from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
+
 from craft import uvfits
+from craft import craco
 
 '''
 Most hard-coded numebrs are updated
 '''
 
-NBLK  = 3
+NBLK = 11
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
 
@@ -134,7 +136,22 @@ def get_grid_lut_from_plan(plan):
     lut = np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker)).astype(np.uint16)
     
     return nuv_round//2, nuvout//2, h_nuvout//2, lut
+
+def test_baseline2uv_and_fast_version_agree(plan, input_data):
+    uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+    fast_version = craco.FastBaseline2Uv(plan)
+    input_flat   = craco.bl2array(input_data)
+
+    dout  = np.zeros(uv_shape, dtype=np.complex64)
+    start = time.time()
+    fast_version(input_flat, dout)
+    end   = time.time()
     
+    duration = end - start
+    print(f'fast version of Baseline2uv took {duration} seconds')
+
+    return dout
+
 class Pipeline:
     def __init__(self, device, xbin, plan):
         self.plan = plan
@@ -218,7 +235,7 @@ def run(p, blk, values):
     nchunk_time = self.plan.nt//NTIME_PARALLEL
     nuv         = self.plan.fdmt_plan.nuvtotal
 
-    tblk = (values.tblk + blk ) % NBLK
+    tblk = blk % NBLK
     
     nparallel_uv = nuv//2
     nurest       = nuv//8
@@ -283,12 +300,11 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
-    parser.add_argument('-f', '--run_fdmt',  action='store_true', help='Run FDMT pipeline')
-    parser.add_argument('-i', '--run_image', action='store_true', help='Run Image pipeline')
+    parser.add_argument('-r', '--run_fdmt',  action='store_true', help='Run FDMT pipeline')
+    parser.add_argument('-R', '--run_image', action='store_true', help='Run Image pipeline')
     parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
-    parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
     parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
@@ -306,19 +322,20 @@ def _main():
     
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
-
+    parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
+    
     # These three are not used in PipelinePlan ...
     parser.add_argument('-W', '--boxcar_weight', type=str,   help='Boxcar weighting type', choices=('sum','avg','sqrt'), default='sum')
-    parser.add_argument('-s', '--fdmt_scale',    type=float, help='Scale FDMT output by this amount')
-    parser.add_argument('-S', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
-
+    parser.add_argument('-f', '--fdmt_scale',    type=float, help='Scale FDMT output by this amount')
+    parser.add_argument('-F', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
+    
     parser.set_defaults(verbose   = False)
     parser.set_defaults(run_fdmt  = False)
     parser.set_defaults(run_image = False)
     parser.set_defaults(wait      = False)
+    parser.set_defaults(show      = False)
     
     parser.set_defaults(nblocks   = 1)
-    parser.set_defaults(tblk      = 0)
     parser.set_defaults(device    = 0)
     parser.set_defaults(npix      = 256)
     parser.set_defaults(ndm       = 2)
@@ -334,7 +351,7 @@ def _main():
     parser.set_defaults(fft_scale  =10.0)
     
     parser.set_defaults(os        = "2.1,2.1")
-    parser.set_defaults(xclbin    = "binary_container_1.xclbin.tuned")
+    parser.set_defaults(xclbin    = "binary_container_1.xclbin.golden")
     parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
     
     values = parser.parse_args()
@@ -356,10 +373,19 @@ def _main():
     # Create a plan
     f = uvfits.open(values.uv)
     plan = PipelinePlan(f, values)
-    f.hdulist.close()
 
     # Create a pipeline 
     p = Pipeline(device, xbin, plan)
+
+    fast_baseline2uv = craco.FastBaseline2Uv(plan)
+    uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+    uv_out  = np.zeros(uv_shape, dtype=np.complex64)
+    
+    #duration = end - start
+    #print(f'fast version of Baseline2uv took {duration} seconds')
+    #
+    #return dout
+
 
     # inbuf is the input to FDMT
     #p.inbuf.nparr[:][0] = 1
@@ -367,25 +393,26 @@ def _main():
     #p.inbuf.copy_to_device()
 
     # mainbuf is the input to pipeline
-    #(nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)
-    
-    p.mainbuf.nparr[:,:,:,:,0] = 1
-    p.mainbuf.nparr[:,:,:,:,1] = 0
-    p.mainbuf.copy_to_device()
+    #(nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)    
+    #p.mainbuf.nparr[:,:,:,:,0] = 1
+    #p.mainbuf.nparr[:,:,:,:,1] = 0
+    #p.mainbuf.copy_to_device()
 
     if values.wait:
         input('Press any key to continue...')
         
-    for blk in range(values.nblocks):
-        # Get baselines
-        f = uvfits.open(values.uv)
-        baselines = f.baselines
-        f.hdulist.close()
+    for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
+        if iblk >= values.nblocks:
+            break
 
-        # Now we need to use baselines data
+        input_flat = craco.bl2array(input_data)
+        fast_baseline2uv(input_flat, uv_out)
+        p.mainbuf.nparr = uv_out.astype(np.int16) # not sure how to do this
+        p.mainbuf.copy_to_device()
         
+        # Now we need to use baselines data    
         call_start = time.perf_counter()
-        starts = run(p, blk, values)
+        starts = run(p, iblk, values)
         wait_start = time.perf_counter()
     
         for istart, start in enumerate(starts):
@@ -394,7 +421,9 @@ def _main():
 
             wait_end = time.perf_counter()
             print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
-            
+
+    f.hdulist.close()
+    
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
 
