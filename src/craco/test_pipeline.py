@@ -353,9 +353,12 @@ def _main():
     for ip in iplist:
         print(ip.get_name())
 
+    # Create a plan
     f = uvfits.open(values.uv)
     plan = PipelinePlan(f, values)
+    f.hdulist.close()
 
+    # Create a pipeline 
     p = Pipeline(device, xbin, plan)
 
     # inbuf is the input to FDMT
@@ -374,6 +377,13 @@ def _main():
         input('Press any key to continue...')
         
     for blk in range(values.nblocks):
+        # Get baselines
+        f = uvfits.open(values.uv)
+        baselines = f.baselines
+        f.hdulist.close()
+
+        # Now we need to use baselines data
+        
         call_start = time.perf_counter()
         starts = run(p, blk, values)
         wait_start = time.perf_counter()
