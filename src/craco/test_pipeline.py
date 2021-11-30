@@ -11,6 +11,7 @@ from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
+from craft import uvfits
 
 '''
 Most hard-coded numebrs are updated
@@ -135,8 +136,8 @@ def get_grid_lut_from_plan(plan):
     return nuv_round//2, nuvout//2, h_nuvout//2, lut
     
 class Pipeline:
-    def __init__(self, device, xbin, plan_fname):
-        self.plan = load_plan(plan_fname)
+    def __init__(self, device, xbin, plan):
+        self.plan = plan
 
         # If we are on new version of pipeline
         self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
@@ -289,8 +290,27 @@ def _main():
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
     parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
+    parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
+    parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
+    parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
+    parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
+    parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
+    parser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
+    parser.add_argument('-N', '--nuvmax',    action='store', type=int, help='Maximum number of UV allowed.')
+    parser.add_argument('-C', '--ncin',      action='store', type=int, help='Numer of channels for sub fdmt')
+    parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
+    
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for candidate grouper')
+    
+    parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per beam')
+    
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
-    parser.add_argument('-p', '--plan',      action='store', type=str, help='plan file which has pipeline configurations')
+    parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
+
+    # These three are not used in PipelinePlan ...
+    parser.add_argument('-W', '--boxcar_weight', type=str,   help='Boxcar weighting type', choices=('sum','avg','sqrt'), default='sum')
+    parser.add_argument('-s', '--fdmt_scale',    type=float, help='Scale FDMT output by this amount')
+    parser.add_argument('-S', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
 
     parser.set_defaults(verbose   = False)
     parser.set_defaults(run_fdmt  = False)
@@ -299,9 +319,23 @@ def _main():
     
     parser.set_defaults(nblocks   = 1)
     parser.set_defaults(tblk      = 0)
-    parser.set_defaults(device    = 0)    
+    parser.set_defaults(device    = 0)
+    parser.set_defaults(npix      = 256)
+    parser.set_defaults(ndm       = 2)
+    parser.set_defaults(nt        = 256)
+    parser.set_defaults(nbox      = 8)
+    parser.set_defaults(nuvwide   = 8)
+    parser.set_defaults(nuvmax    = 8192)
+    parser.set_defaults(ncin      = 32)
+    parser.set_defaults(ndout     = 32)
+    parser.set_defaults(threshold = 3.0)
+    parser.set_defaults(boxcar_weight = "sum")
+    parser.set_defaults(fdmt_scale =1.0)
+    parser.set_defaults(fft_scale  =10.0)
+    
+    parser.set_defaults(os        = "2.1,2.1")
     parser.set_defaults(xclbin    = "binary_container_1.xclbin.tuned")
-    parser.set_defaults(plan      = "pipeline.pickle")
+    parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
     
     values = parser.parse_args()
     if values.verbose:
@@ -319,7 +353,10 @@ def _main():
     for ip in iplist:
         print(ip.get_name())
 
-    p = Pipeline(device, xbin, values.plan)
+    f = uvfits.open(values.uv)
+    plan = PipelinePlan(f, values)
+
+    p = Pipeline(device, xbin, plan)
 
     # inbuf is the input to FDMT
     #p.inbuf.nparr[:][0] = 1
