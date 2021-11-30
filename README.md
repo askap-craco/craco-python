@@ -30,7 +30,7 @@ If you change the package (e.g. add dependancies or change `setup.py`) you'll ne
 ```
 
 # clone the repository
-git clone https://github.com/askap-craco/craco-python.git
+gh repo clone https://github.com/askap-craco/craco-python.git
 cd craco-python
 
 # Create a virtual env if you don't have one already
@@ -42,6 +42,25 @@ source venv/bin/activate
 # Install craco-python as "editable" - this means you don't have to install every time you make a change
 pip install -e .
 
+
+```
+
+# Install dependent 
+
+requirements.txt should has most dependent packages.
+
+We also need to install Python modules from [realtime_pipeline](https://gitlab.atnf.csiro.au:8443/craft/realtime_pipeline) repository.
+
+```
+
+# clone the repository
+git clone https://gitlab.atnf.csiro.au:8443/craft/realtime_pipeline.git
+
+# and then
+cd realtime_pipeline/python/
+
+# with a python3.6 virtual enviroment, then 
+pip install -e .
 
 ```
 

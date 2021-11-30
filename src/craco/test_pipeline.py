@@ -5,23 +5,54 @@ import os
 import pyxrt
 from craco_testing.pyxrtutil import *
 import time
+import pickle
+
+from craft.craco_plan import PipelinePlan
+from craft.craco_plan import FdmtPlan
+from craft.craco_plan import FdmtRun
+from craft.craco_plan import load_plan
+
+'''
+Most hard-coded numebrs are updated
+'''
+
+NBLK  = 3
+NCU = 4
+NTIME_PARALLEL = (NCU*2)
+
+NDM_MAX = 1024
+HBM_SIZE = int(256*1024*1024)
+NBINARY_POINT = 6
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
     return mode
 
+class AddInstruction(object):
+    def __init__(self, plan, target_slot, cell_coords, uvpix):
+        self.plan = plan
+        self.target_slot = target_slot
+        self.cell_coords = cell_coords
+        self.uvpix = uvpix
+        self.shift = False
 
-NDOUT = 186
-NT = 256
-NBLK = 3
-NT_OUTBUF = NBLK*NT
-NCIN = 32
-NUV = 4800
-NUVWIDE = 8
-NUREST = NUV // NUVWIDE
-NDM_MAX = 1024
-NPIX = 256
-   
+    @property
+    def shift_flag(self):
+        return 1 if self.shift else 0
+
+    @property
+    def uvidx(self):
+        irun, icell = self.cell_coords
+        c = icell + self.plan.nuvwide*irun
+        return c
+
+    def __str__(self):
+        irun, icell = self.cell_coords
+        cell = self.plan.fdmt_plan.get_cell(self.cell_coords)
+        return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
+
+    __repr__ = __str__
+    
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
@@ -43,60 +74,154 @@ class BoxcarCu(Kernel):
 class FdmtCu(Kernel):
     def __init__(self, device, xbin):
         super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
-        
-        
+
+def instructions2grid_lut(instructions, max_nsmp_uv):
+    data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
+    
+    nuvout = len(data[:,0]) # This is the number of output UV, there are zeros in between
+
+    output_index = data[:,0]
+    input_index  = data[:,1]
+    send_marker  = data[:,2][1::2]
+
+    nuvin = np.sort(input_index)[-1]   # This is the real number of input UV
+
+    max_nparallel_uv = max_nsmp_uv//2
+    output_index_hw = np.pad(output_index, (0, max_nsmp_uv-nuvout), 'constant')
+    input_index_hw  = np.pad(input_index,  (0, max_nsmp_uv-nuvout), 'constant')
+    send_marker_hw  = np.pad(send_marker,  (0, max_nparallel_uv-int(nuvout//2)), 'constant')
+    
+    return nuvin, nuvout, input_index_hw, output_index_hw, send_marker_hw
+
+def instructions2pad_lut(instructions, npix):
+    location = np.zeros(npix*npix, dtype=int)
+
+    data = np.array(instructions, dtype=np.int32)
+    upix = data[:,0]
+    vpix = data[:,1]
+
+    location_index = vpix*npix+upix
+    #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
+    #((FFT_SIZE/2+vpix)%FFT_SIZE)*FFT_SIZE +
+    #(FFT_SIZE/2+upix)%FFT_SIZE;
+
+    location_value = data[:,2]+1
+
+    location[location_index] = location_value
+
+    return location
+    
+def get_grid_lut_from_plan(plan):
+    
+    upper_instructions = plan.upper_instructions
+    lower_instructions = plan.lower_instructions
+
+    # careful here as craco_plan define nuvmax to be multiple times 8, but we need 2 extra space to pack
+    max_nsmp_uv = plan.nuvmax-2
+    nuv, nuvout, input_index, output_index, send_marker           = instructions2grid_lut(upper_instructions, max_nsmp_uv)
+    h_nuv, h_nuvout, h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions, max_nsmp_uv)
+
+    assert nuv == h_nuv # These two should equal
+
+    nuv_round = nuv+(8-nuv%8)       # Round to 8
+    location   = instructions2pad_lut(plan.upper_idxs, plan.npix)
+    h_location = instructions2pad_lut(plan.lower_idxs, plan.npix)
+    
+    shift_marker   = np.array(plan.upper_shifts, dtype=np.uint16)
+    h_shift_marker = np.array(plan.lower_shifts, dtype=np.uint16)
+    
+    lut = np.concatenate((output_index, input_index, send_marker, location, shift_marker, h_output_index, h_input_index, h_send_marker, h_location, h_shift_marker)).astype(np.uint16)
+    
+    return nuv_round//2, nuvout//2, h_nuvout//2, lut
+    
 class Pipeline:
-    def __init__(self, device, xbin, lut):
+    def __init__(self, device, xbin, plan_fname):
+        self.plan = load_plan(plan_fname)
+
+        # If we are on new version of pipeline
+        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+        print(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
+        print(f'{lut.shape}')
+        
+        np.savetxt("lut.txt", lut, fmt="%d")
+                
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
         self.boxcarcu = BoxcarCu(device, xbin)
         self.fdmtcu = FdmtCu(device, xbin)
+
+        print(f'lut.shape {lut.shape}')
+        print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
         print('Allocating grid LUTs')
-        self.grid_luts = [Buffer(lut.shape, np.uint32, device, g.group_id(3)).clear() for g in self.grids]
+        # For grid with new version pipeline
+        self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
+        
         for l in self.grid_luts:
             l.nparr[:] = lut
             l.copy_to_device()
-        
+                
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
 
-        self.inbuf = Buffer((NUV, NCIN, NT, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
                 
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
         
         print('Allocating FDMT history')
-        self.fdmt_hist_buf = Buffer((256*1024*1024), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
+        # Use a whole HBM for history FDMT
+        self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         print('Allocating FDMT fdmt_config_buf')
-        self.fdmt_config_buf = Buffer((NUV*5*NCIN), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-
+        #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
+        
+        fdmt_luts = self.plan.fdmt_plan.fdmt_lut
+        self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.fdmt_config_buf.nparr[:] = fdmt_luts
+        self.fdmt_config_buf.copy_to_device()
+        
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        nt_outbuf = NBLK*self.plan.nt
+        # WE should NOT use self.plan.nuvrest here, we need to calculate nuvrest as follow
+        nuvrest = self.plan.fdmt_plan.nuvtotal//self.plan.nuvwide
+        self.mainbuf = Buffer((nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + NUREST), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
-        self.boxcar_history = Buffer((NDM_MAX, NPIX, NPIX, 2), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        print('Allocating candidates')    
-        self.candidates = Buffer(256*1024*1024, np.int8, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+
+        npix = self.plan.npix
+        self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        print('Allocating candidates')
+
+        candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
+
+        # The buffer size here should match the one declared in C code
+        self.candidates = Buffer(NDM_MAX*self.plan.nbox, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
 
 def run(p, blk, values):
     self = p
-    threshold = values.threshold
-    ndm = values.ndm
-    nchunk_time = values.nchunk_time
+
+    # To do it properly we need to get number from plan
+    threshold = self.plan.threshold
+    threshold = np.uint16(threshold*(1<<NBINARY_POINT))
+    ndm       = self.plan.nd
+
+    nchunk_time = self.plan.nt//NTIME_PARALLEL
+    nuv         = self.plan.fdmt_plan.nuvtotal
+
     tblk = (values.tblk + blk ) % NBLK
-    nuv = values.nuv
+    
     nparallel_uv = nuv//2
-    nurest = nuv//8
+    nurest       = nuv//8
+    
     load_luts = 1
 
     nplane = ndm*nchunk_time
@@ -104,16 +229,15 @@ def run(p, blk, values):
     shift2 = 7 # FFT CONFIG Register - not sure what this means
     fft_cfg = (nplane << 16) + (shift2 << 6) + (shift1 << 3)
 
-    print(f'ndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}')
-    run_pipeline = True
-    run_fdmt = True
+    print(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
 
     assert ndm < 1024 # It hangs for 1024 - not sure why.
 
     starts = []
-
-    if values.run_pipeline:
-        assert nuv == 3440 # NUV and the LUT need to agree - if not you get in trouble
+    
+    assert nparallel_uv == self.nparallel_uvin # the number from pipeline plan should be the same as we calculated based on indexs from pipeline plan
+        
+    if values.run_image:
         for cu in self.ffts:
             starts.append(cu(fft_cfg, fft_cfg))
             
@@ -121,67 +245,93 @@ def run(p, blk, values):
         starts.append(self.grid_reader(self.mainbuf, ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
 
         for cu, grid_lut in zip(self.grids, self.grid_luts):
-            starts.append(cu(ndm, nchunk_time, nparallel_uv, grid_lut, load_luts))
-
+            starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
+            
     if values.run_fdmt:
         starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
 
-
-    
     return starts
 
 
+def location2pix(location, npix):
+
+    npix_half = npix//2
+    
+    vpix = (location//npix)%npix - npix_half
+    if (vpix<0):
+        vpix = npix+vpix
+        
+    upix = location%npix - npix_half
+    if (upix<0):
+        upix = npix+upix
+        
+    #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
+    return vpix, upix
+
+def print_candidates(candidates, npix):
+    print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
+    #for candidate in np.sort(candidates):
+    for candidate in candidates:
+        location = candidate['loc_2dfft']
+        vpix, upix = location2pix(location, npix)
+
+        snr = float(candidate['snr'])/float(1<<NBINARY_POINT) 
+        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+    
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-b','--nblocks', default=1, type=int, help='Number of blocks')
-    parser.add_argument('-u','--nuv', type=int, help='Number of NUV must match LUTS otherwise lockup', default=3440)
-    parser.add_argument('-m','--ndm', default=1, type=int, help='Number of DMs')
-    parser.add_argument('-t','--threshold', default=1, type=int, help='Threshold for boxcar')
-    parser.add_argument('-c','--nchunk-time', default=32, type=int, help='Nchunks of time to do')
-    parser.add_argument('-k','--tblk', default=0, type=int, help='Block number to execute')
-    parser.add_argument('--no-fdmt', default=True, action='store_false', help='Dont run FDMT pipeline', dest='run_fdmt')
-    parser.add_argument('--no-image', default=True, action='store_false', help='Dont run Image pipeline', dest='run_pipeline')
-    parser.add_argument('-e', '--version', default='', help='Version of fw to load. e.g. ".v14"')
-    parser.add_argument('-x', '--xclbin', default=None, help='XCLBIN to load. Overrides version', required=False)
-    parser.add_argument('-d','--device', default=0, type=int,help='Device number')
-    parser.add_argument('--wait', default=False, action='store_true', help='Wait during execution')
-    parser.set_defaults(verbose=False)
+    parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
+    parser.add_argument('-f', '--run_fdmt',  action='store_true', help='Run FDMT pipeline')
+    parser.add_argument('-i', '--run_image', action='store_true', help='Run Image pipeline')
+    parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
+    
+    parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
+    parser.add_argument('-k', '--tblk',      action='store', type=int, help='Block number to execute')
+    parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
+    parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
+    parser.add_argument('-p', '--plan',      action='store', type=str, help='plan file which has pipeline configurations')
+
+    parser.set_defaults(verbose   = False)
+    parser.set_defaults(run_fdmt  = False)
+    parser.set_defaults(run_image = False)
+    parser.set_defaults(wait      = False)
+    
+    parser.set_defaults(nblocks   = 1)
+    parser.set_defaults(tblk      = 0)
+    parser.set_defaults(device    = 0)    
+    parser.set_defaults(xclbin    = "binary_container_1.xclbin.tuned")
+    parser.set_defaults(plan      = "pipeline.pickle")
+    
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
 
-
     print(f'Values={values}')
 
-
-    mode = get_mode()
-    version = values.version
-    #xclbin = f'{mode}.xilinx_u280_xdma_201920_3{version}/binary_container_1/binary_container_1.xclbin'
-    xclbin = 'binary_container_1.xclbin'
-
-
+    mode   = get_mode()
     device = pyxrt.device(0)
-    xbin = pyxrt.xclbin(xclbin)
+    xbin = pyxrt.xclbin(values.xclbin)
     uuid = device.load_xclbin(xbin)
     iplist = xbin.get_ips()
     for ip in iplist:
         print(ip.get_name())
 
-    
-    #lutbin = os.path.join(os.path.dirname(xclbin), '../../', 'none_duplicate_long.uvgrid.txt.bin')
-    lutbin = 'none_duplicate_long.uvgrid.txt.bin'
-    print(f'Using lut binary file {lutbin}')
-    lut = np.fromfile(lutbin, dtype=np.uint32)
-    print(f'LUT size is {len(lut)}')
-    p = Pipeline(device, xbin, lut)
-    
-    p.inbuf.nparr[:] = 1
-    p.inbuf.copy_to_device()
+    p = Pipeline(device, xbin, values.plan)
 
+    # inbuf is the input to FDMT
+    #p.inbuf.nparr[:][0] = 1
+    #p.inbuf.nparr[:][1] = 0
+    #p.inbuf.copy_to_device()
+
+    # mainbuf is the input to pipeline
+    #(nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)
+    
+    p.mainbuf.nparr[:,:,:,:,0] = 1
+    p.mainbuf.nparr[:,:,:,:,1] = 0
+    p.mainbuf.copy_to_device()
 
     if values.wait:
         input('Press any key to continue...')
@@ -198,18 +348,10 @@ def _main():
             wait_end = time.perf_counter()
             print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
             
-    print(values)
-
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
-#            self.mainbuf = Buffer((NUREST, NDOUT, NT_OUTBUF, NUVWIDE,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-#imshow(p.mainbuf.nparr[0,:,:,0,0])
-    #show()
-
-    
 
     p.candidates.copy_from_device()
-    print(np.all(p.candidates.nparr == 0))
     p.boxcar_history.copy_from_device()
     print(np.all(p.boxcar_history.nparr == 0))
 
@@ -219,8 +361,15 @@ def _main():
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
 
+    # Copy data from device
+    p.candidates.copy_from_device()
+    candidates = p.candidates.nparr[:]
 
+    # Find first zero output
+    last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
+    candidates = candidates[0:last_candidate_index]
 
-
+    print_candidates(candidates, p.plan.npix)
+                     
 if __name__ == '__main__':
     _main()
