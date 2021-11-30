@@ -144,8 +144,15 @@ class Pipeline:
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         print('Allocating FDMT Input')
 
-        self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
-                
+        # Used to be like this
+        #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
+        print(self.plan.fdmt_plan.nuvtotal)
+        print(self.plan.nt)
+        print(self.plan.ncin)
+        print(self.plan.nuvwide)
+        print(self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide)        
+        self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
         
@@ -153,7 +160,7 @@ class Pipeline:
         # Use a whole HBM for history FDMT
         self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
-        print('Allocating FDMT fdmt_config_buf')
+        #print('Allocating FDMT fdmt_config_buf')
         #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
         
         fdmt_luts = self.plan.fdmt_plan.fdmt_lut
@@ -167,7 +174,8 @@ class Pipeline:
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
         nt_outbuf = NBLK*self.plan.nt
-        self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        #self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
@@ -303,7 +311,7 @@ def _main():
     parser.set_defaults(nuvwide   = 8)
     parser.set_defaults(nuvmax    = 8192)
     parser.set_defaults(ncin      = 32)
-    parser.set_defaults(ndout     = 32)
+    parser.set_defaults(ndout     = 186) # used to be 32
     parser.set_defaults(threshold = 3.0)
     parser.set_defaults(boxcar_weight = "sum")
     parser.set_defaults(fdmt_scale =1.0)
