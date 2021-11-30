@@ -30,31 +30,6 @@ NBINARY_POINT = 6
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
     return mode
-
-class AddInstruction(object):
-    def __init__(self, plan, target_slot, cell_coords, uvpix):
-        self.plan = plan
-        self.target_slot = target_slot
-        self.cell_coords = cell_coords
-        self.uvpix = uvpix
-        self.shift = False
-
-    @property
-    def shift_flag(self):
-        return 1 if self.shift else 0
-
-    @property
-    def uvidx(self):
-        irun, icell = self.cell_coords
-        c = icell + self.plan.nuvwide*irun
-        return c
-
-    def __str__(self):
-        irun, icell = self.cell_coords
-        cell = self.plan.fdmt_plan.get_cell(self.cell_coords)
-        return 'add {self.cell_coords} which is {cell} to slot {self.target_slot} and shift={self.shift}'.format(self=self, cell=cell)
-
-    __repr__ = __str__
     
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
@@ -137,20 +112,6 @@ def get_grid_lut_from_plan(plan):
     
     return nuv_round//2, nuvout//2, h_nuvout//2, lut
 
-def test_baseline2uv_and_fast_version_agree(plan, input_data):
-    uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-    fast_version = craco.FastBaseline2Uv(plan)
-    input_flat   = craco.bl2array(input_data)
-
-    dout  = np.zeros(uv_shape, dtype=np.complex64)
-    start = time.time()
-    fast_version(input_flat, dout)
-    end   = time.time()
-    
-    duration = end - start
-    print(f'fast version of Baseline2uv took {duration} seconds')
-
-    return dout
 
 class Pipeline:
     def __init__(self, device, xbin, plan):
@@ -206,12 +167,10 @@ class Pipeline:
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
         nt_outbuf = NBLK*self.plan.nt
-        # WE should NOT use self.plan.nuvrest here, we need to calculate nuvrest as follow
-        nuvrest = self.plan.fdmt_plan.nuvtotal//self.plan.nuvwide
-        self.mainbuf = Buffer((nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
         print('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
 
         npix = self.plan.npix
@@ -393,10 +352,10 @@ def _main():
     #p.inbuf.copy_to_device()
 
     # mainbuf is the input to pipeline
-    #(nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)    
-    #p.mainbuf.nparr[:,:,:,:,0] = 1
-    #p.mainbuf.nparr[:,:,:,:,1] = 0
-    #p.mainbuf.copy_to_device()
+    #(self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)    
+    p.mainbuf.nparr[:,:,:,:,0] = 1
+    p.mainbuf.nparr[:,:,:,:,1] = 0
+    p.mainbuf.copy_to_device()
 
     if values.wait:
         input('Press any key to continue...')
@@ -407,7 +366,14 @@ def _main():
 
         input_flat = craco.bl2array(input_data)
         fast_baseline2uv(input_flat, uv_out)
-        p.mainbuf.nparr = uv_out.astype(np.int16) # not sure how to do this
+
+        # mainbuf shape is different from uv_out shape
+        print(uv_out.shape)
+        print(p.mainbuf.nparr.shape)
+        
+        #p.mainbuf.nparr[:,:,:,:,:] = uv_out
+
+        #p.mainbuf.nparr = uv_out.astype(np.int16) # not sure how to do this
         p.mainbuf.copy_to_device()
         
         # Now we need to use baselines data    
