@@ -19,6 +19,8 @@ from craft import craco
 Most hard-coded numebrs are updated
 '''
 
+# ./test_pipeline.py -R -r -T 1.0 -u frb_d0_t0_a1_sninf_lm00.fits
+
 NBLK = 11
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
@@ -26,7 +28,7 @@ NTIME_PARALLEL = (NCU*2)
 NDM_MAX = 1024
 HBM_SIZE = int(256*1024*1024)
 NBINARY_POINT_THRESHOLD = 6
-NBINARY_POINT_FDMTIN    = 6
+NBINARY_POINT_FDMTIN    = 5
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -401,8 +403,8 @@ def _main():
         input_flat = craco.bl2array(input_data)
         fast_baseline2uv(input_flat, uv_out)
 
-        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real/(float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag/(float(1<<NBINARY_POINT_FDMTIN)))
+        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(float(1<<NBINARY_POINT_FDMTIN)))
+        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(float(1<<NBINARY_POINT_FDMTIN)))
         p.inbuf.copy_to_device()
         
         # Now we need to use baselines data    
