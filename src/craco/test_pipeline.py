@@ -373,12 +373,6 @@ def _main():
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
     
-    #duration = end - start
-    #print(f'fast version of Baseline2uv took {duration} seconds')
-    #
-    #return dout
-
-
     # inbuf is the input to FDMT
     #p.inbuf.nparr[:][0] = 1
     #p.inbuf.nparr[:][1] = 0
@@ -401,16 +395,23 @@ def _main():
         #print(input_flat.shape)
         
         fast_baseline2uv(input_flat, uv_out)
+
+        #print(np.nonzero(uv_out))
+        #print(uv_out)
         
         # mainbuf shape is different from uv_out shape
         print(uv_out.shape)
         print(p.inbuf.nparr.shape)
-                
-        #Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()          
-        #p.mainbuf.nparr[:,:,:,:,:] = uv_out
 
-        #p.mainbuf.nparr = uv_out.astype(np.int16) # not sure how to do this
-        #p.mainbuf.copy_to_device()
+        #(self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2
+
+        p.inbuf.nparr = uv_out.astype('f')
+        #p.inbuf.nparr[:,:,:,:,0] = uv_out[:,:,:,:, 0]
+        #p.inbuf.nparr[:,:,:,:,1] = uv_out[:,:,:,:, 1]
+
+        #p.inbuf.nparr[:] = 1
+        p.inbuf.copy_to_device()
+    
         
         # Now we need to use baselines data    
         call_start = time.perf_counter()
@@ -443,10 +444,17 @@ def _main():
     p.candidates.copy_from_device()
     candidates = p.candidates.nparr[:]
 
-    # Find first zero output
-    last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
-    candidates = candidates[0:last_candidate_index]
+    ## Find first zero output
+    #print(candidates)
+    
+    #print(np.where(candidates['snr'] == 0))
 
+    try:
+        last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
+    except:
+        last_candidate_index = len(candidates)
+
+    candidates = candidates[0:last_candidate_index]
     print_candidates(candidates, p.plan.npix)
                      
 if __name__ == '__main__':
