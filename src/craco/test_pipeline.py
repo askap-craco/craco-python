@@ -25,7 +25,8 @@ NTIME_PARALLEL = (NCU*2)
 
 NDM_MAX = 1024
 HBM_SIZE = int(256*1024*1024)
-NBINARY_POINT = 6
+NBINARY_POINT_THRESHOLD = 6
+NBINARY_POINT_FDMTIN    = 6
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -157,8 +158,8 @@ class Pipeline:
         #self.plan.fdmt_plan.nuvtotal = 3200
         #self.plan.nuvrest = 400
         
-        print(f'{self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
-        print(f'{self.plan.nuvrest*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
+        #print(f'{self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
+        #print(f'{self.plan.nuvrest*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
 
         #print(f'{3200*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
         #print(f'{400*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
@@ -166,7 +167,9 @@ class Pipeline:
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
-        self.inbuf = Buffer((self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        inbuf_shape = (self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2)
+        self.inbuf = Buffer(inbuf_shape, np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        print(f'FDMT input buffer size {np.prod(inbuf_shape)*2/1024/1024} MB')
         
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
@@ -196,8 +199,10 @@ class Pipeline:
         # Has one DDR in link file, which is 8*1024 MB
         #nt_outbuf = NBLK*self.plan.nt
         #self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-        self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-
+        mainbuf_shape = (self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
+        print(f'FDMT output buffer size {np.prod(mainbuf_shape)*2/1024/1024/1024} GB')
+        self.mainbuf = Buffer(mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        
         # small buffer
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
@@ -220,7 +225,7 @@ def run(p, blk, values):
 
     # To do it properly we need to get number from plan
     threshold = self.plan.threshold
-    threshold = np.uint16(threshold*(1<<NBINARY_POINT))
+    threshold = np.uint16(threshold*(1<<NBINARY_POINT_THRESHOLD))
     ndm       = self.plan.nd
 
     nchunk_time = self.plan.nt//NTIME_PARALLEL
@@ -284,7 +289,7 @@ def print_candidates(candidates, npix):
         location = candidate['loc_2dfft']
         vpix, upix = location2pix(location, npix)
 
-        snr = float(candidate['snr'])/float(1<<NBINARY_POINT) 
+        snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
         print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
     
 def _main():
@@ -371,8 +376,10 @@ def _main():
 
     fast_baseline2uv = craco.FastBaseline2Uv(plan)
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+    uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
-    
+    uv_out_fixed = np.zeros(uv_shape2, dtype=np.int16)
+
     # inbuf is the input to FDMT
     #p.inbuf.nparr[:][0] = 1
     #p.inbuf.nparr[:][1] = 0
@@ -392,26 +399,11 @@ def _main():
             break
         
         input_flat = craco.bl2array(input_data)
-        #print(input_flat.shape)
-        
         fast_baseline2uv(input_flat, uv_out)
 
-        #print(np.nonzero(uv_out))
-        #print(uv_out)
-        
-        # mainbuf shape is different from uv_out shape
-        print(uv_out.shape)
-        print(p.inbuf.nparr.shape)
-
-        #(self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2
-
-        p.inbuf.nparr = uv_out.astype('f')
-        #p.inbuf.nparr[:,:,:,:,0] = uv_out[:,:,:,:, 0]
-        #p.inbuf.nparr[:,:,:,:,1] = uv_out[:,:,:,:, 1]
-
-        #p.inbuf.nparr[:] = 1
+        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real/(float(1<<NBINARY_POINT_FDMTIN)))
+        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag/(float(1<<NBINARY_POINT_FDMTIN)))
         p.inbuf.copy_to_device()
-    
         
         # Now we need to use baselines data    
         call_start = time.perf_counter()
