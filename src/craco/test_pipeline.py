@@ -134,6 +134,8 @@ class Pipeline:
         print(f'nuv {self.plan.fdmt_plan.nuvtotal}')
         
         print('Allocating grid LUTs')
+
+        # small buffer
         # For grid with new version pipeline
         self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
         
@@ -145,24 +147,41 @@ class Pipeline:
         print('Allocating FDMT Input')
 
         # Used to be like this
-        #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
         print(self.plan.fdmt_plan.nuvtotal)
         print(self.plan.nt)
         print(self.plan.ncin)
         print(self.plan.nuvwide)
-        print(self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide)        
-        self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
+        print(self.plan.nuvrest)
+        print(self.plan.ndout)
+
+        #self.plan.fdmt_plan.nuvtotal = 3200
+        #self.plan.nuvrest = 400
+        
+        print(f'{self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
+        print(f'{self.plan.nuvrest*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
+
+        #print(f'{3200*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
+        #print(f'{400*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
+
+        # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
+        #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
+        #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
+        self.inbuf = Buffer((self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()        
         
         # FDMT histin, histhout should be same buffer
         assert self.fdmtcu.group_id(2) == self.fdmtcu.group_id(3), 'FDMT histin and histout should be the same'
         
         print('Allocating FDMT history')
-        # Use a whole HBM for history FDMT
+        # Need ??? MB, we have 4*256 MB in link file
+        # Use multiple HBMs for history FDMT
+        # We can only alloc one single HBM, host can only access one single HBM, but kernel can access multiple HBMs
+        # However, we need to make sure that in link file, we assign enough HBM for the FDMT history
         self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         #print('Allocating FDMT fdmt_config_buf')
         #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-        
+
+        # small buffer
         fdmt_luts = self.plan.fdmt_plan.fdmt_lut
         self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, device, self.fdmtcu.krnl.group_id(4)).clear()
         self.fdmt_config_buf.nparr[:] = fdmt_luts
@@ -173,20 +192,25 @@ class Pipeline:
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         print('Allocating mainbuf')
-        nt_outbuf = NBLK*self.plan.nt
+
+        # Has one DDR in link file, which is 8*1024 MB
+        #nt_outbuf = NBLK*self.plan.nt
         #self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
         self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
 
+        # small buffer
         print('Allocating ddreader_lut')
         self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
         print('Allocating boxcar_history')    
 
         npix = self.plan.npix
+        # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
         self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         print('Allocating candidates')
 
         candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
 
+        # small buffer
         # The buffer size here should match the one declared in C code
         self.candidates = Buffer(NDM_MAX*self.plan.nbox, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
@@ -319,8 +343,8 @@ def _main():
     
     parser.set_defaults(os        = "2.1,2.1")
     parser.set_defaults(xclbin    = "binary_container_1.xclbin.golden")
-    #parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
-    parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
+    parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
+    #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
     
     values = parser.parse_args()
     if values.verbose:
@@ -362,9 +386,9 @@ def _main():
 
     # mainbuf is the input to pipeline
     #(self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)    
-    p.mainbuf.nparr[:,:,:,:,0] = 1
-    p.mainbuf.nparr[:,:,:,:,1] = 0
-    p.mainbuf.copy_to_device()
+    #p.mainbuf.nparr[:,:,:,:,0] = 1
+    #p.mainbuf.nparr[:,:,:,:,1] = 0
+    #p.mainbuf.copy_to_device()
 
     if values.wait:
         input('Press any key to continue...')
@@ -372,18 +396,21 @@ def _main():
     for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
         if iblk >= values.nblocks:
             break
-
+        
         input_flat = craco.bl2array(input_data)
+        #print(input_flat.shape)
+        
         fast_baseline2uv(input_flat, uv_out)
-
+        
         # mainbuf shape is different from uv_out shape
         print(uv_out.shape)
-        print(p.mainbuf.nparr.shape)
-        
+        print(p.inbuf.nparr.shape)
+                
+        #Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()          
         #p.mainbuf.nparr[:,:,:,:,:] = uv_out
 
         #p.mainbuf.nparr = uv_out.astype(np.int16) # not sure how to do this
-        p.mainbuf.copy_to_device()
+        #p.mainbuf.copy_to_device()
         
         # Now we need to use baselines data    
         call_start = time.perf_counter()
