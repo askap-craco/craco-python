@@ -20,7 +20,9 @@ Most hard-coded numebrs are updated
 '''
 
 # ./test_pipeline.py -R -r -T 1.0 -u frb_d0_t0_a1_sninf_lm00.fits
-
+# search for
+# /data/craco/den15c/old_pipeline/realtime_pipeline/imag_fixed_noprelink/golden_candidate has candidates 
+ 
 NBLK = 11
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
@@ -382,23 +384,14 @@ def _main():
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
     uv_out_fixed = np.zeros(uv_shape2, dtype=np.int16)
 
-    # inbuf is the input to FDMT
-    #p.inbuf.nparr[:][0] = 1
-    #p.inbuf.nparr[:][1] = 0
-    #p.inbuf.copy_to_device()
-
-    # mainbuf is the input to pipeline
-    #(self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide, 2)    
-    #p.mainbuf.nparr[:,:,:,:,0] = 1
-    #p.mainbuf.nparr[:,:,:,:,1] = 0
-    #p.mainbuf.copy_to_device()
-
     if values.wait:
         input('Press any key to continue...')
         
     for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
         if iblk >= values.nblocks:
             break
+
+        print(iblk)
         
         input_flat = craco.bl2array(input_data)
         fast_baseline2uv(input_flat, uv_out)
@@ -419,7 +412,7 @@ def _main():
             wait_end = time.perf_counter()
             print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
 
-    f.hdulist.close()
+    f.close()
     
     p.mainbuf.copy_from_device()
     print(p.mainbuf.nparr.shape)
@@ -439,10 +432,6 @@ def _main():
     candidates = p.candidates.nparr[:]
 
     ## Find first zero output
-    #print(candidates)
-    
-    #print(np.where(candidates['snr'] == 0))
-
     try:
         last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
     except:
