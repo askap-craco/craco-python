@@ -205,7 +205,8 @@ class Pipeline:
         #self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
         mainbuf_shape = (self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
         print(f'FDMT output buffer size {np.prod(mainbuf_shape)*2/1024/1024/1024} GB')
-        self.mainbuf = Buffer(mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        #self.mainbuf = Buffer(mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
+        self.mainbuf = Buffer(mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0))
         
         # small buffer
         print('Allocating ddreader_lut')
@@ -378,7 +379,7 @@ def _main():
     # Create a pipeline 
     p = Pipeline(device, xbin, plan)
 
-    fast_baseline2uv = craco.FastBaseline2Uv(plan)
+    fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
     uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
@@ -414,8 +415,8 @@ def _main():
 
     f.close()
     
-    p.mainbuf.copy_from_device()
-    print(p.mainbuf.nparr.shape)
+    #p.mainbuf.copy_from_device()
+    #print(p.mainbuf.nparr.shape)
 
     p.candidates.copy_from_device()
     p.boxcar_history.copy_from_device()
@@ -423,7 +424,7 @@ def _main():
 
     p.fdmt_hist_buf.copy_to_device()
     print('inbuf', hex(p.inbuf.buf.address()))
-    print('mainbuf', hex(p.mainbuf.buf.address()))
+    #print('mainbuf', hex(p.mainbuf.buf.address()))
     print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
     print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
 
