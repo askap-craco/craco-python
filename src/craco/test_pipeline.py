@@ -20,25 +20,34 @@ import pytest
 
 @pytest.fixture(scope='module')
 def fitsname():
-    return '/data/craco/ban115/test_data/nant30/frb_d0_t0_a1_sninf_lm00/frb_d0_t0_a1_sninf_lm00.fits'
+    #return '/data/craco/ban115/test_data/nant30/frb_d0_t0_a1_sninf_lm00/frb_d0_t0_a1_sninf_lm00.fits'
+    return '/data/craco/ban115/craco-python/src/craco/frb_d0_lm0_nt16_nant24.fits'
+
+@pytest.fixture(scope='module')
+def xclbin():
+    return '/data/craco/ban115/builds/binary_container_01482863.xclbin'
 
 @pytest.fixture(scope='module')
 def plan(fitsname):
     f = uvfits.open(fitsname)
-    default_values = craft.c
-    p = PipelinePlan(f, search_pipeline.get_parser())
+    p = PipelinePlan(f, '')
     return p
 
-
 @pytest.fixture(scope='module')
-def search_pipeline(plan):
-    mode   = get_mode()
+def pipeline(plan, xclbin):
     device = pyxrt.device(0)
-    xbin = pyxrt.xclbin(values.xclbin)
+    xbin = pyxrt.xclbin(xclbin)
     uuid = device.load_xclbin(xbin)
     # Create a pipeline 
     p = search_pipeline.Pipeline(device, xbin, plan)
     return p
+
+
+def test_iplist(pipeline, plan):
+    pline = pipeline
+    print('***** listing IPs *****')
+    for ip in pline.xbin.get_ips():
+        print(ip.get_name())
 
 
 def _main():

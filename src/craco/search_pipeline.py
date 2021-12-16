@@ -127,6 +127,8 @@ def get_grid_lut_from_plan(plan):
 
 class Pipeline:
     def __init__(self, device, xbin, plan):
+        self.device = device
+        self.xbin = xbin
         self.plan = plan
 
         # If we are on new version of pipeline
