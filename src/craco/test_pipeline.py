@@ -11,17 +11,34 @@ from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
-
 from craco import search_pipeline
 
 from craft import uvfits
 from craft import craco
 
-@pytest.fixture
+import pytest
+
+@pytest.fixture(scope='module')
 def fitsname():
-    return 
+    return '/data/craco/ban115/test_data/nant30/frb_d0_t0_a1_sninf_lm00/frb_d0_t0_a1_sninf_lm00.fits'
+
+@pytest.fixture(scope='module')
+def plan(fitsname):
+    f = uvfits.open(fitsname)
+    default_values = craft.c
+    p = PipelinePlan(f, search_pipeline.get_parser())
+    return p
 
 
+@pytest.fixture(scope='module')
+def search_pipeline(plan):
+    mode   = get_mode()
+    device = pyxrt.device(0)
+    xbin = pyxrt.xclbin(values.xclbin)
+    uuid = device.load_xclbin(xbin)
+    # Create a pipeline 
+    p = search_pipeline.Pipeline(device, xbin, plan)
+    return p
 
 
 def _main():
@@ -34,15 +51,12 @@ def _main():
 
     print(f'Values={values}')
 
-    mode   = get_mode()
-    device = pyxrt.device(0)
-    xbin = pyxrt.xclbin(values.xclbin)
-    uuid = device.load_xclbin(xbin)
     iplist = xbin.get_ips()
     for ip in iplist:
         print(ip.get_name())
 
     # Create a plan
+
     f = uvfits.open(values.uv)
     plan = PipelinePlan(f, values)
 

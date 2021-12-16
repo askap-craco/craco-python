@@ -33,7 +33,8 @@ NBLK = 11
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
 
-NDM_MAX = krnl.MAX_NDM
+#NDM_MAX = krnl.MAX_NDM
+NDM_MAX = 1024
 HBM_SIZE = int(256*1024*1024)
 NBINARY_POINT_THRESHOLD = 6
 NBINARY_POINT_FDMTIN    = 5
@@ -314,15 +315,15 @@ def location2pix(location, npix):
     #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
     return vpix, upix
 
-def log.info_candidates(candidates, npix):
-    log.info(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
+def print_candidates(candidates, npix):
+    print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
     #for candidate in np.sort(candidates):
     for candidate in candidates:
         location = candidate['loc_2dfft']
         vpix, upix = location2pix(location, npix)
 
         snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
-        log.info(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
 
 
 def waitall(starts):
@@ -391,7 +392,6 @@ def get_parser():
     #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
 
     return parser
-
 
 def _main():
     parser = get_parser()
