@@ -15,6 +15,8 @@ from craft.craco_plan import load_plan
 from craft import uvfits
 from craft import craco
 
+from collections import OrderedDict
+
 import logging
 
 log = logging.getLogger(__name__)
@@ -27,8 +29,14 @@ Most hard-coded numebrs are updated
 
 # ./test_pipeline.py -R -r -T 1.0 -u frb_d0_t0_a1_sninf_lm00.fits
 # search for
-# /data/craco/den15c/old_pipeline/realtime_pipeline/imag_fixed_noprelink/golden_candidate has candidates 
- 
+# /data/craco/den15c/old_pipeline/realtime_pipeline/imag_fixed_noprelink/golden_candidate has candidates
+
+candidate_dtype = [('snr', np.int16),
+                   ('loc_2dfft', np.uint16),
+                   ('boxc_width', np.uint8),
+                   ('time', np.uint8),
+                   ('dm', np.uint16)]
+
 NBLK = 11
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
@@ -38,6 +46,46 @@ NDM_MAX = 1024
 HBM_SIZE = int(256*1024*1024)
 NBINARY_POINT_THRESHOLD = 6
 NBINARY_POINT_FDMTIN    = 5
+
+def merge_candidates_width_time(cands):
+    '''
+    Merges candidates that have overlappign width and times for identical DMs and locations
+    Assumes data in hardware ordering (whatever that is)
+
+    THIS IT NOT VERY EFFICIENT! But it will work for now
+
+    It is very complicated
+
+    :returns: New candidate list
+    '''
+    cout = []
+    cands = np.sort(cands, order=['dm', 'loc_2dfft', 'time', 'boxc_width', 'snr'])
+    curr_cand = [cands[0]]
+    for icand, cand in enumerate(cands[1:]):
+        # if it's the same place and DM
+        if cand['dm'] == curr_cand[0]['dm'] and cand['loc_2dfft'] == curr_cand[0]['loc_2dfft']:
+            # if the current candidate is in time window of the previous one, then group it
+            # calcualate start and end times for hte current and first andidates
+            # times are inclusive 
+            curr_cand_start_time = cand['time'] - cand['boxc_width'] 
+            curr_cand_end_time = cand['time'] 
+            first_cand_start_time = curr_cand[0]['time'] - cand['boxc_width']
+            first_cand_end_time = curr_cand[0]['time']
+            if first_cand_start_time <= curr_cand_start_time <= first_cand_end_time:
+                curr_cand.append(cand)
+            else:
+                best_cand =  max(curr_cand, key=lambda c:c['snr'])
+                yield best_cand
+                curr_cand = [cand]
+        else: # change of pixel or DM
+            best_cand =  max(curr_cand, key=lambda c:c['snr'])
+            yield best_cand
+            curr_cand = [cand]
+
+    if len(curr_cand) > 0:
+        best_cand =  max(curr_cand, key=lambda c:c['snr'])
+        yield best_cand
+        
 
 def get_mode():
     mode = os.environ.get('XCL_EMULATION_MODE', 'hw')
@@ -126,10 +174,21 @@ def get_grid_lut_from_plan(plan):
 
 
 class Pipeline:
-    def __init__(self, device, xbin, plan):
+    def __init__(self, device, xbin, plan, alloc_device_only_buffers=False):
+        '''
+        Make the search pipelien bound to the hardware
+        
+        :device: XRT device
+        :xbin: XCLBIN object
+        :plan:PIpeline plan
+        :alloc_device_only_buffers: Set to True if you want to be able to manipulate buffers that we normally only use fo rdevice only
+        '''
+        
         self.device = device
         self.xbin = xbin
         self.plan = plan
+
+        self.device_only_buffer_flag = 'normal' if alloc_device_only_buffers else 'device_only'
 
         # If we are on new version of pipeline
         self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
@@ -192,7 +251,7 @@ class Pipeline:
         # Use multiple HBMs for history FDMT
         # We can only alloc one single HBM, host can only access one single HBM, but kernel can access multiple HBMs
         # However, we need to make sure that in link file, we assign enough HBM for the FDMT history
-        self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), 'device_only').clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
+        self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), self.device_only_buffer_flag).clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
         #log.info('Allocating FDMT fdmt_config_buf')
         #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
@@ -221,7 +280,7 @@ class Pipeline:
         sub_mainbuf_shape[0] = (self.plan.nuvrest + num_mainbufs - 1) // num_mainbufs
         logging.info(f'Mainbuf shape is {mainbuf_shape} breaking into {num_mainbufs} buffers of {sub_mainbuf_shape}')
         # Allocate buffers in sub buffers - this works around an XRT bug that doesn't let you allocate a large buffer
-        self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0)).clear() for b in range(num_mainbufs)]
+        self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
 
         # small buffer
         log.info('Allocating ddreader_lut')
@@ -230,10 +289,8 @@ class Pipeline:
 
         npix = self.plan.npix
         # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
-        self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), 'device_only').clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         log.info('Allocating candidates')
-
-        candidate_dtype=np.dtype([('snr', np.uint16), ('loc_2dfft', np.uint16), ('boxc_width', np.uint8), ('time', np.uint8), ('dm', np.uint16)])
 
         # small buffer
         # The buffer size here should match the one declared in C code
@@ -277,29 +334,31 @@ class Pipeline:
             self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk).wait(0)
         
         if values.run_image:
-            if fake == 'zeros':
-                for b in self.all_mainbufs:
-                    b.nparr[:] = 0
-                    b.copy_to_device()
-            if fake == 'dm0':
-                for b in self.all_mainbufs:
-                    b.nparr[:] = 0
-                    b.nparr[:, 0, tblk, 8, :, 0] = 1
-                    #(self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
-                    b.copy_to_device()
-
-        
-        for cu in self.ffts:
-            starts.append(cu(fft_cfg, fft_cfg))
+            for cu in self.ffts:
+                starts.append(cu(fft_cfg, fft_cfg))
             
-        starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
-        starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
+            starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
+            starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
 
-        for cu, grid_lut in zip(self.grids, self.grid_luts):
-            starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
+            for cu, grid_lut in zip(self.grids, self.grid_luts):
+                starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
             
 
         return starts
+
+    def get_candidates(self):
+        '''
+        Returns a numpy array of candidates with candidate_dtype structure type
+        Copies all data from the device and returns a view containing only the correct number of valid 
+        candidates
+        :returns: nparray dtype=candidate_dtype size=number of valid canidates
+        '''
+        self.candidates.copy_from_device()
+        # argmax stops at the first occurence of 'True'
+        ncand = np.argmax(self.candidates.nparr['snr'] == 0)
+        return self.candidates.nparr[:ncand]
+            
+
 
 
 def location2pix(location, npix):
