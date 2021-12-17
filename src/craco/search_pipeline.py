@@ -59,6 +59,9 @@ def merge_candidates_width_time(cands):
     :returns: New candidate list
     '''
     cout = []
+    if len(cands) == 0:
+        return cands
+    
     cands = np.sort(cands, order=['dm', 'loc_2dfft', 'time', 'boxc_width', 'snr'])
     curr_cand = [cands[0]]
     for icand, cand in enumerate(cands[1:]):
@@ -289,7 +292,9 @@ class Pipeline:
 
         npix = self.plan.npix
         # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
-        self.boxcar_history = Buffer((self.plan.nd, self.plan.nbox - 1, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        NBOX = 8
+        self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        print(f"Boxcar history {self.boxcar_history.nparr.shape} {self.boxcar_history.nparr.size} {self.boxcar_history.nparr.itemsize}")
         log.info('Allocating candidates')
 
         # small buffer
@@ -357,11 +362,11 @@ class Pipeline:
         # argmax stops at the first occurence of 'True'
         ncand = np.argmax(self.candidates.nparr['snr'] == 0)
         return self.candidates.nparr[:ncand]
-            
 
+    def reset_boxcar_history(self):
+        self.boxcar_history.clear()
 
-
-def location2pix(location, npix):
+def location2pix(location, npix=256):
 
     npix_half = npix//2
     
@@ -376,6 +381,8 @@ def location2pix(location, npix):
     #location_index = ((npix_half+vpix)%npix)*npix + (npix_half+upix)%npix
     return vpix, upix
 
+location2pix = np.vectorize(location2pix)
+
 def print_candidates(candidates, npix):
     print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
     #for candidate in np.sort(candidates):
@@ -384,8 +391,21 @@ def print_candidates(candidates, npix):
         vpix, upix = location2pix(location, npix)
 
         snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
-        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']+1}\t\t{candidate['time']}\t{candidate['dm']}")
+        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}")
 
+def grid_candidates(cands, field='snr', npix=256):
+    g = np.zeros((npix, npix))
+    for candidx, cand in enumerate(cands):
+        vpix, upix = location2pix(cand['loc_2dfft'], npix)
+        if field == 'candidx':
+            d = candidx
+        if field == 'count':
+            d = 1.0
+        else:
+            d = cand[field]
+        g[vpix, upix] += d
+
+    return g
 
 def waitall(starts):
     for istart, start in enumerate(starts):
