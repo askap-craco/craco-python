@@ -12,6 +12,8 @@ import os
 import sys
 import logging
 
+log = logging.getLogger(__name__)
+
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 def _main():

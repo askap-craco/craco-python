@@ -65,6 +65,35 @@ def test_mainbuf_address_cover_everything(pipeline, plan):
     print(b.nparr.size, b.nparr.itemsize)
     assert np.all(addresses[1:] - addresses[:-1] == b.nparr.size*b.nparr.itemsize)
 
+
+def test_fdmt_mainbuf_mapping(pipeline, plan):
+    '''
+    CHeck running the FDMT on different tblks fills the mainbufs as expected
+    '''
+    pipeline.candidates.nparr['snr'] = -1
+    pipeline.candidates.copy_to_device()
+    values = copy.deepcopy(plan.values)
+    values.run_fdmt = True
+    values.run_image = False
+
+    for tblk in range(NTBLK):
+        for b in pipeline.all_mainbufs:
+            b.clear()
+        #        mainbuf_shape = (self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
+        #         inbuf_shape = (self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2)
+        t = 0
+        chan = 0
+        pipeline.inbuf.nparr[:,t, chan,:,0] = tblk
+        pipeline.inbuf.nparr[:,t, chan,:,1].flat = np.arange(plan.nuvrest, plan.nuvwide)
+        pipeline.inbuf.copy_to_device()
+        pipeline.fdmt_hist_buf.clear()
+        starts = pipeline.run(tblk, values)
+        waitall(starts)
+        for b in pipeline.all_mainbufs:
+            b.copy_from_device()
+            print(tblk, b.nparr.shape, b.nparr[:,:,:,:,0].sum(), b.nparr[:,:,:,:,1].sum())
+    
+
 def test_imaging_dm0_data0(pipeline, plan):
     ''' 
     Make sure clearing the input makes the output all zeros

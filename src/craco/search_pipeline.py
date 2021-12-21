@@ -328,7 +328,7 @@ class Pipeline:
 
         log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
 
-        assert ndm < 1024 # It hangs for 1024 - not sure why.
+        assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
 
         starts = []
     
