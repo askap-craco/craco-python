@@ -10,13 +10,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import sys
+#import coloredlogs
 import logging
 from mpi4py import MPI
 import mpi4py
 import time
 import random
 import rdma_transport
-#import coloredlogs
 
 # mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
 log = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ def be_transmitter(values):
 
     transmitter_info = {'rank':rank, 'psn':random.randint(0, 16384), 'qpn': random.randint(0, 16384),
                         'gid': np.random.bytes(16), 'lid':np.random.randint(0,16384)}
-    log.info(transmitter_info)
+    #log.info(transmitter_info)
     
     log.info(f'Sending transmitter info {transmitter_info} to a receiver with rank {receiver_rank}')
     world.send(transmitter_info, dest=int(receiver_rank), tag=1)
@@ -127,6 +127,8 @@ def _main():
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
+
+    #coloredlogs.install(level='DEBUG', logger=log)
     
     #if values.verbose:
     #    coloredlogs.install(
