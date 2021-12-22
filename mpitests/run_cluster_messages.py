@@ -15,7 +15,10 @@ from mpi4py import MPI
 import mpi4py
 import time
 import random
+import rdma_transport
+#import coloredlogs
 
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
 log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
@@ -45,8 +48,8 @@ size = world.Get_size()
 def be_receiver(values):
     receivers = world.Split(1, rank)
     transmitters = world.Split(0, rank)
-    transmit_ids = np.arange(values.nlink)
-    receive_ids = transmit_ids % values.nrx
+    transmitter_ids = np.arange(values.nlink)
+    receive_ids = transmitter_ids % values.nrx
     my_transmitters = np.where(receive_ids == rank)[0]
     num_transmitters_sending_to_me = len(my_transmitters)
     log.info(f'Rank {rank} expects data from {num_transmitters_sending_to_me} transmitters:{my_transmitters}')
@@ -55,13 +58,16 @@ def be_receiver(values):
     
 
     # Send info to my transmitters
+    status = MPI.Status()
     for tx in my_transmitters:
-        destrank = tx + values.nrx
-        log.info(f'Sending {receiver_info} to rank {destrank}')
-        world.send(receiver_info, dest=int(destrank), tag=1)
+        transmitter_rank = tx + values.nrx
+        log.info(f'Sending {receiver_info} to rank {transmitter_rank}')
+        world.send(receiver_info, dest=int(transmitter_rank), tag=1)
+
+        info = world.recv(source=transmitter_rank, tag=MPI.ANY_TAG, status=status)
+        log.info(f'Got {info} from rank={status.Get_source()} tag={status.Get_tag()}')
 
     msg = np.zeros(values.msg_size)
-    status = MPI.Status()
     start = time.time()
     for imsg in range(values.nmsg):
         # TODO: extra loop over the number of transmitters I'm exxpecting
@@ -84,23 +90,30 @@ def be_transmitter(values):
     receivers = world.Split(1, rank)
 
     # the rank of us in the list of transmitters
-    transmit_rank = transmitters.Get_rank()
-    assert transmit_rank == world.Get_rank() - values.nrx
-    assert transmit_rank < values.nlink
+    transmitter_rank = transmitters.Get_rank()
+    assert transmitter_rank == world.Get_rank() - values.nrx
+    assert transmitter_rank < values.nlink
 
     # the reciver rank we'll send our data  to
-    target_receiver_rank = transmit_rank % values.nrx
+    receiver_rank = transmitter_rank % values.nrx
 
     # Wait for info from my receiver
     status = MPI.Status()
     info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
     log.info(f'Got {info} from rank={status.Get_source()} tag={status.Get_tag()}')
+
+    transmitter_info = {'rank':rank, 'psn':random.randint(0, 16384), 'qpn': random.randint(0, 16384),
+                        'gid': np.random.bytes(16), 'lid':np.random.randint(0,16384)}
+    log.info(transmitter_info)
+    
+    log.info(f'Sending {transmitter_info} to rank {receiver_rank}')
+    world.send(transmitter_info, dest=int(receiver_rank), tag=1)
     
     msg = np.zeros(values.msg_size)
     for imsg in range(values.nmsg):
-        log.debug(f'Sending msg {imsg} from {transmit_rank} to {target_receiver_rank}')
+        log.debug(f'Sending msg {imsg} from {transmitter_rank} to {receiver_rank}')
         if values.method == 'mpi':
-            world.Send(msg+imsg, dest=target_receiver_rank, tag=transmit_rank)
+            world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
         
 
 def _main():
@@ -114,12 +127,20 @@ def _main():
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
+    
+    #if values.verbose:
+    #    coloredlogs.install(
+    #        fmt="[ %(levelname)s\t- %(asctime)s - %(name)s - %(filename)s:%(lineno)s] %(message)s",
+    #        level='DEBUG')
+    #else:            
+    #    coloredlogs.install(
+    #        fmt="[ %(levelname)s\t- %(asctime)s - %(name)s - %(filename)s:%(lineno)s] %(message)s",
+    #        level='INFO')
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-
-
+        
     assert size == values.nrx + values.nlink
 
     # ranks < nrx are receivers
