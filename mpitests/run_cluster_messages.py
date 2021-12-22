@@ -52,7 +52,7 @@ def be_receiver(values):
     receive_ids = transmitter_ids % values.nrx
     my_transmitters = np.where(receive_ids == rank)[0]
     num_transmitters_sending_to_me = len(my_transmitters)
-    log.info(f'Rank {rank} expects data from {num_transmitters_sending_to_me} transmitters:{my_transmitters}')
+    log.info(f'Rank {rank} receiver expects data from {num_transmitters_sending_to_me} transmitters:{my_transmitters}')
     receiver_info = {'rank':rank, 'psn':random.randint(0, 16384), 'qpn': random.randint(0, 16384),
                      'gid': np.random.bytes(16), 'lid':np.random.randint(0,16384)}
     
@@ -61,11 +61,11 @@ def be_receiver(values):
     status = MPI.Status()
     for tx in my_transmitters:
         transmitter_rank = tx + values.nrx
-        log.info(f'Sending {receiver_info} to rank {transmitter_rank}')
+        log.info(f'Sending the receiver info {receiver_info} to a transmitter with rank {transmitter_rank}')
         world.send(receiver_info, dest=int(transmitter_rank), tag=1)
 
         info = world.recv(source=transmitter_rank, tag=MPI.ANY_TAG, status=status)
-        log.info(f'Got {info} from rank={status.Get_source()} tag={status.Get_tag()}')
+        log.info(f'Got transmitter info {info} from a transmitter with rank={status.Get_source()} tag={status.Get_tag()}')
 
     msg = np.zeros(values.msg_size)
     start = time.time()
@@ -74,12 +74,12 @@ def be_receiver(values):
         for imsg2 in range(num_transmitters_sending_to_me):
             if values.method == 'mpi':
                 world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
-                log.debug(f'Receviver {rank} Got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
+                log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
 
     end = time.time()
     interval = end - start
     rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
-    log.info(f'Rank {rank} Received data at {rate} Gbps')
+    log.info(f'Rank {rank} receiver received data at {rate} Gbps')
         
 
 def be_transmitter(values):
@@ -100,18 +100,18 @@ def be_transmitter(values):
     # Wait for info from my receiver
     status = MPI.Status()
     info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-    log.info(f'Got {info} from rank={status.Get_source()} tag={status.Get_tag()}')
+    log.info(f'Got receiver info {info} from receiver with rank={status.Get_source()} tag={status.Get_tag()}')
 
     transmitter_info = {'rank':rank, 'psn':random.randint(0, 16384), 'qpn': random.randint(0, 16384),
                         'gid': np.random.bytes(16), 'lid':np.random.randint(0,16384)}
     log.info(transmitter_info)
     
-    log.info(f'Sending {transmitter_info} to rank {receiver_rank}')
+    log.info(f'Sending transmitter info {transmitter_info} to a receiver with rank {receiver_rank}')
     world.send(transmitter_info, dest=int(receiver_rank), tag=1)
     
     msg = np.zeros(values.msg_size)
     for imsg in range(values.nmsg):
-        log.debug(f'Sending msg {imsg} from {transmitter_rank} to {receiver_rank}')
+        log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
         if values.method == 'mpi':
             world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
         
