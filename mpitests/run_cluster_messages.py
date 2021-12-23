@@ -85,19 +85,19 @@ def be_receiver(values):
     receivers = []
     for tx in my_transmitters:
         receiver = RdmaTransport(requestLogLevel, 
-                                      mode, 
-                                      messageSize,
-                                      numMemoryBlocks,
-                                      numContiguousMessages,
-                                      dataFileName,
-                                      numTotalMessages,
-                                      messageDelayTime,
-                                      rdmaDeviceName,
-                                      rdmaPort,
-                                      gidIndex,
-                                      identifierFileName,
-                                      metricURL,
-                                      numMetricAveraging)
+                                 mode, 
+                                 messageSize,
+                                 numMemoryBlocks,
+                                 numContiguousMessages,
+                                 dataFileName,
+                                 numTotalMessages,
+                                 messageDelayTime,
+                                 rdmaDeviceName,
+                                 rdmaPort,
+                                 gidIndex,
+                                 #identifierFileName,
+                                 metricURL,
+                                 numMetricAveraging)
         receivers.append(receiver)
         
         receiver_psn = receiver.getPacketSequenceNumber()
@@ -126,7 +126,7 @@ def be_receiver(values):
         receivers[tx].setQueuePairNumber(transmitter_qpn)
         receivers[tx].setGidAddress(transmitter_gid)
         receivers[tx].setLocalIdentifier(transmitter_lid)
-        receivers[tx].setupRdma();
+        receivers[tx].setupRdma(identifierFileName);
 
         
     msg = np.zeros(values.msg_size)
@@ -182,19 +182,19 @@ def be_transmitter(values):
     gidIndex = -1
     
     transmitter = RdmaTransport(requestLogLevel, 
-                                  mode, 
-                                  messageSize,
-                                  numMemoryBlocks,
-                                  numContiguousMessages,
-                                  dataFileName,
-                                  numTotalMessages,
-                                  messageDelayTime,
-                                  rdmaDeviceName,
-                                  rdmaPort,
-                                  gidIndex,
-                                  identifierFileName,
-                                  metricURL,
-                                  numMetricAveraging)
+                                mode, 
+                                messageSize,
+                                numMemoryBlocks,
+                                numContiguousMessages,
+                                dataFileName,
+                                numTotalMessages,
+                                messageDelayTime,
+                                rdmaDeviceName,
+                                rdmaPort,
+                                gidIndex,
+                                #identifierFileName,
+                                metricURL,
+                                numMetricAveraging)
     
     transmitter_psn = transmitter.getPacketSequenceNumber()
     transmitter_qpn = transmitter.getQueuePairNumber()
@@ -217,7 +217,7 @@ def be_transmitter(values):
     transmitter.setGidAddress(receiver_gid)
     transmitter.setLocalIdentifier(receiver_lid)
     
-    transmitter.setupRdma()
+    transmitter.setupRdma(identifierFileName)
     
     msg = np.zeros(values.msg_size)
     # for rdma mode, the loop stops at nmsg only when bith numMemoryBlocks = 1 and numContiguousMessages = 1
