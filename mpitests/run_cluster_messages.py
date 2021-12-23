@@ -72,7 +72,7 @@ def be_receiver(values):
     my_transmitters = np.where(receive_ids == rank)[0]
     num_transmitters_sending_to_me = len(my_transmitters)
 
-    log.info(f'Rank {rank} receiver expects data from {num_transmitters_sending_to_me} transmitters:{my_transmitters}')
+    log.info(f'Rank {rank} receiver expects data from {num_transmitters_sending_to_me} transmitters: {my_transmitters}')
 
     # Setup rdma receiver
     mode = runMode.RECV_MODE
@@ -95,14 +95,14 @@ def be_receiver(values):
                                   metricURL,
                                   numMetricAveraging)
     
-    #psn = rdma_receiver.getPacketSequenceNumber()
-    #qpn = rdma_receiver.getQueuePairNumber()
-    #gid = np.frombuffer(rdma_receiver.getGidAddress(), dtype=np.uint8)
-    #lid = rdma_receiver.getLocalIdentifier()
-    #receiver_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
-    #                 'gid': gid, 'lid':lid}
+    psn = rdma_receiver.getPacketSequenceNumber()
+    qpn = rdma_receiver.getQueuePairNumber()
+    gid = np.frombuffer(rdma_receiver.getGidAddress(), dtype=np.uint8)
+    lid = rdma_receiver.getLocalIdentifier()
+    receiver_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
+                     'gid': gid, 'lid':lid}
 
-    receiver_info = {}
+    #receiver_info = {}
     
     # Send info to my transmitters
     status = MPI.Status()
@@ -152,35 +152,35 @@ def be_transmitter(values):
     receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
     log.info(f'Got receiver info {receiver_info} from receiver with rank={status.Get_source()} tag={status.Get_tag()}')
     
-    ## Setup rdma transmitter 
-    #mode = runMode.SEND_MODE
-    #rdmaDeviceName = None #"mlx5_1"
-    #rdmaPort = 1
-    #gidIndex = -1
-    #
-    #rdma_transmitter = RdmaTransport(requestLogLevel, 
-    #                              mode, 
-    #                              messageSize,
-    #                              numMemoryBlocks,
-    #                              numContiguousMessages,
-    #                              dataFileName,
-    #                              numTotalMessages,
-    #                              messageDelayTime,
-    #                              rdmaDeviceName,
-    #                              rdmaPort,
-    #                              gidIndex,
-    #                              identifierFileName,
-    #                              metricURL,
-    #                              numMetricAveraging)
+    # Setup rdma transmitter 
+    mode = runMode.SEND_MODE
+    rdmaDeviceName = None #"mlx5_1"
+    rdmaPort = 1
+    gidIndex = -1
     
-    #psn = rdma_transmitter.getPacketSequenceNumber()
-    #qpn = rdma_transmitter.getQueuePairNumber()
-    #gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
-    #lid = rdma_transmitter.getLocalIdentifier()
-    #transmitter_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
-    #                 'gid': gid, 'lid':lid}
+    rdma_transmitter = RdmaTransport(requestLogLevel, 
+                                  mode, 
+                                  messageSize,
+                                  numMemoryBlocks,
+                                  numContiguousMessages,
+                                  dataFileName,
+                                  numTotalMessages,
+                                  messageDelayTime,
+                                  rdmaDeviceName,
+                                  rdmaPort,
+                                  gidIndex,
+                                  identifierFileName,
+                                  metricURL,
+                                  numMetricAveraging)
+    
+    psn = rdma_transmitter.getPacketSequenceNumber()
+    qpn = rdma_transmitter.getQueuePairNumber()
+    gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
+    lid = rdma_transmitter.getLocalIdentifier()
+    transmitter_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
+                     'gid': gid, 'lid':lid}
 
-    transmitter_info = {}
+    #transmitter_info = {}
     log.info(f'Sending transmitter info {transmitter_info} to a receiver with rank {receiver_rank}')
     world.send(transmitter_info, dest=int(receiver_rank), tag=1)
     
