@@ -95,12 +95,12 @@ def be_receiver(values):
                                   metricURL,
                                   numMetricAveraging)
     
-    psn = rdma_receiver.getPacketSequenceNumber()
-    qpn = rdma_receiver.getQueuePairNumber()
-    gid = np.frombuffer(rdma_receiver.getGidAddress(), dtype=np.uint8)
-    lid = rdma_receiver.getLocalIdentifier()
-    receiver_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
-                     'gid': gid, 'lid':lid}
+    receiver_psn = rdma_receiver.getPacketSequenceNumber()
+    receiver_qpn = rdma_receiver.getQueuePairNumber()
+    receiver_gid = np.frombuffer(rdma_receiver.getGidAddress(), dtype=np.uint8)
+    receiver_lid = rdma_receiver.getLocalIdentifier()
+    receiver_info = {'rank':rank, 'psn':receiver_psn, 'qpn': receiver_qpn,
+                     'gid': receiver_gid, 'lid':receiver_lid}
 
     # Send info to my transmitters
     status = MPI.Status()
@@ -114,6 +114,11 @@ def be_receiver(values):
         transmitter_rank = tx + values.nrx
         transmitter_info = world.recv(source=transmitter_rank, tag=MPI.ANY_TAG, status=status)
         log.info(f'Got transmitter info {transmitter_info} from a transmitter with rank={status.Get_source()} tag={status.Get_tag()}')
+
+        transmitter_psn = transmitter_info['psn']
+        transmitter_qpn = transmitter_info['qpn']
+        transmitter_gid = transmitter_info['gid']
+        transmitter_lid = transmitter_info['lid']
 
     msg = np.zeros(values.msg_size)
     start = time.time()
@@ -149,7 +154,12 @@ def be_transmitter(values):
     status = MPI.Status()
     receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
     log.info(f'Got receiver info {receiver_info} from receiver with rank={status.Get_source()} tag={status.Get_tag()}')
-    
+
+    receiver_psn = receiver_info['psn']
+    receiver_qpn = receiver_info['qpn']
+    receiver_gid = receiver_info['gid']
+    receiver_lid = receiver_info['lid']
+
     # Setup rdma transmitter 
     mode = runMode.SEND_MODE
     rdmaDeviceName = None #"mlx5_1"
@@ -171,12 +181,12 @@ def be_transmitter(values):
                                   metricURL,
                                   numMetricAveraging)
     
-    psn = rdma_transmitter.getPacketSequenceNumber()
-    qpn = rdma_transmitter.getQueuePairNumber()
-    gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
-    lid = rdma_transmitter.getLocalIdentifier()
-    transmitter_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
-                     'gid': gid, 'lid':lid}
+    transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
+    transmitter_qpn = rdma_transmitter.getQueuePairNumber()
+    transmitter_gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
+    transmitter_lid = rdma_transmitter.getLocalIdentifier()
+    transmitter_info = {'rank':rank, 'psn':transmitter_psn, 'qpn': transmitter_qpn,
+                        'gid': transmitter_gid, 'lid':transmitter_lid}
 
     log.info(f'Sending transmitter info {transmitter_info} to a receiver with rank {receiver_rank}')
     world.send(transmitter_info, dest=int(receiver_rank), tag=1)
@@ -187,7 +197,6 @@ def be_transmitter(values):
         if values.method == 'mpi':
             world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
         
-
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
