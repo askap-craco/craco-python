@@ -127,16 +127,23 @@ def be_receiver(values):
         receivers[tx].setGidAddress(transmitter_gid)
         receivers[tx].setLocalIdentifier(transmitter_lid)
         receivers[tx].setupRdma();
+
         
     msg = np.zeros(values.msg_size)
     start = time.time()
+    # for rdma mode, the loop stops at nmsg only when bith numMemoryBlocks = 1 and numContiguousMessages = 1
     for imsg in range(values.nmsg):
         # TODO: extra loop over the number of transmitters I'm exxpecting
-        for imsg2 in range(num_transmitters_sending_to_me):
+        for tx in range(num_transmitters_sending_to_me):
             if values.method == 'mpi':
                 world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
                 log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
-
+            if values.method == 'rdma':
+                receivers[tx].issueRequests()
+                receivers[tx].pollRequests()
+                numCompletionsFound = receivers[tx].get_numCompletionsFound()
+                workCompletions = receivers[tx].get_workCompletions()
+                
     end = time.time()
     interval = end - start
     rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
@@ -213,11 +220,17 @@ def be_transmitter(values):
     transmitter.setupRdma()
     
     msg = np.zeros(values.msg_size)
+    # for rdma mode, the loop stops at nmsg only when bith numMemoryBlocks = 1 and numContiguousMessages = 1
     for imsg in range(values.nmsg):
         log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
         if values.method == 'mpi':
             world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
-        
+        if values.method == 'rdma':
+            transmitter.issueRequests()
+            transmitter.pollRequests()
+            numCompletionsFound = transmitter.get_numCompletionsFound()
+            workCompletions = transmitter.get_workCompletions()
+                
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
