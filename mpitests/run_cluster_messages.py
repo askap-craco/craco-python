@@ -102,8 +102,6 @@ def be_receiver(values):
     receiver_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
                      'gid': gid, 'lid':lid}
 
-    #receiver_info = {}
-    
     # Send info to my transmitters
     status = MPI.Status()
     for tx in my_transmitters:
@@ -180,7 +178,6 @@ def be_transmitter(values):
     transmitter_info = {'rank':rank, 'psn':psn, 'qpn': qpn,
                      'gid': gid, 'lid':lid}
 
-    #transmitter_info = {}
     log.info(f'Sending transmitter info {transmitter_info} to a receiver with rank {receiver_rank}')
     world.send(transmitter_info, dest=int(receiver_rank), tag=1)
     
