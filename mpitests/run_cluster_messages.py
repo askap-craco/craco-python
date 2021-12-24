@@ -12,7 +12,6 @@ import os
 import sys
 #import coloredlogs
 import logging
-#from mpi4py import MPI
 import mpi4py
 import time
 import random
@@ -78,6 +77,19 @@ def be_receiver(values):
     log.info(f'Rank {rank} receiver expects data from {num_transmitters_sending_to_me} transmitters: {my_transmitters}')
 
     status = MPI.Status()
+
+    # Receive messages
+    msg = np.zeros(values.msg_size)
+    start = time.time()
+    
+    if values.method == 'mpi':
+        for imsg in range(values.nmsg):
+            # TODO: extra loop over the number of transmitters I'm exxpecting
+            for tx in range(num_transmitters_sending_to_me):
+                world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
+                log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
+
+    world.Barrier()
     if values.method == 'rdma':
         # Setup rdma receiver
         mode = runMode.RECV_MODE
@@ -99,7 +111,6 @@ def be_receiver(values):
                                           rdmaDeviceName,
                                           rdmaPort,
                                           gidIndex,
-                                          #identifierFileName,
                                           metricURL,
                                           numMetricAveraging)
             rdma_receivers.append(rdma_receiver)
@@ -133,20 +144,6 @@ def be_receiver(values):
             rdma_receivers[tx].setLocalIdentifier(rdma_transmitter_lid)
             rdma_receivers[tx].setupRdma(identifierFileName);
 
-    # Receive messages
-    msg = np.zeros(values.msg_size)
-    start = time.time()
-    # for rdma mode, the loop stops at nmsg only when bith numMemoryBlocks = 1 and numContiguousMessages = 1
-    world.Barrier()
-    
-    if values.method == 'mpi':
-        for imsg in range(values.nmsg):
-            # TODO: extra loop over the number of transmitters I'm exxpecting
-            for tx in range(num_transmitters_sending_to_me):
-                world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
-                log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
-
-    if values.method == 'rdma':
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
             rdma_receivers[tx].issueRequests()
@@ -195,6 +192,15 @@ def be_transmitter(values):
 
     # Wait for info from my receiver
     status = MPI.Status()
+    # Get messages now
+    msg = np.zeros(values.msg_size)
+    world.Barrier()
+
+    if values.method == 'mpi':
+        for imsg in range(values.nmsg):
+            log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
+            world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
+
     if values.method == 'rdma':
         rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
         log.info(f'Got rdma receiver info {rdma_receiver_info} from rdma receiver with rank={status.Get_source()} tag={status.Get_tag()}')
@@ -221,7 +227,6 @@ def be_transmitter(values):
                                          rdmaDeviceName,
                                          rdmaPort,
                                          gidIndex,
-                                         #identifierFileName,
                                          metricURL,
                                          numMetricAveraging)
         
@@ -248,16 +253,6 @@ def be_transmitter(values):
         
         rdma_transmitter.setupRdma(identifierFileName)
 
-    # Get messages now
-    msg = np.zeros(values.msg_size)
-    # for rdma mode, the loop stops at nmsg only when bith numMemoryBlocks = 1 and numContiguousMessages = 1
-    world.Barrier()
-    if values.method == 'mpi':
-        for imsg in range(values.nmsg):
-            log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
-            world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
-
-    if values.method == 'rdma':
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
             rdma_memory = rdma_transmitter.get_memoryview(0)
