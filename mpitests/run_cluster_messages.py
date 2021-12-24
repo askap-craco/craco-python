@@ -175,7 +175,6 @@ def be_receiver(values):
     interval = end - start
     rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
     log.info(f'Rank {rank} receiver received data at {rate} Gbps')
-    print("ARE WE HERE YET???")
 
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
@@ -289,7 +288,6 @@ def be_transmitter(values):
                 #print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
                 
             time.sleep(1)
-        #print("ARE WE HERE YET????")
         
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
