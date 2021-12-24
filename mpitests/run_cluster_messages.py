@@ -31,7 +31,8 @@ log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
 
-requestLogLevel = logType.LOG_DEBUG
+#requestLogLevel = logType.LOG_DEBUG
+requestLogLevel = logType.LOG_INFO
 messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
@@ -42,6 +43,8 @@ identifierFileName = None
 metricURL = None
 numMetricAveraging = 0
 
+ndataPrint = 10
+            
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 '''
@@ -145,7 +148,7 @@ def be_receiver(values):
 
     if values.method == 'rdma':
         numCompletionsTotal = 0
-        while numCompletionsTotal < numTotalMessages:
+        while numCompletionsTotal < values.nmsg:
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
@@ -155,10 +158,19 @@ def be_receiver(values):
             
             workCompletions = rdma_receivers[tx].get_workCompletions()
             
-            ndata_print = 10
-            rdma_memory = rdma_receivers[tx].get_memoryview(0)
-            rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
-            #print(f'The first {ndata_print} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {sum(rdma_buffer)}, {numCompletionsFound}, {workCompletions}')
+            for i in range(numCompletionsFound%numMemoryBlocks):
+                index = workCompletions[i].wr_id
+
+                # Get data for buffer regions
+                block_index = index//numContiguousMessages
+                rdma_memory = rdma_receivers[tx].get_memoryview(block_index)
+                rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
+
+                # now it is data for each message
+                message_index = index%numContiguousMessages
+                data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
+                
+                print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
                 
     end = time.time()
     interval = end - start
@@ -198,30 +210,30 @@ def be_transmitter(values):
         rdmaPort = 1
         gidIndex = -1
         
-        transmitter = RdmaTransport(requestLogLevel, 
-                                    mode, 
-                                    messageSize,
-                                    numMemoryBlocks,
-                                    numContiguousMessages,
-                                    dataFileName,
-                                    numTotalMessages,
-                                    messageDelayTime,
-                                    rdmaDeviceName,
-                                    rdmaPort,
-                                    gidIndex,
-                                    #identifierFileName,
-                                    metricURL,
-                                    numMetricAveraging)
+        rdma_transmitter = RdmaTransport(requestLogLevel, 
+                                         mode, 
+                                         messageSize,
+                                         numMemoryBlocks,
+                                         numContiguousMessages,
+                                         dataFileName,
+                                         numTotalMessages,
+                                         messageDelayTime,
+                                         rdmaDeviceName,
+                                         rdmaPort,
+                                         gidIndex,
+                                         #identifierFileName,
+                                         metricURL,
+                                         numMetricAveraging)
         
-        transmitter_psn = transmitter.getPacketSequenceNumber()
-        transmitter_qpn = transmitter.getQueuePairNumber()
-        transmitter_gid = np.frombuffer(transmitter.getGidAddress(), dtype=np.uint8)
-        transmitter_lid = transmitter.getLocalIdentifier()
-        transmitter_info = {'rank':rank, 'psn':transmitter_psn, 'qpn': transmitter_qpn,
-                            'gid': transmitter_gid, 'lid':transmitter_lid}
+        rdma_transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
+        rdma_transmitter_qpn = rdma_transmitter.getQueuePairNumber()
+        rdma_transmitter_gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
+        rdma_transmitter_lid = rdma_transmitter.getLocalIdentifier()
+        rdma_transmitter_info = {'rank':rank, 'psn':rdma_transmitter_psn, 'qpn': rdma_transmitter_qpn,
+                            'gid': rdma_transmitter_gid, 'lid':rdma_transmitter_lid}
         
-        log.info(f'Sending rdma transmitter info {transmitter_info} to a rdma receiver with rank {receiver_rank}')
-        world.send(transmitter_info, dest=int(receiver_rank), tag=1)
+        log.info(f'Sending rdma transmitter info {rdma_transmitter_info} to a rdma receiver with rank {receiver_rank}')
+        world.send(rdma_transmitter_info, dest=int(receiver_rank), tag=1)
         
         # now setup remote infromation and finish rdma setup
         rdma_receiver_psn = rdma_receiver_info['psn']
@@ -229,12 +241,12 @@ def be_transmitter(values):
         rdma_receiver_gid = rdma_receiver_info['gid']
         rdma_receiver_lid = rdma_receiver_info['lid']
         
-        transmitter.setPacketSequenceNumber(rdma_receiver_psn)
-        transmitter.setQueuePairNumber(rdma_receiver_qpn)
-        transmitter.setGidAddress(rdma_receiver_gid)
-        transmitter.setLocalIdentifier(rdma_receiver_lid)
+        rdma_transmitter.setPacketSequenceNumber(rdma_receiver_psn)
+        rdma_transmitter.setQueuePairNumber(rdma_receiver_qpn)
+        rdma_transmitter.setGidAddress(rdma_receiver_gid)
+        rdma_transmitter.setLocalIdentifier(rdma_receiver_lid)
         
-        transmitter.setupRdma(identifierFileName)
+        rdma_transmitter.setupRdma(identifierFileName)
 
     # Get messages now
     msg = np.zeros(values.msg_size)
@@ -247,25 +259,34 @@ def be_transmitter(values):
 
     if values.method == 'rdma':
         numCompletionsTotal = 0
-        while numCompletionsTotal < numTotalMessages:
-            ndata_print = 10
-            
-            rdma_memory = transmitter.get_memoryview(0)
-            rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
+        while numCompletionsTotal < values.nmsg:
+            rdma_memory = rdma_transmitter.get_memoryview(0)
+            rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) 
             rdma_buffer[:] = 1
-            print(f'BEFORE:\tThe first {ndata_print} data message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndata_print]}')
+            print(f'BEFORE:\tThe first {ndataPrint} data message from rdma transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndataPrint]}')
             
-            transmitter.issueRequests()
-            #transmitter.waitRequestsCompletion()
-            transmitter.pollRequests()
-            numCompletionsFound = transmitter.get_numCompletionsFound()
+            rdma_transmitter.issueRequests()
+            #rdma_transmitter.waitRequestsCompletion()
+            rdma_transmitter.pollRequests()
+            numCompletionsFound = rdma_transmitter.get_numCompletionsFound()
             numCompletionsTotal += numCompletionsFound
             
-            workCompletions = transmitter.get_workCompletions()
+            workCompletions = rdma_transmitter.get_workCompletions()
 
-            #rdma_memory = transmitter.get_memoryview(0)
-            #rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
-            print(f'The first {ndata_print} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndata_print]}')
+            for i in range(numCompletionsFound%numMemoryBlocks):
+                index = workCompletions[i].wr_id
+
+                # Get data for buffer regions
+                block_index = index//numContiguousMessages
+                rdma_memory = rdma_transmitter.get_memoryview(block_index)
+                rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
+
+                # now it is data for each message
+                message_index = index%numContiguousMessages
+                data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
+                
+                print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
+
             time.sleep(0.5)
             
 def _main():
@@ -306,9 +327,6 @@ def _main():
     else:
         be_transmitter(values)
 
-
-    
-    
-
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --nmsg 2000
 if __name__ == '__main__':
     _main()
