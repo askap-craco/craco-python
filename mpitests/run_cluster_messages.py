@@ -89,7 +89,6 @@ def be_receiver(values):
                 world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
                 log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
 
-    world.Barrier()
     if values.method == 'rdma':
         # Setup rdma receiver
         mode = runMode.RECV_MODE
@@ -144,6 +143,7 @@ def be_receiver(values):
             rdma_receivers[tx].setLocalIdentifier(rdma_transmitter_lid)
             rdma_receivers[tx].setupRdma(identifierFileName);
 
+        world.Barrier()
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
             rdma_receivers[tx].issueRequests()
@@ -155,7 +155,7 @@ def be_receiver(values):
             
             workCompletions = rdma_receivers[tx].get_workCompletions()
             
-            for i in range(numCompletionsFound%numMemoryBlocks):
+            for i in range(numCompletionsFound):
                 index = workCompletions[i].wr_id
 
                 # Get data for buffer regions
@@ -166,14 +166,16 @@ def be_receiver(values):
                 # now it is data for each message
                 message_index = index%numContiguousMessages
                 data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
+
+                print(f"receiver {rank} data index {i}")
                 
-                print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
+                #print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
                 
     end = time.time()
     interval = end - start
     rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
     log.info(f'Rank {rank} receiver received data at {rate} Gbps')
-        
+    print("ARE WE HERE YET???")
 
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
@@ -194,7 +196,6 @@ def be_transmitter(values):
     status = MPI.Status()
     # Get messages now
     msg = np.zeros(values.msg_size)
-    world.Barrier()
 
     if values.method == 'mpi':
         for imsg in range(values.nmsg):
@@ -253,37 +254,43 @@ def be_transmitter(values):
         
         rdma_transmitter.setupRdma(identifierFileName)
 
+        world.Barrier()
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
+
+            # The setup here will not be strightforward
             rdma_memory = rdma_transmitter.get_memoryview(0)
             rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) 
             rdma_buffer[:] = 1
-            print(f'BEFORE:\tThe first {ndataPrint} data message from rdma transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndataPrint]}')
+            #print(f'BEFORE:\tThe first {ndataPrint} data message from rdma transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndataPrint]}')
             
             rdma_transmitter.issueRequests()
-            #rdma_transmitter.waitRequestsCompletion()
+            rdma_transmitter.waitRequestsCompletion()
             rdma_transmitter.pollRequests()
             numCompletionsFound = rdma_transmitter.get_numCompletionsFound()
             numCompletionsTotal += numCompletionsFound
-            
+
+            print(f'{numCompletionsTotal} on transmitter {transmitter_rank}, the last numCompletionsFound is {numCompletionsFound}')
             workCompletions = rdma_transmitter.get_workCompletions()
 
-            for i in range(numCompletionsFound%numMemoryBlocks):
+            for i in range(numCompletionsFound):
                 index = workCompletions[i].wr_id
-
+            
                 # Get data for buffer regions
                 block_index = index//numContiguousMessages
                 rdma_memory = rdma_transmitter.get_memoryview(block_index)
                 rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
-
+            
                 # now it is data for each message
                 message_index = index%numContiguousMessages
                 data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
-                
-                print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
 
-            time.sleep(0.5)
-            
+                #print(f"why here we have problem {i}")
+                #print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
+                
+            time.sleep(1)
+        #print("ARE WE HERE YET????")
+        
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
