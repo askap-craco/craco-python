@@ -22,7 +22,6 @@ from mpi4py import MPI
 
 from rdma_transport import RdmaTransport
 from rdma_transport import runMode
-from rdma_transport import logType
 from rdma_transport import ibv_wc
 
 # mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
@@ -31,23 +30,20 @@ from rdma_transport import ibv_wc
 
 # cpu binding
 
+# numCompltions has numMissing included??? check RDMAapi.c to figure out
+
 log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
 
-#requestLogLevel = logType.LOG_DEBUG
-requestLogLevel = logType.LOG_INFO
 messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
 numRepeat = 2000
-dataFileName = None
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 300
 identifierFileName = None 
-metricURL = None
-numMetricAveraging = 0
 
 ndataPrint = 10
             
@@ -115,19 +111,15 @@ def create_rdma_receivers(values, my_transmitters):
     # Send info to my transmitters
     rdma_receivers = []
     for tx in my_transmitters:
-        rdma_receiver = RdmaTransport(requestLogLevel, 
-                                      mode, 
+        rdma_receiver = RdmaTransport(mode, 
                                       messageSize,
                                       numMemoryBlocks,
                                       numContiguousMessages,
-                                      dataFileName,
                                       numTotalMessages,
                                       messageDelayTimeRecv,
                                       rdmaDeviceName,
                                       rdmaPort,
-                                      gidIndex,
-                                      metricURL,
-                                      numMetricAveraging)
+                                      gidIndex)
         rdma_receivers.append(rdma_receiver)
 
     return rdma_receivers
@@ -281,19 +273,15 @@ def be_transmitter(values):
         rdmaPort = 1
         gidIndex = -1
         
-        rdma_transmitter = RdmaTransport(requestLogLevel, 
-                                         mode, 
+        rdma_transmitter = RdmaTransport(mode, 
                                          messageSize,
                                          numMemoryBlocks,
                                          numContiguousMessages,
-                                         dataFileName,
                                          numTotalMessages,
                                          messageDelayTimeSend,
                                          rdmaDeviceName,
                                          rdmaPort,
-                                         gidIndex,
-                                         metricURL,
-                                         numMetricAveraging)
+                                         gidIndex)
         
         rdma_transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
         rdma_transmitter_qpn = rdma_transmitter.getQueuePairNumber()
