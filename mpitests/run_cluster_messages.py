@@ -192,7 +192,6 @@ def be_receiver(values):
         rdma_receivers = create_rdma_receivers(values, my_transmitters)
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
-
         rdma_buffers = setup_rdma_buffers(values, rdma_receivers, my_transmitters)
     
         world.Barrier()
@@ -324,7 +323,12 @@ def be_transmitter(values):
         for iblock in range(numMemoryBlocks):
             rdma_memory = rdma_transmitter.get_memoryview(iblock)
             rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
-            
+
+
+
+        # need to sleep here
+        time.sleep(1)
+        
         world.Barrier()
         start = time.time()
         
