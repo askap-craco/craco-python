@@ -102,7 +102,34 @@ def transmit_with_mpi(values, status, receiver_rank, transmitter_rank):
     rate = msg.itemsize*msg.size*values.nmsg*8.E-9/float(interval)
     log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
     log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+
+def create_rdma_receivers(values, my_transmitters):
+    # Setup rdma receiver
+    mode = runMode.RECV_MODE
+    rdmaDeviceName = None #"mlx5_1"
+    rdmaPort = 1
+    gidIndex = -1
     
+    # Send info to my transmitters
+    rdma_receivers = []
+    for tx in my_transmitters:
+        rdma_receiver = RdmaTransport(requestLogLevel, 
+                                      mode, 
+                                      messageSize,
+                                      numMemoryBlocks,
+                                      numContiguousMessages,
+                                      dataFileName,
+                                      numTotalMessages,
+                                      messageDelayTimeRecv,
+                                      rdmaDeviceName,
+                                      rdmaPort,
+                                      gidIndex,
+                                      metricURL,
+                                      numMetricAveraging)
+        rdma_receivers.append(rdma_receiver)
+
+    return rdma_receivers
+
 def be_receiver(values):
     receivers = world.Split(1, rank)
     transmitters = world.Split(0, rank)
@@ -119,34 +146,36 @@ def be_receiver(values):
         receive_with_mpi(values, status, num_transmitters)
         
     if values.method == 'rdma':
-        # Setup rdma receiver
-        mode = runMode.RECV_MODE
-        rdmaDeviceName = None #"mlx5_1"
-        rdmaPort = 1
-        gidIndex = -1
-        
-        # Send info to my transmitters
-        rdma_receivers = []
+        rdma_receivers = create_rdma_receivers(values, my_transmitters)
+        #
+        ## Setup rdma receiver
+        #mode = runMode.RECV_MODE
+        #rdmaDeviceName = None #"mlx5_1"
+        #rdmaPort = 1
+        #gidIndex = -1
+        #
+        ## Send info to my transmitters
+        #rdma_receivers = []
         for tx in my_transmitters:
-            rdma_receiver = RdmaTransport(requestLogLevel, 
-                                          mode, 
-                                          messageSize,
-                                          numMemoryBlocks,
-                                          numContiguousMessages,
-                                          dataFileName,
-                                          numTotalMessages,
-                                          messageDelayTimeRecv,
-                                          rdmaDeviceName,
-                                          rdmaPort,
-                                          gidIndex,
-                                          metricURL,
-                                          numMetricAveraging)
-            rdma_receivers.append(rdma_receiver)
+            #rdma_receiver = RdmaTransport(requestLogLevel, 
+            #                              mode, 
+            #                              messageSize,
+            #                              numMemoryBlocks,
+            #                              numContiguousMessages,
+            #                              dataFileName,
+            #                              numTotalMessages,
+            #                              messageDelayTimeRecv,
+            #                              rdmaDeviceName,
+            #                              rdmaPort,
+            #                              gidIndex,
+            #                              metricURL,
+            #                              numMetricAveraging)
+            #rdma_receivers.append(rdma_receiver)
             
-            rdma_receiver_psn = rdma_receiver.getPacketSequenceNumber()
-            rdma_receiver_qpn = rdma_receiver.getQueuePairNumber()
-            rdma_receiver_gid = np.frombuffer(rdma_receiver.getGidAddress(), dtype=np.uint8)
-            rdma_receiver_lid = rdma_receiver.getLocalIdentifier()
+            rdma_receiver_psn = rdma_receivers[tx].getPacketSequenceNumber()
+            rdma_receiver_qpn = rdma_receivers[tx].getQueuePairNumber()
+            rdma_receiver_gid = np.frombuffer(rdma_receivers[tx].getGidAddress(), dtype=np.uint8)
+            rdma_receiver_lid = rdma_receivers[tx].getLocalIdentifier()
             rdma_receiver_info = {'rank':rank, 'psn':rdma_receiver_psn, 'qpn': rdma_receiver_qpn,
                                   'gid': rdma_receiver_gid, 'lid':rdma_receiver_lid}
             
