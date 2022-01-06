@@ -202,7 +202,7 @@ def be_receiver(values):
         numCompletionsTotal = 0
         tx = 0
         while numMessagesTotal < values.nmsg:
-            #print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
+            #print(f'Receiver {numCompletionsTotal} + {numMissingTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
