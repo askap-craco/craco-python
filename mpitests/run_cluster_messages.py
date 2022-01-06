@@ -171,6 +171,9 @@ def be_receiver(values):
         tx = 0
         while numMessagesTotal < values.nmsg:
             #print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
+            #time.sleep(1)
+            #time.sleep(1E-3)
+            
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
@@ -206,7 +209,10 @@ def be_receiver(values):
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
-        log.info(f'message loss rate is {numMissingTotal/float(numMessagesTotal)}')
+        log.info(f'Rank {rank} receiver, message missed is {numMissingTotal}')
+        log.info(f'Rank {rank} receiver, message received is {numCompletionsTotal}')
+        log.info(f'Rank {rank} receiver, message total is {values.nmsg}')
+        log.info(f'Rank {rank} receiver, message loss rate is {numMissingTotal/float(numMessagesTotal)}')
         
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
@@ -303,7 +309,8 @@ def be_transmitter(values):
         
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
-
+            #time.sleep(1E-3)
+            
             # The setup here will not be strightforward
             #rdma_memory = rdma_transmitter.get_memoryview(0)
             #rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) 
@@ -343,7 +350,7 @@ def be_transmitter(values):
         rate = messageSize*values.nmsg*8.E-9/float(interval)
         log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
         log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
-
+        
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
