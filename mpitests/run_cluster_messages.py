@@ -161,7 +161,7 @@ def be_receiver(values):
                 # Get data for buffer regions
                 block_index = index//numContiguousMessages
                 rdma_memory = rdma_receivers[tx].get_memoryview(block_index)
-                rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
+                rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) # 163 and 164 will be slow, do it at the begning
 
                 # now it is data for each message
                 message_index = index%numContiguousMessages
