@@ -26,7 +26,8 @@ from rdma_transport import logType
 from rdma_transport import ibv_wc
 
 # mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
-# receiver will hang if there are missed messages
+
+# receiver will hang if there are missed messages, fixed
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +161,7 @@ def be_receiver(values):
         numMissingTotal = 0
         numMessagesTotal = 0
         numCompletionsTotal = 0
+        tx = 0
         while numMessagesTotal < values.nmsg:
             print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
@@ -193,11 +195,15 @@ def be_receiver(values):
                 
     end = time.time()
     interval = end - start
-    #rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
-    #required_rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
-    rate = msg.itemsize*msg.size*numCompletionsTotal*num_transmitters_sending_to_me*8/float(interval)/1e9
+
+    if values.method == 'mpi':
+        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
+    else:
+        rate = messageSize*numCompletionsTotal*num_transmitters_sending_to_me*8/float(interval)/1e9
     log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
-    log.info(f'message loss rate is {numMissingTotal/float(numMessagesTotal)}')
+
+    if values.method == 'rdma':
+        log.info(f'message loss rate is {numMissingTotal/float(numMessagesTotal)}')
         
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
