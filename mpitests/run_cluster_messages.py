@@ -203,9 +203,6 @@ def be_receiver(values):
         tx = 0
         while numMessagesTotal < values.nmsg:
             #print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
-            #time.sleep(1)
-            #time.sleep(1E-3)
-            
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
@@ -219,21 +216,21 @@ def be_receiver(values):
 
             workCompletions = rdma_receivers[tx].get_workCompletions()
             
-            for i in range(numCompletionsFound):
-                index = workCompletions[i].wr_id
-
-                # Get data for buffer regions
-                block_index = index//numContiguousMessages
-                #rdma_memory = rdma_receivers[tx].get_memoryview(block_index)
-                #rdma_buffers = np.frombuffer(rdma_memory, dtype=np.int16) # 163 and 164 will be slow, do it at the begning
-
-                # now it is data for each message
-                message_index = index%numContiguousMessages
-                data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
-
-                #print(f"receiver {rank} data index {i}")
-                
-                #print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffers[data_start_index:data_start_index+ndataPrint]}')
+            #for i in range(numCompletionsFound):
+            #    index = workCompletions[i].wr_id
+            #
+            #    # Get data for buffer regions
+            #    block_index = index//numContiguousMessages
+            #    #rdma_memory = rdma_receivers[tx].get_memoryview(block_index)
+            #    #rdma_buffers = np.frombuffer(rdma_memory, dtype=np.int16) # 163 and 164 will be slow, do it at the begning
+            #
+            #    # now it is data for each message
+            #    message_index = index%numContiguousMessages
+            #    data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
+            #
+            #    #print(f"receiver {rank} data index {i}")
+            #    
+            #    #print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffers[data_start_index:data_start_index+ndataPrint]}')
             
         end = time.time()
         interval = end - start
@@ -323,8 +320,6 @@ def be_transmitter(values):
         for iblock in range(numMemoryBlocks):
             rdma_memory = rdma_transmitter.get_memoryview(iblock)
             rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
-
-
 
         # need to sleep here
         time.sleep(1)
