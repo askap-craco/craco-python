@@ -26,6 +26,8 @@ from rdma_transport import logType
 from rdma_transport import ibv_wc
 
 # mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
+# receiver will hang if there are missed messages
+
 log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
@@ -35,9 +37,11 @@ requestLogLevel = logType.LOG_INFO
 messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
+numRepeat = 200
 dataFileName = None
-numTotalMessages = 2*numMemoryBlocks*numContiguousMessages
-messageDelayTime = 0
+numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
+messageDelayTimeRecv = 0
+messageDelayTimeSend = 0#1000
 identifierFileName = None 
 metricURL = None
 numMetricAveraging = 0
@@ -80,7 +84,6 @@ def be_receiver(values):
 
     # Receive messages
     msg = np.zeros(values.msg_size)
-    start = time.time()
     
     if values.method == 'mpi':
         for imsg in range(values.nmsg):
@@ -106,7 +109,7 @@ def be_receiver(values):
                                           numContiguousMessages,
                                           dataFileName,
                                           numTotalMessages,
-                                          messageDelayTime,
+                                          messageDelayTimeRecv,
                                           rdmaDeviceName,
                                           rdmaPort,
                                           gidIndex,
@@ -151,16 +154,25 @@ def be_receiver(values):
                 rdma_buffer_tx.append(np.frombuffer(rdma_memory, dtype=np.int16))
             rdma_buffer.append(rdma_buffer_tx)
 
+        start = time.time()
         world.Barrier()
+        
+        numMissingTotal = 0
+        numMessagesTotal = 0
         numCompletionsTotal = 0
-        while numCompletionsTotal < values.nmsg:
+        while numMessagesTotal < values.nmsg:
+            print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
 
             numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
+            numMissingFound     = rdma_receivers[tx].get_numMissingFound()
+
             numCompletionsTotal += numCompletionsFound
-            
+            numMissingTotal     += numMissingFound
+            numMessagesTotal    += (numCompletionsFound+numMissingFound)
+
             workCompletions = rdma_receivers[tx].get_workCompletions()
             
             for i in range(numCompletionsFound):
@@ -181,9 +193,12 @@ def be_receiver(values):
                 
     end = time.time()
     interval = end - start
-    rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
-    log.info(f'Rank {rank} receiver received data at {rate} Gbps')
-
+    #rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
+    #required_rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
+    rate = msg.itemsize*msg.size*numCompletionsTotal*num_transmitters_sending_to_me*8/float(interval)/1e9
+    log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
+    log.info(f'message loss rate is {numMissingTotal/float(numMessagesTotal)}')
+        
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
     transmitters = world.Split(0, rank)
@@ -231,7 +246,7 @@ def be_transmitter(values):
                                          numContiguousMessages,
                                          dataFileName,
                                          numTotalMessages,
-                                         messageDelayTime,
+                                         messageDelayTimeSend,
                                          rdmaDeviceName,
                                          rdmaPort,
                                          gidIndex,
