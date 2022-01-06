@@ -71,35 +71,53 @@ world = MPI.COMM_WORLD
 rank = world.Get_rank()
 size = world.Get_size()
 
+def receive_with_mpi(values, status, num_transmitters):
+    # Receive messages
+    msg = np.zeros(values.msg_size)
+    
+    start = time.time()
+    for imsg in range(values.nmsg):
+        # TODO: extra loop over the number of transmitters I'm exxpecting
+        for tx in range(num_transmitters):
+            world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
+            log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
+    end = time.time()
+    
+    interval = end - start
+    rate = msg.itemsize*msg.size*values.nmsg*num_transmitters*8.E-9/float(interval)
+    log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
+    log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
+
+def transmit_with_mpi(values, status, receiver_rank, transmitter_rank):
+    # Get messages now
+    msg = np.zeros(values.msg_size)
+    
+    start = time.time()
+    for imsg in range(values.nmsg):
+        log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
+        world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
+        
+    end = time.time()
+    interval = end - start
+    rate = msg.itemsize*msg.size*values.nmsg*8.E-9/float(interval)
+    log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
+    log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+    
 def be_receiver(values):
     receivers = world.Split(1, rank)
     transmitters = world.Split(0, rank)
     transmitter_ids = np.arange(values.nlink)
     receive_ids = transmitter_ids % values.nrx
     my_transmitters = np.where(receive_ids == rank)[0]
-    num_transmitters_sending_to_me = len(my_transmitters)
+    num_transmitters = len(my_transmitters)
 
-    log.info(f'Rank {rank} receiver expects data from {num_transmitters_sending_to_me} transmitters: {my_transmitters}')
+    log.info(f'Rank {rank} receiver expects data from {num_transmitters} transmitters: {my_transmitters}')
 
     status = MPI.Status()
 
     if values.method == 'mpi':
-        # Receive messages
-        msg = np.zeros(values.msg_size)
-
-        start = time.time()
-        for imsg in range(values.nmsg):
-            # TODO: extra loop over the number of transmitters I'm exxpecting
-            for tx in range(num_transmitters_sending_to_me):
-                world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
-                log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
-        end = time.time()
+        receive_with_mpi(values, status, num_transmitters)
         
-        interval = end - start
-        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
-        log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
-        log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
-                
     if values.method == 'rdma':
         # Setup rdma receiver
         mode = runMode.RECV_MODE
@@ -205,7 +223,7 @@ def be_receiver(values):
             
         end = time.time()
         interval = end - start
-        rate = messageSize*numCompletionsTotal*num_transmitters_sending_to_me*8.E-9/float(interval)
+        rate = messageSize*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
@@ -233,19 +251,7 @@ def be_transmitter(values):
     status = MPI.Status()
 
     if values.method == 'mpi':
-        # Get messages now
-        msg = np.zeros(values.msg_size)
-
-        start = time.time()
-        for imsg in range(values.nmsg):
-            log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
-            world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
-
-        end = time.time()
-        interval = end - start
-        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
-        log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
-        log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+        transmit_with_mpi(values, status, receiver_rank, transmitter_rank)
         
     if values.method == 'rdma':
         rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
@@ -345,8 +351,6 @@ def be_transmitter(values):
         end = time.time()
         interval = end - start
 
-        #if values.method == 'mpi':
-        #    rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
         rate = messageSize*values.nmsg*8.E-9/float(interval)
         log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
         log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
