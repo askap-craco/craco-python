@@ -42,7 +42,7 @@ numRepeat = 2000
 dataFileName = None
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
-messageDelayTimeSend = 0#1000
+messageDelayTimeSend = 0
 identifierFileName = None 
 metricURL = None
 numMetricAveraging = 0
@@ -83,16 +83,23 @@ def be_receiver(values):
 
     status = MPI.Status()
 
-    # Receive messages
-    msg = np.zeros(values.msg_size)
-    
     if values.method == 'mpi':
+        # Receive messages
+        msg = np.zeros(values.msg_size)
+
+        start = time.time()
         for imsg in range(values.nmsg):
             # TODO: extra loop over the number of transmitters I'm exxpecting
             for tx in range(num_transmitters_sending_to_me):
                 world.Recv(msg, MPI.ANY_SOURCE, MPI.ANY_TAG, status)
                 log.debug(f'Receviver with {rank} got data from transmitter={status.Get_source()} tag={status.Get_tag()} mean={msg.mean()}')
-
+        end = time.time()
+        
+        interval = end - start
+        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
+        log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
+        log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
+                
     if values.method == 'rdma':
         # Setup rdma receiver
         mode = runMode.RECV_MODE
@@ -155,15 +162,15 @@ def be_receiver(values):
                 rdma_buffer_tx.append(np.frombuffer(rdma_memory, dtype=np.int16))
             rdma_buffer.append(rdma_buffer_tx)
 
-        start = time.time()
         world.Barrier()
+        start = time.time()
         
         numMissingTotal = 0
         numMessagesTotal = 0
         numCompletionsTotal = 0
         tx = 0
         while numMessagesTotal < values.nmsg:
-            print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
+            #print(f'Receiver {numCompletionsTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
@@ -192,17 +199,13 @@ def be_receiver(values):
                 #print(f"receiver {rank} data index {i}")
                 
                 #print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
-                
-    end = time.time()
-    interval = end - start
-
-    if values.method == 'mpi':
-        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8/float(interval)/1e9
-    else:
-        rate = messageSize*numCompletionsTotal*num_transmitters_sending_to_me*8/float(interval)/1e9
-    log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
-
-    if values.method == 'rdma':
+            
+        end = time.time()
+        interval = end - start
+        rate = messageSize*numCompletionsTotal*num_transmitters_sending_to_me*8.E-9/float(interval)
+        
+        log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
+        log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
         log.info(f'message loss rate is {numMissingTotal/float(numMessagesTotal)}')
         
 def be_transmitter(values):
@@ -222,14 +225,22 @@ def be_transmitter(values):
 
     # Wait for info from my receiver
     status = MPI.Status()
-    # Get messages now
-    msg = np.zeros(values.msg_size)
 
     if values.method == 'mpi':
+        # Get messages now
+        msg = np.zeros(values.msg_size)
+
+        start = time.time()
         for imsg in range(values.nmsg):
             log.debug(f'Sending msg {imsg} from transmitter {transmitter_rank} to receiver {receiver_rank}')
             world.Send(msg+imsg, dest=receiver_rank, tag=transmitter_rank)
 
+        end = time.time()
+        interval = end - start
+        rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
+        log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
+        log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+        
     if values.method == 'rdma':
         rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
         log.info(f'Got rdma receiver info {rdma_receiver_info} from rdma receiver with rank={status.Get_source()} tag={status.Get_tag()}')
@@ -288,6 +299,8 @@ def be_transmitter(values):
             rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
             
         world.Barrier()
+        start = time.time()
+        
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
 
@@ -322,7 +335,15 @@ def be_transmitter(values):
                 #print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
                 
             #time.sleep(1)
-        
+        end = time.time()
+        interval = end - start
+
+        #if values.method == 'mpi':
+        #    rate = msg.itemsize*msg.size*values.nmsg*num_transmitters_sending_to_me*8.E-9/float(interval)
+        rate = messageSize*values.nmsg*8.E-9/float(interval)
+        log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
+        log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
