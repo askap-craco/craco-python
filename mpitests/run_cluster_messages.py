@@ -41,6 +41,7 @@ numMemoryBlocks = 10
 numContiguousMessages = 100
 #numRepeat = 20000
 numRepeat = 200
+#numRepeat = 200
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
