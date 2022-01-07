@@ -24,7 +24,7 @@ from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536
 
 # receiver will hang if there are missed messages, fixed
 
@@ -36,20 +36,16 @@ log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
 
-messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
 #numRepeat = 20000
 #numRepeat = 2000
 #numRepeat = 200
 #numRepeat = 20
-numRepeat = 1
-numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
-identifierFileName = None 
 
-ndataPrint = 10
+identifierFileName = None 
             
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
@@ -105,7 +101,7 @@ def transmit_with_mpi(values, status, receiver_rank, transmitter_rank):
     log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
     log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
 
-def create_rdma_receivers(my_transmitters):
+def create_rdma_receivers(values, my_transmitters):
     # Setup rdma receiver
     mode = runMode.RECV_MODE
     rdmaDeviceName = None #"mlx5_1"
@@ -116,10 +112,10 @@ def create_rdma_receivers(my_transmitters):
     rdma_receivers = []
     for tx in my_transmitters:
         rdma_receiver = RdmaTransport(mode, 
-                                      messageSize,
+                                      values.msg_size,
                                       numMemoryBlocks,
                                       numContiguousMessages,
-                                      numTotalMessages,
+                                      values.nmsg,
                                       messageDelayTimeRecv,
                                       rdmaDeviceName,
                                       rdmaPort,
@@ -128,7 +124,7 @@ def create_rdma_receivers(my_transmitters):
 
     return rdma_receivers
 
-def create_rdma_transmitter():
+def create_rdma_transmitter(values):
     # Setup rdma transmitter 
     mode = runMode.SEND_MODE
     rdmaDeviceName = None #"mlx5_1"
@@ -136,10 +132,10 @@ def create_rdma_transmitter():
     gidIndex = -1
     
     rdma_transmitter = RdmaTransport(mode, 
-                                     messageSize,
+                                     values.msg_size,
                                      numMemoryBlocks,
                                      numContiguousMessages,
-                                     numTotalMessages,
+                                     values.nmsg,
                                      messageDelayTimeSend,
                                      rdmaDeviceName,
                                      rdmaPort,
@@ -250,7 +246,7 @@ def be_receiver(values):
         receive_with_mpi(values, status, num_transmitters)
         
     if values.method == 'rdma':
-        rdma_receivers = create_rdma_receivers(my_transmitters)
+        rdma_receivers = create_rdma_receivers(values, my_transmitters)
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
@@ -293,7 +289,7 @@ def be_receiver(values):
                 
         end = time.time()
         interval = end - start
-        rate = messageSize*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
+        rate = values.msg_size*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
@@ -325,7 +321,7 @@ def be_transmitter(values):
         
     if values.method == 'rdma':
         # Setup rdma transmitter 
-        rdma_transmitter = create_rdma_transmitter()
+        rdma_transmitter = create_rdma_transmitter(values)
         send_transmitter_info(rdma_transmitter, receiver_rank)
         pair_with_receiver(rdma_transmitter, identifierFileName, status)
 
@@ -363,7 +359,7 @@ def be_transmitter(values):
         end = time.time()
         interval = end - start
 
-        rate = messageSize*values.nmsg*8.E-9/float(interval)
+        rate = values.msg_size*values.nmsg*8.E-9/float(interval)
         log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
         log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
         
@@ -379,39 +375,23 @@ def _main():
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
 
-    #coloredlogs.install(level='DEBUG', logger=log)
-    
-    #if values.verbose:
-    #    coloredlogs.install(
-    #        fmt="[ %(levelname)s\t- %(asctime)s - %(name)s - %(filename)s:%(lineno)s] %(message)s",
-    #        level='DEBUG')
-    #else:            
-    #    coloredlogs.install(
-    #        fmt="[ %(levelname)s\t- %(asctime)s - %(name)s - %(filename)s:%(lineno)s] %(message)s",
-    #        level='INFO')
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-    
         
     assert size == values.nrx + values.nlink
 
-    # Setup nmsage to a reasonable number when we use rdma method
-    # ignore the passed nmsg
-    # nmsg will only be used at 'mpi' mode
+    if values.method == 'mpi':
+        assert values.nmsg != 0
     if values.method == 'rdma':
-        values.nmsg = numTotalMessages
-        
-    # ranks < nrx are receivers
-    # ransk >= nrx are transmitter
-    log.info(f"World rank {rank} size {size}")
+        if values.nmsg == 0:
+            values.nmsg = numContiguousMessages*numMemoryBlocks            
 
     if rank < values.nrx:
         be_receiver(values)
     else:
         be_transmitter(values)
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --nmsg 2000
 if __name__ == '__main__':
     _main()
