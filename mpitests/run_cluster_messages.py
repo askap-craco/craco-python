@@ -332,7 +332,8 @@ def be_transmitter(values):
         rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
 
         print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
-        rdma_buffers[0][0:10] = 1
+        for i in range(numMemoryBlocks):
+            rdma_buffers[i][0:10] = 1
 
         start = time.time()
         numCompletionsTotal = 0
@@ -355,9 +356,9 @@ def be_transmitter(values):
                 # now it is data for each message
                 message_index = index%numContiguousMessages
 
-                sum_data = np.sum(rdma_buffers[block_index][0:10])
-                if sum_data:
-                    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
+                #sum_data = np.sum(rdma_buffers[block_index][0:10])
+                #if sum_data:
+                #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
 
         end = time.time()
         interval = end - start
