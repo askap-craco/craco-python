@@ -42,7 +42,8 @@ numContiguousMessages = 100
 #numRepeat = 20000
 #numRepeat = 2000
 #numRepeat = 200
-numRepeat = 20
+#numRepeat = 20
+numRepeat = 1
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
@@ -256,8 +257,6 @@ def be_receiver(values):
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
-
-        rdma_buffers[:,:,:] = 1;
         
         print(f'rdma_buffers for receiver shape is {rdma_buffers.shape}')
         start = time.time()
@@ -291,7 +290,9 @@ def be_receiver(values):
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
-                print(np.sum(rdma_buffers[tx, block_index, message_index, :]))
+                sum_data = np.sum(rdma_buffers[tx, block_index, message_index, :])
+                #if sum_data:
+                print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
                 
         end = time.time()
         interval = end - start
@@ -334,6 +335,7 @@ def be_transmitter(values):
         rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
 
         print(f'rdma_buffers for transmitter shape is {rdma_buffers.shape}')
+        rdma_buffers[:,:,:] = 1;
         
         start = time.time()
         numCompletionsTotal = 0
@@ -355,7 +357,11 @@ def be_transmitter(values):
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
-            
+
+                #sum_data = np.sum(rdma_buffers[block_index, message_index, :])
+                #if sum_data:
+                #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
+
         end = time.time()
         interval = end - start
 
