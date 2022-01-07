@@ -295,7 +295,8 @@ def be_receiver(values):
                         
         end = time.time()
         interval = end - start
-        rate = values.msg_size*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
+        #rate = values.msg_size*numCompletionsTotal[tx]*num_transmitters*8.E-9/float(interval)
+        rate = values.msg_size*numCompletionsTotal[tx]*8.E-9/float(interval)
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
