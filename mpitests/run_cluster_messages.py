@@ -40,8 +40,9 @@ messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
 #numRepeat = 20000
-numRepeat = 200
+#numRepeat = 2000
 #numRepeat = 200
+numRepeat = 20
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
@@ -256,6 +257,8 @@ def be_receiver(values):
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
 
+        rdma_buffers[:,:,:] = 1;
+        
         print(f'rdma_buffers for receiver shape is {rdma_buffers.shape}')
         start = time.time()
         
@@ -288,8 +291,8 @@ def be_receiver(values):
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
-                data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
-            
+                print(np.sum(rdma_buffers[tx, block_index, message_index, :]))
+                
         end = time.time()
         interval = end - start
         rate = messageSize*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
@@ -352,7 +355,6 @@ def be_transmitter(values):
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
-                data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
             
         end = time.time()
         interval = end - start
