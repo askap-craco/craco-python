@@ -24,8 +24,11 @@ from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-cmsgs 100 --num-blks 10 --nmsg 10000
-# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100000
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 10000
+# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 10000
+
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method mpi --msg-size 65536 --nmsg 10000
+# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method mpi --msg-size 65536 --nmsg 10000
 
 # cpu binding
 
@@ -249,12 +252,12 @@ def be_receiver(values):
         print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         start = time.time()
         
-        numMissingTotal = 0
-        numMessagesTotal = 0
-        numCompletionsTotal = 0
+        numMissingTotal = np.zeros(num_transmitters, dtype=int)
+        numMessagesTotal = np.zeros(num_transmitters, dtype=int)
+        numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
         tx = 0
 
-        while numMessagesTotal < values.nmsg:
+        while numMessagesTotal[tx] < values.nmsg:
             rdma_receivers[tx].issueRequests()
             world.Barrier()
             
@@ -264,9 +267,9 @@ def be_receiver(values):
             numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
             numMissingFound     = rdma_receivers[tx].get_numMissingFound()
 
-            numCompletionsTotal += numCompletionsFound
-            numMissingTotal     += numMissingFound
-            numMessagesTotal    += (numCompletionsFound+numMissingFound)
+            numCompletionsTotal[tx] += numCompletionsFound
+            numMissingTotal[tx]     += numMissingFound
+            numMessagesTotal[tx]    += (numCompletionsFound+numMissingFound)
 
             workCompletions = rdma_receivers[tx].get_workCompletions()
 
@@ -296,10 +299,10 @@ def be_receiver(values):
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
-        log.info(f'Rank {rank} receiver, message missed is {numMissingTotal}')
-        log.info(f'Rank {rank} receiver, message received is {numCompletionsTotal}')
+        log.info(f'Rank {rank} receiver, message missed is {numMissingTotal[tx]}')
+        log.info(f'Rank {rank} receiver, message received is {numCompletionsTotal[tx]}')
         log.info(f'Rank {rank} receiver, message total is {values.nmsg}')
-        log.info(f'Rank {rank} receiver, message loss rate is {numMissingTotal/float(numMessagesTotal)}')
+        log.info(f'Rank {rank} receiver, message loss rate is {numMissingTotal[tx]/float(numMessagesTotal[tx])}')
         
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
