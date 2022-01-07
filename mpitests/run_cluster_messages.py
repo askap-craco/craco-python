@@ -254,25 +254,32 @@ def be_receiver(values):
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
         numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
-        tx = 0
-        
-        rdma_receivers[tx].issueRequests()
+        #tx = 0
+
+        for tx in range(num_transmitters):
+            rdma_receivers[tx].issueRequests()
+            
         world.Barrier() # receiver should be ready before transmitter is ready
         start = time.time()
-        while numMessagesTotal[tx] < values.nmsg:            
-            rdma_receivers[tx].waitRequestsCompletion()
-            rdma_receivers[tx].pollRequests()
+        while numMessagesTotal[tx] < values.nmsg:
+            for tx in range(num_transmitters):
+                rdma_receivers[tx].waitRequestsCompletion()
+                
+            for tx in range(num_transmitters):
+                rdma_receivers[tx].pollRequests()
 
-            numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
-            numMissingFound     = rdma_receivers[tx].get_numMissingFound()
+            for tx in range(num_transmitters):
+                numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
+                numMissingFound     = rdma_receivers[tx].get_numMissingFound()
 
-            numCompletionsTotal[tx] += numCompletionsFound
-            numMissingTotal[tx]     += numMissingFound
-            numMessagesTotal[tx]    += (numCompletionsFound+numMissingFound)
+                numCompletionsTotal[tx] += numCompletionsFound
+                numMissingTotal[tx]     += numMissingFound
+                numMessagesTotal[tx]    += (numCompletionsFound+numMissingFound)
 
-            workCompletions = rdma_receivers[tx].get_workCompletions()
+                workCompletions = rdma_receivers[tx].get_workCompletions()
 
-            rdma_receivers[tx].issueRequests()
+            for tx in range(num_transmitters):
+                rdma_receivers[tx].issueRequests()
             
             if values.test == 'throughput':
                 continue
