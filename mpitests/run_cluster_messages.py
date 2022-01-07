@@ -101,7 +101,7 @@ def transmit_with_mpi(values, status, receiver_rank, transmitter_rank):
     log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
     log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
 
-def create_rdma_receivers(values, my_transmitters):
+def create_rdma_receivers(my_transmitters):
     # Setup rdma receiver
     mode = runMode.RECV_MODE
     rdmaDeviceName = None #"mlx5_1"
@@ -210,14 +210,17 @@ def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     
     rdma_transmitter.setupRdma(identifierFileName)
 
-def setup_rdma_buffers(values, rdma_receivers, my_transmitters):
+def setup_rdma_buffers_worker(rdma, numMemoryBlocks):
+    rdma_buffer = []
+    for iblock in range(numMemoryBlocks):
+        rdma_memory = rdma.get_memoryview(iblock)
+        rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
+    return rdma_buffer
+    
+def setup_rdma_buffers(rdma_receivers, my_transmitters, numMemoryBlocks):
     rdma_buffers = []
     for tx in my_transmitters:
-        rdma_buffer = []
-        for iblock in range(numMemoryBlocks):
-            rdma_memory = rdma_receivers[tx].get_memoryview(iblock)
-            rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
-        rdma_buffers.append(rdma_buffer)
+        rdma_buffers.append(setup_rdma_buffers_worker(rdma_receivers[tx], numMemoryBlocks))
     return rdma_buffers
 
 def be_receiver(values):
@@ -236,10 +239,10 @@ def be_receiver(values):
         receive_with_mpi(values, status, num_transmitters)
         
     if values.method == 'rdma':
-        rdma_receivers = create_rdma_receivers(values, my_transmitters)
+        rdma_receivers = create_rdma_receivers(my_transmitters)
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
-        rdma_buffers = setup_rdma_buffers(values, rdma_receivers, my_transmitters)
+        rdma_buffers = setup_rdma_buffers(rdma_receivers, my_transmitters, numMemoryBlocks)
     
         start = time.time()
         
@@ -311,12 +314,8 @@ def be_transmitter(values):
         rdma_transmitter = create_rdma_transmitter()
         send_transmitter_info(rdma_transmitter, receiver_rank)
         pair_with_receiver(rdma_transmitter, identifierFileName, status)
-        
-        
-        rdma_buffer = []
-        for iblock in range(numMemoryBlocks):
-            rdma_memory = rdma_transmitter.get_memoryview(iblock)
-            rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
+
+        rdma_buffer = setup_rdma_buffers_worker(rdma_transmitter, numMemoryBlocks)
 
         start = time.time()
         numCompletionsTotal = 0
