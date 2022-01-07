@@ -254,7 +254,6 @@ def be_receiver(values):
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
         numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
-        #tx = 0
 
         for tx in range(num_transmitters):
             rdma_receivers[tx].issueRequests()
