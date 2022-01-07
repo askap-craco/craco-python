@@ -250,17 +250,16 @@ def be_receiver(values):
         rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters)
         
         print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
-        start = time.time()
         
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
         numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
         tx = 0
-
-        while numMessagesTotal[tx] < values.nmsg:
-            rdma_receivers[tx].issueRequests()
-            world.Barrier()
-            
+        
+        rdma_receivers[tx].issueRequests()
+        world.Barrier() # receiver should be ready before transmitter is ready
+        start = time.time()
+        while numMessagesTotal[tx] < values.nmsg:            
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
 
@@ -273,6 +272,8 @@ def be_receiver(values):
 
             workCompletions = rdma_receivers[tx].get_workCompletions()
 
+            rdma_receivers[tx].issueRequests()
+            
             if values.test == 'throughput':
                 continue
             else:
@@ -344,10 +345,11 @@ def be_transmitter(values):
             for i in range(values.num_blks):
                 rdma_buffers[i][0:10] = i
 
-        start = time.time()
         numCompletionsTotal = 0
+
+        world.Barrier() # receiver should be ready before transmitter is ready
+        start = time.time()
         while numCompletionsTotal < values.nmsg:
-            world.Barrier()
             rdma_transmitter.issueRequests()
             rdma_transmitter.waitRequestsCompletion()
             rdma_transmitter.pollRequests()
