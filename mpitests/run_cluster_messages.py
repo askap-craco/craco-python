@@ -281,10 +281,15 @@ def be_receiver(values):
                     
                     # now it is data for each message
                     message_index = index%values.num_cmsgs
+
                     sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-                    if sum_data:
-                        print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
-                
+                    if values.test == 'ones':
+                        assert sum_data == 10
+                    if values.test == 'increment':
+                        #print(block_index, sum_data)
+                        assert sum_data == 10*block_index
+                        
+                        
         end = time.time()
         interval = end - start
         rate = values.msg_size*numCompletionsTotal*num_transmitters*8.E-9/float(interval)
@@ -326,8 +331,14 @@ def be_transmitter(values):
         rdma_buffers = setup_buffers_for_single_rdma(values, rdma_transmitter)
 
         print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
-        for i in range(values.num_blks):
-            rdma_buffers[i][0:10] = 1
+
+        if values.test == 'ones':
+            for i in range(values.num_blks):
+                rdma_buffers[i][0:10] = 1
+                
+        if values.test == 'increment':
+            for i in range(values.num_blks):
+                rdma_buffers[i][0:10] = i
 
         start = time.time()
         numCompletionsTotal = 0
@@ -339,23 +350,8 @@ def be_transmitter(values):
             numCompletionsFound = rdma_transmitter.get_numCompletionsFound()
             numCompletionsTotal += numCompletionsFound
             
-            workCompletions = rdma_transmitter.get_workCompletions()
-            #if values.test == 'throughput':
-            #    continue
-            #else:
-            #    for i in range(numCompletionsFound):
-            #        index = workCompletions[i].wr_id
-            #        
-            #        # Get data for buffer regions
-            #        block_index = index//values.num_cmsgs
-            #        
-            #        # now it is data for each message
-            #        message_index = index%values.num_cmsgs
-            #        
-            #        #sum_data = np.sum(rdma_buffers[block_index][0:10])
-            #        #if sum_data:
-            #        #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
-                    
+            #workCompletions = rdma_transmitter.get_workCompletions()
+       
         end = time.time()
         interval = end - start
 
