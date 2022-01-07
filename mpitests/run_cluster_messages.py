@@ -210,17 +210,27 @@ def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     
     rdma_transmitter.setupRdma(identifierFileName)
 
-def setup_rdma_buffers_worker(rdma, numMemoryBlocks):
-    rdma_buffer = []
+def memory2np_buffer(memory, numContiguousMessages, messageSize):
+    assert len(memory) == numContiguousMessages*messageSize
+
+    np_buffer = []
+    count = messageSize*8/16
+    for i in range(numContiguousMessages):
+        offset = i*messageSize
+        np_buffer.append(np.frombuffer(memory, count = count, offset = offset, dtype=np.int16))
+    return np_buffer
+
+def setup_buffers_for_single_rdma(rdma, numMemoryBlocks):
+    rdma_buffers = []
     for iblock in range(numMemoryBlocks):
         rdma_memory = rdma.get_memoryview(iblock)
-        rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
-    return rdma_buffer
+        rdma_buffers.append(np.frombuffer(rdma_memory, dtype=np.int16))
+    return rdma_buffers
     
-def setup_rdma_buffers(rdma_receivers, my_transmitters, numMemoryBlocks):
+def setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks):
     rdma_buffers = []
     for tx in my_transmitters:
-        rdma_buffers.append(setup_rdma_buffers_worker(rdma_receivers[tx], numMemoryBlocks))
+        rdma_buffers.append(setup_buffers_for_single_rdma(rdma_receivers[tx], numMemoryBlocks))
     return rdma_buffers
 
 def be_receiver(values):
@@ -242,7 +252,7 @@ def be_receiver(values):
         rdma_receivers = create_rdma_receivers(my_transmitters)
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
-        rdma_buffers = setup_rdma_buffers(rdma_receivers, my_transmitters, numMemoryBlocks)
+        rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
     
         start = time.time()
         
@@ -315,7 +325,7 @@ def be_transmitter(values):
         send_transmitter_info(rdma_transmitter, receiver_rank)
         pair_with_receiver(rdma_transmitter, identifierFileName, status)
 
-        rdma_buffer = setup_rdma_buffers_worker(rdma_transmitter, numMemoryBlocks)
+        rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
 
         start = time.time()
         numCompletionsTotal = 0
