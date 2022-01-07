@@ -195,9 +195,7 @@ def be_receiver(values):
         numCompletionsTotal = 0
         tx = 0
 
-        #while numMessagesTotal < values.nmsg:
         while numCompletionsTotal < values.nmsg:
-            #print(f'Receiver {numCompletionsTotal} + {numMissingTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
             world.Barrier()
             
@@ -218,16 +216,10 @@ def be_receiver(values):
             
                 # Get data for buffer regions
                 block_index = index//numContiguousMessages
-                #rdma_memory = rdma_receivers[tx].get_memoryview(block_index)
-                #rdma_buffers = np.frombuffer(rdma_memory, dtype=np.int16) # 163 and 164 will be slow, do it at the begning
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
                 data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
-            
-                #print(f"receiver {rank} data index {i}")
-                
-                #print(f'The first {ndataPrint} data of rdma_receiver {rank} receivered from rdma transmitter {status.Get_source()} is {rdma_buffers[data_start_index:data_start_index+ndataPrint]}')
             
         end = time.time()
         interval = end - start
@@ -317,20 +309,13 @@ def be_transmitter(values):
         start = time.time()
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
-            # The setup here will not be strightforward
-            #rdma_memory = rdma_transmitter.get_memoryview(0)
-            #rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) 
-            #rdma_buffer[:] = 1
-            #print(f'BEFORE:\tThe first {ndataPrint} data message from rdma transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndataPrint]}')
-
             world.Barrier()
             rdma_transmitter.issueRequests()
             rdma_transmitter.waitRequestsCompletion()
             rdma_transmitter.pollRequests()
             numCompletionsFound = rdma_transmitter.get_numCompletionsFound()
             numCompletionsTotal += numCompletionsFound
-
-            #print(f'{numCompletionsTotal} on transmitter {transmitter_rank}, the last numCompletionsFound is {numCompletionsFound}')
+            
             workCompletions = rdma_transmitter.get_workCompletions()
 
             for i in range(numCompletionsFound):
@@ -338,16 +323,11 @@ def be_transmitter(values):
             
                 # Get data for buffer regions
                 block_index = index//numContiguousMessages
-                #rdma_memory = rdma_transmitter.get_memoryview(block_index)
-                #rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16)
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
                 data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
             
-                #print(f"why here we have problem {i}")
-                #print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')[
-                
         end = time.time()
         interval = end - start
 
