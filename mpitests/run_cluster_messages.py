@@ -124,6 +124,25 @@ def create_rdma_receivers(values, my_transmitters):
 
     return rdma_receivers
 
+def create_rdma_transmitter():
+    # Setup rdma transmitter 
+    mode = runMode.SEND_MODE
+    rdmaDeviceName = None #"mlx5_1"
+    rdmaPort = 1
+    gidIndex = -1
+    
+    rdma_transmitter = RdmaTransport(mode, 
+                                     messageSize,
+                                     numMemoryBlocks,
+                                     numContiguousMessages,
+                                     numTotalMessages,
+                                     messageDelayTimeSend,
+                                     rdmaDeviceName,
+                                     rdmaPort,
+                                     gidIndex)
+
+    return rdma_transmitter
+
 def send_receivers_info(values, rdma_receivers, my_transmitters):
     
     for tx in my_transmitters:            
@@ -138,6 +157,18 @@ def send_receivers_info(values, rdma_receivers, my_transmitters):
         log.info(f'Sending the rdma receiver info {rdma_receiver_info} to a rdma transmitter with rank {transmitter_rank}')
         world.send(rdma_receiver_info, dest=int(transmitter_rank), tag=1)
 
+def send_transmitter_info(rdma_transmitter, receiver_rank):
+    rdma_transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
+    rdma_transmitter_qpn = rdma_transmitter.getQueuePairNumber()
+    rdma_transmitter_gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
+    rdma_transmitter_lid = rdma_transmitter.getLocalIdentifier()
+
+    rdma_transmitter_info = {'rank':rank, 'psn':rdma_transmitter_psn, 'qpn': rdma_transmitter_qpn,
+                             'gid': rdma_transmitter_gid, 'lid':rdma_transmitter_lid}
+    
+    log.info(f'Sending rdma transmitter info {rdma_transmitter_info} to a rdma receiver with rank {receiver_rank}')
+    world.send(rdma_transmitter_info, dest=int(receiver_rank), tag=1)
+        
 def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
     # recv informaton from transmitters
     for tx in my_transmitters:
@@ -156,6 +187,28 @@ def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
         rdma_receivers[tx].setGidAddress(rdma_transmitter_gid)
         rdma_receivers[tx].setLocalIdentifier(rdma_transmitter_lid)
         rdma_receivers[tx].setupRdma(identifierFileName);
+
+def pair_with_receiver(rdma_transmitter, identifierFileName, status):
+    rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+    log.info(f'Got rdma receiver info {rdma_receiver_info} from rdma receiver with rank={status.Get_source()} tag={status.Get_tag()}')
+    
+    rdma_receiver_psn = rdma_receiver_info['psn']
+    rdma_receiver_qpn = rdma_receiver_info['qpn']
+    rdma_receiver_gid = rdma_receiver_info['gid']
+    rdma_receiver_lid = rdma_receiver_info['lid']
+
+    # now setup remote infromation and finish rdma setup
+    rdma_receiver_psn = rdma_receiver_info['psn']
+    rdma_receiver_qpn = rdma_receiver_info['qpn']
+    rdma_receiver_gid = rdma_receiver_info['gid']
+    rdma_receiver_lid = rdma_receiver_info['lid']
+    
+    rdma_transmitter.setPacketSequenceNumber(rdma_receiver_psn)
+    rdma_transmitter.setQueuePairNumber(rdma_receiver_qpn)
+    rdma_transmitter.setGidAddress(rdma_receiver_gid)
+    rdma_transmitter.setLocalIdentifier(rdma_receiver_lid)
+    
+    rdma_transmitter.setupRdma(identifierFileName)
 
 def setup_rdma_buffers(values, rdma_receivers, my_transmitters):
     rdma_buffers = []
@@ -254,53 +307,12 @@ def be_transmitter(values):
         transmit_with_mpi(values, status, receiver_rank, transmitter_rank)
         
     if values.method == 'rdma':
-        rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-        log.info(f'Got rdma receiver info {rdma_receiver_info} from rdma receiver with rank={status.Get_source()} tag={status.Get_tag()}')
-        
-        rdma_receiver_psn = rdma_receiver_info['psn']
-        rdma_receiver_qpn = rdma_receiver_info['qpn']
-        rdma_receiver_gid = rdma_receiver_info['gid']
-        rdma_receiver_lid = rdma_receiver_info['lid']
-        
         # Setup rdma transmitter 
-        mode = runMode.SEND_MODE
-        rdmaDeviceName = None #"mlx5_1"
-        rdmaPort = 1
-        gidIndex = -1
+        rdma_transmitter = create_rdma_transmitter()
+        send_transmitter_info(rdma_transmitter, receiver_rank)
+        pair_with_receiver(rdma_transmitter, identifierFileName, status)
         
-        rdma_transmitter = RdmaTransport(mode, 
-                                         messageSize,
-                                         numMemoryBlocks,
-                                         numContiguousMessages,
-                                         numTotalMessages,
-                                         messageDelayTimeSend,
-                                         rdmaDeviceName,
-                                         rdmaPort,
-                                         gidIndex)
         
-        rdma_transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
-        rdma_transmitter_qpn = rdma_transmitter.getQueuePairNumber()
-        rdma_transmitter_gid = np.frombuffer(rdma_transmitter.getGidAddress(), dtype=np.uint8)
-        rdma_transmitter_lid = rdma_transmitter.getLocalIdentifier()
-        rdma_transmitter_info = {'rank':rank, 'psn':rdma_transmitter_psn, 'qpn': rdma_transmitter_qpn,
-                            'gid': rdma_transmitter_gid, 'lid':rdma_transmitter_lid}
-        
-        log.info(f'Sending rdma transmitter info {rdma_transmitter_info} to a rdma receiver with rank {receiver_rank}')
-        world.send(rdma_transmitter_info, dest=int(receiver_rank), tag=1)
-        
-        # now setup remote infromation and finish rdma setup
-        rdma_receiver_psn = rdma_receiver_info['psn']
-        rdma_receiver_qpn = rdma_receiver_info['qpn']
-        rdma_receiver_gid = rdma_receiver_info['gid']
-        rdma_receiver_lid = rdma_receiver_info['lid']
-        
-        rdma_transmitter.setPacketSequenceNumber(rdma_receiver_psn)
-        rdma_transmitter.setQueuePairNumber(rdma_receiver_qpn)
-        rdma_transmitter.setGidAddress(rdma_receiver_gid)
-        rdma_transmitter.setLocalIdentifier(rdma_receiver_lid)
-        
-        rdma_transmitter.setupRdma(identifierFileName)
-
         rdma_buffer = []
         for iblock in range(numMemoryBlocks):
             rdma_memory = rdma_transmitter.get_memoryview(iblock)
