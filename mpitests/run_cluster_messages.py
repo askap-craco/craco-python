@@ -218,19 +218,21 @@ def setup_buffers_for_single_rdma(rdma, numMemoryBlocks):
     rdma_buffers = []
     for iblock in range(numMemoryBlocks):
         rdma_memory = rdma.get_memoryview(iblock)
+
+        # for now use int8 as it is the same size as char
         rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int8)
 
-        # put zero into it, otherwise the number will be wrong
         rdma_buffer[:] = 0
-
         rdma_buffers.append(rdma_buffer)
-    return np.array(rdma_buffers)
+        
+    return rdma_buffers
     
 def setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks):
     rdma_buffers = []
     for tx in my_transmitters:
         rdma_buffers.append(setup_buffers_for_single_rdma(rdma_receivers[tx], numMemoryBlocks))
-    return np.array(rdma_buffers)
+
+    return rdma_buffers
 
 def be_receiver(values):
     receivers = world.Split(1, rank)
@@ -253,7 +255,7 @@ def be_receiver(values):
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
         
-        print(f'rdma_buffers for receiver shape is {rdma_buffers.shape}')
+        print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         start = time.time()
         
         numMissingTotal = 0
@@ -329,8 +331,8 @@ def be_transmitter(values):
 
         rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
 
-        print(f'rdma_buffers for transmitter shape is {rdma_buffers.shape}')
-        rdma_buffers[0,0:10] = 1
+        print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
+        rdma_buffers[0][0:10] = 1
 
         start = time.time()
         numCompletionsTotal = 0
