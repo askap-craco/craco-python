@@ -190,7 +190,7 @@ def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
         rdma_receivers[tx].setQueuePairNumber(rdma_transmitter_qpn)
         rdma_receivers[tx].setGidAddress(rdma_transmitter_gid)
         rdma_receivers[tx].setLocalIdentifier(rdma_transmitter_lid)
-        rdma_receivers[tx].setupRdma(identifierFileName);
+        rdma_receivers[tx].setupRdma(identifierFileName)
 
 def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
@@ -214,28 +214,20 @@ def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     
     rdma_transmitter.setupRdma(identifierFileName)
 
-def memory2np_buffer(memory, numContiguousMessages, messageSize):
-    assert len(memory) == numContiguousMessages*messageSize
-
-    np_buffer = []
-    count = messageSize//2     # char to int16
-    for i in range(numContiguousMessages):
-        offset = i*messageSize
-        np_buffer.append(np.frombuffer(memory, count = count, offset = offset, dtype=np.int16))
-    return np.array(np_buffer)
-
 def setup_buffers_for_single_rdma(rdma, numMemoryBlocks):
     rdma_buffers = []
     for iblock in range(numMemoryBlocks):
         rdma_memory = rdma.get_memoryview(iblock)
-        rdma_buffers.append(memory2np_buffer(rdma_memory, numContiguousMessages, messageSize))
-    return np.array(rdma_buffers)
+        rdma_buffers.append(np.frombuffer(rdma_memory, dtype=np.int8))
+    #return np.array(rdma_buffers)
+    return rdma_buffers
     
 def setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks):
     rdma_buffers = []
     for tx in my_transmitters:
         rdma_buffers.append(setup_buffers_for_single_rdma(rdma_receivers[tx], numMemoryBlocks))
-    return np.array(rdma_buffers)
+    #return np.array(rdma_buffers)
+    return rdma_buffers
 
 def be_receiver(values):
     receivers = world.Split(1, rank)
@@ -258,7 +250,7 @@ def be_receiver(values):
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
         
-        print(f'rdma_buffers for receiver shape is {rdma_buffers.shape}')
+        print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         start = time.time()
         
         numMissingTotal = 0
@@ -290,9 +282,9 @@ def be_receiver(values):
             
                 # now it is data for each message
                 message_index = index%numContiguousMessages
-                sum_data = np.sum(rdma_buffers[tx, block_index, message_index, :])
-                #if sum_data:
-                print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
+                sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                if sum_data:
+                    print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
                 
         end = time.time()
         interval = end - start
@@ -334,9 +326,9 @@ def be_transmitter(values):
 
         rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
 
-        print(f'rdma_buffers for transmitter shape is {rdma_buffers.shape}')
-        rdma_buffers[:,:,:] = 1;
-        
+        print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
+        rdma_buffers[0][0:10] = 1
+
         start = time.time()
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
@@ -358,9 +350,9 @@ def be_transmitter(values):
                 # now it is data for each message
                 message_index = index%numContiguousMessages
 
-                #sum_data = np.sum(rdma_buffers[block_index, message_index, :])
-                #if sum_data:
-                #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
+                sum_data = np.sum(rdma_buffers[block_index][0:10])
+                if sum_data:
+                    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
 
         end = time.time()
         interval = end - start
