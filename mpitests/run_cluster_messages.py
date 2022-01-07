@@ -340,21 +340,21 @@ def be_transmitter(values):
             numCompletionsTotal += numCompletionsFound
             
             workCompletions = rdma_transmitter.get_workCompletions()
-            if values.test == 'throughput':
-                continue
-            else:
-                for i in range(numCompletionsFound):
-                    index = workCompletions[i].wr_id
-                    
-                    # Get data for buffer regions
-                    block_index = index//values.num_cmsgs
-                    
-                    # now it is data for each message
-                    message_index = index%values.num_cmsgs
-                    
-                    #sum_data = np.sum(rdma_buffers[block_index][0:10])
-                    #if sum_data:
-                    #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
+            #if values.test == 'throughput':
+            #    continue
+            #else:
+            #    for i in range(numCompletionsFound):
+            #        index = workCompletions[i].wr_id
+            #        
+            #        # Get data for buffer regions
+            #        block_index = index//values.num_cmsgs
+            #        
+            #        # now it is data for each message
+            #        message_index = index%values.num_cmsgs
+            #        
+            #        #sum_data = np.sum(rdma_buffers[block_index][0:10])
+            #        #if sum_data:
+            #        #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
                     
         end = time.time()
         interval = end - start
