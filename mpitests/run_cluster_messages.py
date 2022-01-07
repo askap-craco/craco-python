@@ -36,12 +36,6 @@ log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
 
-numMemoryBlocks = 10
-numContiguousMessages = 100
-#numRepeat = 20000
-#numRepeat = 2000
-#numRepeat = 200
-#numRepeat = 20
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
 
@@ -113,8 +107,8 @@ def create_rdma_receivers(values, my_transmitters):
     for tx in my_transmitters:
         rdma_receiver = RdmaTransport(mode, 
                                       values.msg_size,
-                                      numMemoryBlocks,
-                                      numContiguousMessages,
+                                      values.num_blks,
+                                      values.num_cmsgs,
                                       values.nmsg,
                                       messageDelayTimeRecv,
                                       rdmaDeviceName,
@@ -133,8 +127,8 @@ def create_rdma_transmitter(values):
     
     rdma_transmitter = RdmaTransport(mode, 
                                      values.msg_size,
-                                     numMemoryBlocks,
-                                     numContiguousMessages,
+                                     values.num_blks,
+                                     values.num_cmsgs,
                                      values.nmsg,
                                      messageDelayTimeSend,
                                      rdmaDeviceName,
@@ -210,9 +204,9 @@ def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     
     rdma_transmitter.setupRdma(identifierFileName)
 
-def setup_buffers_for_single_rdma(rdma, numMemoryBlocks):
+def setup_buffers_for_single_rdma(values, rdma):
     rdma_buffers = []
-    for iblock in range(numMemoryBlocks):
+    for iblock in range(values.num_blks):
         rdma_memory = rdma.get_memoryview(iblock)
 
         # for now use int8 as it is the same size as char
@@ -223,10 +217,10 @@ def setup_buffers_for_single_rdma(rdma, numMemoryBlocks):
         
     return rdma_buffers
     
-def setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks):
+def setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters):
     rdma_buffers = []
     for tx in my_transmitters:
-        rdma_buffers.append(setup_buffers_for_single_rdma(rdma_receivers[tx], numMemoryBlocks))
+        rdma_buffers.append(setup_buffers_for_single_rdma(values, rdma_receivers[tx]))
 
     return rdma_buffers
 
@@ -249,7 +243,7 @@ def be_receiver(values):
         rdma_receivers = create_rdma_receivers(values, my_transmitters)
         send_receivers_info(values, rdma_receivers, my_transmitters)
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
-        rdma_buffers = setup_buffers_for_multiple_rdma(rdma_receivers, my_transmitters, numMemoryBlocks)
+        rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters)
         
         print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         start = time.time()
@@ -279,10 +273,10 @@ def be_receiver(values):
                 index = workCompletions[i].wr_id
             
                 # Get data for buffer regions
-                block_index = index//numContiguousMessages
+                block_index = index//values.num_cmsgs
             
                 # now it is data for each message
-                message_index = index%numContiguousMessages
+                message_index = index%values.num_cmsgs
                 sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
                 if sum_data:
                     print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
@@ -325,10 +319,10 @@ def be_transmitter(values):
         send_transmitter_info(rdma_transmitter, receiver_rank)
         pair_with_receiver(rdma_transmitter, identifierFileName, status)
 
-        rdma_buffers = setup_buffers_for_single_rdma(rdma_transmitter, numMemoryBlocks)
+        rdma_buffers = setup_buffers_for_single_rdma(values, rdma_transmitter)
 
         print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
-        for i in range(numMemoryBlocks):
+        for i in range(values.num_blks):
             rdma_buffers[i][0:10] = 1
 
         start = time.time()
@@ -347,10 +341,10 @@ def be_transmitter(values):
                 index = workCompletions[i].wr_id
             
                 # Get data for buffer regions
-                block_index = index//numContiguousMessages
+                block_index = index//values.num_cmsgs
             
                 # now it is data for each message
-                message_index = index%numContiguousMessages
+                message_index = index%values.num_cmsgs
 
                 #sum_data = np.sum(rdma_buffers[block_index][0:10])
                 #if sum_data:
@@ -368,10 +362,13 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('--nrx', type=int, help='Number of receivers', default=1)
     parser.add_argument('--nlink', type=int, help='Number of transmit links (2x number of cards)', default=1)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--nmsg', type=int, default=10)
-    parser.add_argument('--msg-size', type=int, default=4096)
+    parser.add_argument('--nmsg', type=int, default=1000)
+    parser.add_argument('--msg-size', type=int, default=65536)
+    parser.add_argument('--num-blks', type=int, default=10)
+    parser.add_argument('--num-cmsgs', type=int, default=100)
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
 
@@ -385,8 +382,11 @@ def _main():
     if values.method == 'mpi':
         assert values.nmsg != 0
     if values.method == 'rdma':
+        assert values.num_blks != 0
+        assert values.num_cmsgs != 0
+        
         if values.nmsg == 0:
-            values.nmsg = numContiguousMessages*numMemoryBlocks            
+            values.nmsg = values.num_blks*values.num_cmsgs
 
     if rank < values.nrx:
         be_receiver(values)
