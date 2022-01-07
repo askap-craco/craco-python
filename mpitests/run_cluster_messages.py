@@ -269,18 +269,21 @@ def be_receiver(values):
             numMessagesTotal    += (numCompletionsFound+numMissingFound)
 
             workCompletions = rdma_receivers[tx].get_workCompletions()
-            
-            for i in range(numCompletionsFound):
-                index = workCompletions[i].wr_id
-            
-                # Get data for buffer regions
-                block_index = index//values.num_cmsgs
-            
-                # now it is data for each message
-                message_index = index%values.num_cmsgs
-                sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-                if sum_data:
-                    print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
+
+            if values.test == 'throughput':
+                continue
+            else:
+                for i in range(numCompletionsFound):
+                    index = workCompletions[i].wr_id
+                    
+                    # Get data for buffer regions
+                    block_index = index//values.num_cmsgs
+                    
+                    # now it is data for each message
+                    message_index = index%values.num_cmsgs
+                    sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                    if sum_data:
+                        print(f'non-zero summary of data on receiver side is {sum_data} at {block_index} {message_index}')
                 
         end = time.time()
         interval = end - start
@@ -337,20 +340,22 @@ def be_transmitter(values):
             numCompletionsTotal += numCompletionsFound
             
             workCompletions = rdma_transmitter.get_workCompletions()
-
-            for i in range(numCompletionsFound):
-                index = workCompletions[i].wr_id
-            
-                # Get data for buffer regions
-                block_index = index//values.num_cmsgs
-            
-                # now it is data for each message
-                message_index = index%values.num_cmsgs
-
-                #sum_data = np.sum(rdma_buffers[block_index][0:10])
-                #if sum_data:
-                #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
-
+            if values.test == 'throughput':
+                continue
+            else:
+                for i in range(numCompletionsFound):
+                    index = workCompletions[i].wr_id
+                    
+                    # Get data for buffer regions
+                    block_index = index//values.num_cmsgs
+                    
+                    # now it is data for each message
+                    message_index = index%values.num_cmsgs
+                    
+                    #sum_data = np.sum(rdma_buffers[block_index][0:10])
+                    #if sum_data:
+                    #    print(f'non-zero summary of data on transmitter side is {sum_data} at {block_index} {message_index}')
+                    
         end = time.time()
         interval = end - start
 
@@ -368,6 +373,8 @@ def _main():
     parser.add_argument('--num-blks', type=int, default=10)
     parser.add_argument('--num-cmsgs', type=int, default=100)
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
+    parser.add_argument('--test', default='throughput', help='throughput, ones or increment')
+    
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     
     parser.set_defaults(verbose=False)
