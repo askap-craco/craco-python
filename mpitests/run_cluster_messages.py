@@ -39,10 +39,10 @@ NFPGA_PER_LINK = 3
 messageSize = 65536
 numMemoryBlocks = 10
 numContiguousMessages = 100
-numRepeat = 2000
+numRepeat = 100
 numTotalMessages = numRepeat*numMemoryBlocks*numContiguousMessages
 messageDelayTimeRecv = 0
-messageDelayTimeSend = 300
+messageDelayTimeSend = 0
 identifierFileName = None 
 
 ndataPrint = 10
@@ -195,9 +195,14 @@ def be_receiver(values):
         numMessagesTotal = 0
         numCompletionsTotal = 0
         tx = 0
+
         while numMessagesTotal < values.nmsg:
+            #world.Barrier()
+            #while numCompletionsTotal < values.nmsg:
             #print(f'Receiver {numCompletionsTotal} + {numMissingTotal} VS {values.nmsg}')
             rdma_receivers[tx].issueRequests()
+            world.Barrier()
+            
             rdma_receivers[tx].waitRequestsCompletion()
             rdma_receivers[tx].pollRequests()
 
@@ -312,13 +317,14 @@ def be_transmitter(values):
             rdma_buffer.append(np.frombuffer(rdma_memory, dtype=np.int16))
 
         # need to sleep here
-        time.sleep(2)
+        #time.sleep(10)
         
         world.Barrier()
         start = time.time()
         
         numCompletionsTotal = 0
         while numCompletionsTotal < values.nmsg:
+            #world.Barrier()
             #time.sleep(1E-3)
             
             # The setup here will not be strightforward
@@ -326,7 +332,8 @@ def be_transmitter(values):
             #rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int16) 
             #rdma_buffer[:] = 1
             #print(f'BEFORE:\tThe first {ndataPrint} data message from rdma transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[0:ndataPrint]}')
-            
+
+            world.Barrier()
             rdma_transmitter.issueRequests()
             rdma_transmitter.waitRequestsCompletion()
             rdma_transmitter.pollRequests()
@@ -347,7 +354,7 @@ def be_transmitter(values):
                 # now it is data for each message
                 message_index = index%numContiguousMessages
                 data_start_index = int(message_index*messageSize*8//16) # because messageSize is in bytes, but we are using uint16_t, which is 2 bytes
-
+            
                 #print(f"why here we have problem {i}")
                 #print(f'The first {ndataPrint} data of message from transmitter {transmitter_rank} to receiver {receiver_rank} is {rdma_buffer[data_start_index:data_start_index+ndataPrint]}')
                 
