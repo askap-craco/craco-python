@@ -263,7 +263,7 @@ def be_receiver(values):
         numCompletionsTotal = 0
         tx = 0
 
-        while numCompletionsTotal < values.nmsg:
+        while numMessagesTotal < values.nmsg:
             rdma_receivers[tx].issueRequests()
             world.Barrier()
             
