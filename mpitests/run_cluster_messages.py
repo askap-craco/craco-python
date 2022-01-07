@@ -24,9 +24,8 @@ from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536
-
-# receiver will hang if there are missed messages, fixed
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-cmsgs 100 --num-blks 10 --nmsg 10000
+# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100000
 
 # cpu binding
 
@@ -36,9 +35,11 @@ log = logging.getLogger(__name__)
 
 NFPGA_PER_LINK = 3
 
+# we do not need these numbers configurable as barrier will sovle any sync issue
 messageDelayTimeRecv = 0
 messageDelayTimeSend = 0
 
+# We do not use identifier file here, so we hard code it
 identifierFileName = None 
             
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
