@@ -40,7 +40,7 @@ NFPGA_PER_LINK = 3
 
 # we do not need these numbers configurable as barrier will sovle any sync issue
 messageDelayTimeRecv = 0
-messageDelayTimeSend = 100
+messageDelayTimeSend = 10000
 
 # We do not use identifier file here, so we hard code it
 identifierFileName = None 
