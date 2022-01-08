@@ -254,53 +254,70 @@ def be_receiver(values):
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
         numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
-
+        numCompletionsFound = np.zeros(num_transmitters, dtype=int)
+        numMissingFound = np.zeros(num_transmitters, dtype=int)
+        
         for tx in range(num_transmitters):
             rdma_receivers[tx].issueRequests()
+
+        # setup while loop stop marker
+        do_while = False
+        for tx in range(num_transmitters):
+            do_while = do_while or (numMessagesTotal[tx] < values.nmsg)
             
         world.Barrier() # receiver should be ready before transmitter is ready
         start = time.time()
-        while numMessagesTotal[tx] < values.nmsg:
+        #while numMessagesTotal[tx] < values.nmsg:
+        while do_while:
             for tx in range(num_transmitters):
-                rdma_receivers[tx].waitRequestsCompletion()
+                if numMessagesTotal[tx] < values.nmsg:
+                    rdma_receivers[tx].waitRequestsCompletion()
                 
             for tx in range(num_transmitters):
-                rdma_receivers[tx].pollRequests()
+                if numMessagesTotal[tx] < values.nmsg:
+                    rdma_receivers[tx].pollRequests()
 
             for tx in range(num_transmitters):
-                numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
-                numMissingFound     = rdma_receivers[tx].get_numMissingFound()
+                if numMessagesTotal[tx] < values.nmsg:
+                    numCompletionsFound[tx] = rdma_receivers[tx].get_numCompletionsFound()
+                    numMissingFound[tx]     = rdma_receivers[tx].get_numMissingFound()
 
-                numCompletionsTotal[tx] += numCompletionsFound
-                numMissingTotal[tx]     += numMissingFound
-                numMessagesTotal[tx]    += (numCompletionsFound+numMissingFound)
+                    numCompletionsTotal[tx] += numCompletionsFound[tx]
+                    numMissingTotal[tx]     += numMissingFound[tx]
+                    numMessagesTotal[tx]    += (numCompletionsFound[tx]+numMissingFound[tx])
 
-                workCompletions = rdma_receivers[tx].get_workCompletions()
+                    workCompletions = rdma_receivers[tx].get_workCompletions()
 
             for tx in range(num_transmitters):
-                rdma_receivers[tx].issueRequests()
-            
+                if numMessagesTotal[tx] < values.nmsg:
+                    rdma_receivers[tx].issueRequests()
+
+            # check if we need to stop while loop
+            do_while = False
+            for tx in range(num_transmitters):
+                do_while = do_while or (numMessagesTotal[tx] < values.nmsg)
+                        
             if values.test == 'throughput':
                 continue
-            else:
-                for i in range(numCompletionsFound):
-                    index = workCompletions[i].wr_id
-                    
-                    # Get data for buffer regions
-                    block_index = index//values.num_cmsgs
-                    
-                    # now it is data for each message
-                    message_index = index%values.num_cmsgs
-
-
-                    for tx in range(num_transmitters):
-                        sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-                        if values.test == 'ones':
-                            assert sum_data == 10
-                        if values.test == 'increment':
-                            #print(block_index, sum_data)
-                            assert sum_data == 10*block_index
-                        
+            #else:
+            #    for i in range(numCompletionsFound):
+            #        index = workCompletions[i].wr_id
+            #        
+            #        # Get data for buffer regions
+            #        block_index = index//values.num_cmsgs
+            #        
+            #        # now it is data for each message
+            #        message_index = index%values.num_cmsgs
+            #
+            #
+            #        for tx in range(num_transmitters):
+            #            sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+            #            if values.test == 'ones':
+            #                assert sum_data == 10
+            #            if values.test == 'increment':
+            #                #print(block_index, sum_data)
+            #                assert sum_data == 10*block_index
+            #            
                         
         end = time.time()
         interval = end - start
