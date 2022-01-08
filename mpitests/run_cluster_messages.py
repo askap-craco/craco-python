@@ -249,13 +249,11 @@ def be_receiver(values):
         pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters)
         
-        print(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
+        log.info(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
         numCompletionsTotal = np.zeros(num_transmitters, dtype=int)
-        numCompletionsFound = np.zeros(num_transmitters, dtype=int)
-        numMissingFound = np.zeros(num_transmitters, dtype=int)
         
         for tx in range(num_transmitters):
             rdma_receivers[tx].issueRequests()
@@ -267,7 +265,6 @@ def be_receiver(values):
             
         world.Barrier() # receiver should be ready before transmitter is ready
         start = time.time()
-        #while numMessagesTotal[tx] < values.nmsg:
         while do_while:
             for tx in range(num_transmitters):
                 if numMessagesTotal[tx] < values.nmsg:
@@ -279,15 +276,31 @@ def be_receiver(values):
 
             for tx in range(num_transmitters):
                 if numMessagesTotal[tx] < values.nmsg:
-                    numCompletionsFound[tx] = rdma_receivers[tx].get_numCompletionsFound()
-                    numMissingFound[tx]     = rdma_receivers[tx].get_numMissingFound()
+                    numCompletionsFound = rdma_receivers[tx].get_numCompletionsFound()
+                    numMissingFound     = rdma_receivers[tx].get_numMissingFound()
 
-                    numCompletionsTotal[tx] += numCompletionsFound[tx]
-                    numMissingTotal[tx]     += numMissingFound[tx]
-                    numMessagesTotal[tx]    += (numCompletionsFound[tx]+numMissingFound[tx])
+                    numCompletionsTotal[tx] += numCompletionsFound
+                    numMissingTotal[tx]     += numMissingFound
+                    numMessagesTotal[tx]    += (numCompletionsFound+numMissingFound)
 
-                    workCompletions = rdma_receivers[tx].get_workCompletions()
-
+                    # we do not need following with throughput test
+                    if values.test is not 'throughput':
+                        workCompletions = rdma_receivers[tx].get_workCompletions()
+                        for i in range(numCompletionsFound):
+                            index = workCompletions[i].wr_id
+                        
+                            # Get data for buffer regions
+                            block_index = index//values.num_cmsgs
+                    
+                            # now it is data for each message
+                            message_index = index%values.num_cmsgs
+                        
+                            sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                            if values.test == 'ones':
+                                assert sum_data == 10
+                            if values.test == 'increment':
+                                assert sum_data == 10*block_index
+                        
             for tx in range(num_transmitters):
                 if numMessagesTotal[tx] < values.nmsg:
                     rdma_receivers[tx].issueRequests()
@@ -296,43 +309,21 @@ def be_receiver(values):
             do_while = False
             for tx in range(num_transmitters):
                 do_while = do_while or (numMessagesTotal[tx] < values.nmsg)
-                        
-            if values.test == 'throughput':
-                continue
-            #else:
-            #    for i in range(numCompletionsFound):
-            #        index = workCompletions[i].wr_id
-            #        
-            #        # Get data for buffer regions
-            #        block_index = index//values.num_cmsgs
-            #        
-            #        # now it is data for each message
-            #        message_index = index%values.num_cmsgs
-            #
-            #
-            #        for tx in range(num_transmitters):
-            #            sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-            #            if values.test == 'ones':
-            #                assert sum_data == 10
-            #            if values.test == 'increment':
-            #                #print(block_index, sum_data)
-            #                assert sum_data == 10*block_index
-            #            
-                        
+                                        
         end = time.time()
         interval = end - start
-        #rate = values.msg_size*numCompletionsTotal[tx]*num_transmitters*8.E-9/float(interval)
-        rate = values.msg_size*numCompletionsTotal[tx]*8.E-9/float(interval)
-        
-        log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
-        log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
 
-        
-        log.info(f'Rank {rank} receiver, message missed is {numMissingTotal[tx]}')
-        log.info(f'Rank {rank} receiver, message received is {numCompletionsTotal[tx]}')
-        log.info(f'Rank {rank} receiver, message total is {values.nmsg}')
-        log.info(f'Rank {rank} receiver, message loss rate is {numMissingTotal[tx]/float(numMessagesTotal[tx])}')
-        
+        for tx in range(num_transmitters):
+            rate = values.msg_size*numCompletionsTotal[tx]*8.E-9/float(interval)
+            
+            log.info(f'Rank {rank} receiver from transmitter {tx}, elapsed time is {interval} seconds')
+            log.info(f'Rank {rank} receiver from transmitter {tx}, data rate is {rate} Gbps')
+            
+            log.info(f'Rank {rank} receiver from transmitter {tx}, message missed is {numMissingTotal[tx]}')
+            log.info(f'Rank {rank} receiver from transmitter {tx}, message received is {numCompletionsTotal[tx]}')
+            log.info(f'Rank {rank} receiver from transmitter {tx}, message total is {values.nmsg}')
+            log.info(f'Rank {rank} receiver from transmitter {tx}, message loss rate is {numMissingTotal[tx]/float(numMessagesTotal[tx])}\n')
+            
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
     transmitters = world.Split(0, rank)
@@ -362,7 +353,7 @@ def be_transmitter(values):
 
         rdma_buffers = setup_buffers_for_single_rdma(values, rdma_transmitter)
 
-        print(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
+        log.info(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
 
         if values.test == 'ones':
             for i in range(values.num_blks):
@@ -390,7 +381,7 @@ def be_transmitter(values):
 
         rate = values.msg_size*values.nmsg*8.E-9/float(interval)
         log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
-        log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
+        log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps\n')
         
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
