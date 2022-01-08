@@ -40,7 +40,7 @@ NFPGA_PER_LINK = 3
 
 # we do not need these numbers configurable as barrier will sovle any sync issue
 messageDelayTimeRecv = 0
-messageDelayTimeSend = 0
+messageDelayTimeSend = 100
 
 # We do not use identifier file here, so we hard code it
 identifierFileName = None 
@@ -297,8 +297,10 @@ def be_receiver(values):
                         
                             sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
                             if values.test == 'ones':
+                                #log.info(sum_data)
                                 assert sum_data == 10
                             if values.test == 'increment':
+                                #log.info(sum_data)
                                 assert sum_data == 10*block_index
                         
             for tx in range(num_transmitters):
@@ -374,7 +376,7 @@ def be_transmitter(values):
             numCompletionsFound = rdma_transmitter.get_numCompletionsFound()
             numCompletionsTotal += numCompletionsFound
             
-            #workCompletions = rdma_transmitter.get_workCompletions()
+            workCompletions = rdma_transmitter.get_workCompletions()
        
         end = time.time()
         interval = end - start
