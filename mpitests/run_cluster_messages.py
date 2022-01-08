@@ -40,7 +40,6 @@ NFPGA_PER_LINK = 3
 
 # we do not need these numbers configurable as barrier will sovle any sync issue
 messageDelayTimeRecv = 0
-messageDelayTimeSend = 10000
 
 # We do not use identifier file here, so we hard code it
 identifierFileName = None 
@@ -134,7 +133,7 @@ def create_rdma_transmitter(values):
                                      values.num_blks,
                                      values.num_cmsgs,
                                      values.nmsg,
-                                     messageDelayTimeSend,
+                                     values.send_delay,
                                      rdmaDeviceName,
                                      rdmaPort,
                                      gidIndex)
@@ -394,6 +393,7 @@ def _main():
     parser.add_argument('--msg-size', type=int, default=65536)
     parser.add_argument('--num-blks', type=int, default=10)
     parser.add_argument('--num-cmsgs', type=int, default=100)
+    parser.add_argument('--send-delay', type=int, help='delay in microseconds for RDMA sender/transmitter', default=0)
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
     parser.add_argument('--test', default='throughput', help='throughput, ones or increment')
     
@@ -414,6 +414,7 @@ def _main():
     if values.method == 'rdma':
         assert values.num_blks != 0
         assert values.num_cmsgs != 0
+        assert values.send_delay >= 0
         
         if values.nmsg == 0:
             values.nmsg = values.num_blks*values.num_cmsgs
