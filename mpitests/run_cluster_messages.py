@@ -24,15 +24,15 @@ from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 10000
-# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 10000
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 10_000 --test ones --send-delay 10_000
+# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 10_000 --test ones --send-delay 10_000
 
-# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method mpi --msg-size 65536 --nmsg 10000
-# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method mpi --msg-size 65536 --nmsg 10000
+# mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method mpi --msg-size 65_536 --nmsg 10_000
+# mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method mpi --msg-size 65_536 --nmsg 10_000
 
 # cpu binding
-
-# numCompltions has numMissing included??? check RDMAapi.c to figure out
+# if there is message missing, the result will be wrong, add send-delay option so that we can make message missing free for result check
+# throughput test does not need delay option
 
 log = logging.getLogger(__name__)
 
@@ -310,7 +310,8 @@ def be_receiver(values):
             do_while = False
             for tx in range(num_transmitters):
                 do_while = do_while or (numMessagesTotal[tx] < values.nmsg)
-                                        
+
+        # we may need to get end and interval for all transmitter seperately
         end = time.time()
         interval = end - start
 
