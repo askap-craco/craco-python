@@ -292,12 +292,14 @@ def be_receiver(values):
                     # now it is data for each message
                     message_index = index%values.num_cmsgs
 
-                    sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-                    if values.test == 'ones':
-                        assert sum_data == 10
-                    if values.test == 'increment':
-                        #print(block_index, sum_data)
-                        assert sum_data == 10*block_index
+
+                    for tx in range(num_transmitters):
+                        sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                        if values.test == 'ones':
+                            assert sum_data == 10
+                        if values.test == 'increment':
+                            #print(block_index, sum_data)
+                            assert sum_data == 10*block_index
                         
                         
         end = time.time()
@@ -307,6 +309,8 @@ def be_receiver(values):
         
         log.info(f'Rank {rank} receiver elapsed time is {interval} seconds')
         log.info(f'Rank {rank} receiver data rate is {rate} Gbps')
+
+        
         log.info(f'Rank {rank} receiver, message missed is {numMissingTotal[tx]}')
         log.info(f'Rank {rank} receiver, message received is {numCompletionsTotal[tx]}')
         log.info(f'Rank {rank} receiver, message total is {values.nmsg}')
