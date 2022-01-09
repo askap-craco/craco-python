@@ -23,6 +23,7 @@ from mpi4py import MPI
 from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
+from rdma_transport import ibv_wc_status
 
 # mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 10_000 --test ones --send-delay 10_000
 # mpirun -c 2 run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 10_000 --test ones --send-delay 10_000
@@ -286,21 +287,23 @@ def be_receiver(values):
                     if values.test is not 'throughput':
                         workCompletions = rdma_receivers[tx].get_workCompletions()
                         for i in range(numCompletionsFound):
-                            index = workCompletions[i].wr_id
+                            workCompletion = workCompletions[i]
+                            if workCompletion.status == ibv_wc_status.IBV_WC_SUCCESS:
+                                index = workCompletion.wr_id
                         
-                            # Get data for buffer regions
-                            block_index = index//values.num_cmsgs
+                                # Get data for buffer regions
+                                block_index = index//values.num_cmsgs
                     
-                            # now it is data for each message
-                            message_index = index%values.num_cmsgs
+                                # now it is data for each message
+                                message_index = index%values.num_cmsgs
                         
-                            sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
-                            if values.test == 'ones':
-                                #log.info(sum_data)
-                                assert sum_data == 10
-                            if values.test == 'increment':
-                                #log.info(sum_data)
-                                assert sum_data == 10*block_index
+                                sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                                if values.test == 'ones':
+                                    #log.info(sum_data)
+                                    assert sum_data == 10
+                                if values.test == 'increment':
+                                    #log.info(sum_data)
+                                    assert sum_data == 10*block_index
                         
             for tx in range(num_transmitters):
                 if numMessagesTotal[tx] < values.nmsg:
