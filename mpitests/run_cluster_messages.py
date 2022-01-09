@@ -215,7 +215,6 @@ def setup_buffers_for_single_rdma(values, rdma):
 
         # for now use int8 as it is the same size as char
         rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int8)
-
         rdma_buffer[:] = 0
 
         # for now use int8 as it is the same size as char
@@ -291,8 +290,9 @@ def be_receiver(values):
                         workCompletions = rdma_receivers[tx].get_workCompletions()
                         assert numCompletionsFound == len(workCompletions)
                         
-                        for i in range(numCompletionsFound):
-                            workCompletion = workCompletions[i]
+                        #for i in range(numCompletionsFound):
+                        for workCompletion in workCompletions:
+                            #workCompletion = workCompletions[i]
                             if workCompletion.status == ibv_wc_status.IBV_WC_SUCCESS:
                                 index = workCompletion.wr_id
                         
@@ -308,7 +308,7 @@ def be_receiver(values):
                                     assert sum_data == 10, f'Invalid sum_data {sum_data}'
                                 if values.test == 'increment':
                                     #log.info(sum_data)
-                                    assert sum_data == 10*block_index
+                                    assert sum_data == 10*block_index, f'Invalid sum_data {sum_data} at {block_index}'
                         
             for tx in range(num_transmitters):
                 if numMessagesTotal[tx] < values.nmsg:
@@ -372,10 +372,10 @@ def be_transmitter(values):
                 
         if values.test == 'increment':
             for i in range(values.num_blks):
-                rdma_buffers[i][0:10] = i
+                for j in range(values.num_cmsgs):
+                    rdma_buffers[i][j,0:10] = i
 
         numCompletionsTotal = 0
-
         world.Barrier() # receiver should be ready before transmitter is ready
         start = time.time()
         while numCompletionsTotal < values.nmsg:
