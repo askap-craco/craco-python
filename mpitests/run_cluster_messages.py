@@ -217,7 +217,10 @@ def setup_buffers_for_single_rdma(values, rdma):
         rdma_buffer = np.frombuffer(rdma_memory, dtype=np.int8)
 
         rdma_buffer[:] = 0
-        rdma_buffers.append(rdma_buffer)
+
+        # for now use int8 as it is the same size as char
+        shape = (values.num_cmsgs, values.msg_size)
+        rdma_buffers.append(rdma_buffer.reshape(shape))
         
     return rdma_buffers
     
@@ -299,7 +302,7 @@ def be_receiver(values):
                                 # now it is data for each message
                                 message_index = index%values.num_cmsgs
                         
-                                sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
+                                sum_data = np.sum(rdma_buffers[tx][block_index][message_index,0:10])
                                 if values.test == 'ones':
                                     #log.info(sum_data)
                                     assert sum_data == 10, f'Invalid sum_data {sum_data}'
@@ -364,7 +367,8 @@ def be_transmitter(values):
 
         if values.test == 'ones':
             for i in range(values.num_blks):
-                rdma_buffers[i][0:10] = 1
+                for j in range(values.num_cmsgs):
+                    rdma_buffers[i][j,0:10] = 1
                 
         if values.test == 'increment':
             for i in range(values.num_blks):
