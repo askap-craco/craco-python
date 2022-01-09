@@ -286,6 +286,8 @@ def be_receiver(values):
                     # we do not need following with throughput test
                     if values.test is not 'throughput':
                         workCompletions = rdma_receivers[tx].get_workCompletions()
+                        assert numCompletionsFound == len(workCompletions)
+                        
                         for i in range(numCompletionsFound):
                             workCompletion = workCompletions[i]
                             if workCompletion.status == ibv_wc_status.IBV_WC_SUCCESS:
@@ -300,7 +302,7 @@ def be_receiver(values):
                                 sum_data = np.sum(rdma_buffers[tx][block_index][0:10])
                                 if values.test == 'ones':
                                     #log.info(sum_data)
-                                    assert sum_data == 10
+                                    assert sum_data == 10, f'Invalid sum_data {sum_data}'
                                 if values.test == 'increment':
                                     #log.info(sum_data)
                                     assert sum_data == 10*block_index
