@@ -99,7 +99,7 @@ def transmit_with_mpi(values, status, receiver_rank, transmitter_rank):
     log.info(f'Rank {transmitter_rank} transmitter elapsed time is {interval} seconds')
     log.info(f'Rank {transmitter_rank} transmitter data rate is {rate} Gbps')
 
-def create_rdma_receivers(values, my_transmitters):
+def create_rdma_receivers(values, num_transmitters):
     # Setup rdma receiver
     mode = runMode.RECV_MODE
     rdmaDeviceName = None #"mlx5_1"
@@ -108,7 +108,7 @@ def create_rdma_receivers(values, my_transmitters):
     
     # Send info to my transmitters
     rdma_receivers = []
-    for tx in my_transmitters:
+    for tx in range(num_transmitters):
         rdma_receiver = RdmaTransport(mode, 
                                       values.msg_size,
                                       values.num_blks,
@@ -141,9 +141,9 @@ def create_rdma_transmitter(values):
 
     return rdma_transmitter
 
-def send_receivers_info(values, rdma_receivers, my_transmitters):
+def send_receivers_info(values, rdma_receivers, num_transmitters):
     
-    for tx in my_transmitters:            
+    for tx in range(num_transmitters):            
         rdma_receiver_psn = rdma_receivers[tx].getPacketSequenceNumber()
         rdma_receiver_qpn = rdma_receivers[tx].getQueuePairNumber()
         rdma_receiver_gid = np.frombuffer(rdma_receivers[tx].getGidAddress(), dtype=np.uint8)
@@ -167,9 +167,9 @@ def send_transmitter_info(rdma_transmitter, receiver_rank):
     log.info(f'Sending rdma transmitter info {rdma_transmitter_info} to a rdma receiver with rank {receiver_rank}')
     world.send(rdma_transmitter_info, dest=int(receiver_rank), tag=1)
         
-def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
+def pair_with_transmitters(values, rdma_receivers, num_transmitters, status):
     # recv informaton from transmitters
-    for tx in my_transmitters:
+    for tx in range(num_transmitters):
         transmitter_rank = tx + values.nrx
         
         rdma_transmitter_info = world.recv(source=transmitter_rank, tag=MPI.ANY_TAG, status=status)
@@ -223,9 +223,9 @@ def setup_buffers_for_single_rdma(values, rdma):
         
     return rdma_buffers
     
-def setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters):
+def setup_buffers_for_multiple_rdma(values, rdma_receivers, num_transmitters):
     rdma_buffers = []
-    for tx in my_transmitters:
+    for tx in range(num_transmitters):
         rdma_buffers.append(setup_buffers_for_single_rdma(values, rdma_receivers[tx]))
 
     return rdma_buffers
@@ -246,10 +246,10 @@ def be_receiver(values):
         receive_with_mpi(values, status, num_transmitters)
         
     if values.method == 'rdma':
-        rdma_receivers = create_rdma_receivers(values, my_transmitters)
-        send_receivers_info(values, rdma_receivers, my_transmitters)
-        pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
-        rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, my_transmitters)
+        rdma_receivers = create_rdma_receivers(values, num_transmitters)
+        send_receivers_info(values, rdma_receivers, num_transmitters)
+        pair_with_transmitters(values, rdma_receivers, num_transmitters, status)
+        rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, num_transmitters)
         
         log.info(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         
