@@ -337,14 +337,14 @@ def be_receiver(values):
 def be_transmitter(values):
     assert values.nlink >= values.nrx, 'Each transmitter only sends to one place'
     transmitters = world.Split(0, rank)
-    assert transmitters.Get_size() == values.nlink
+    #assert transmitters.Get_size() == values.nlink, f'{transmitters.Get_size()} {values.nlink}'
     
     receivers = world.Split(1, rank)
 
     # the rank of us in the list of transmitters
     transmitter_rank = transmitters.Get_rank()
     assert transmitter_rank == world.Get_rank() - values.nrx
-    assert transmitter_rank < values.nlink
+    assert transmitter_rank < values.nlink, f'{transmitter_rank} {values.nlink}'
 
     # the reciver rank we'll send our data  to
     receiver_rank = transmitter_rank % values.nrx
@@ -404,10 +404,11 @@ def _main():
     parser.add_argument('--msg-size', type=int, default=65536)
     parser.add_argument('--num-blks', type=int, default=10)
     parser.add_argument('--num-cmsgs', type=int, default=100)
+    parser.add_argument('--num_node', type=int, default=2)
     parser.add_argument('--send-delay', type=int, help='delay in microseconds for RDMA sender/transmitter', default=0)
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
     parser.add_argument('--test', default='throughput', help='throughput, ones or increment')
-    
+        
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     
     parser.set_defaults(verbose=False)
@@ -418,7 +419,8 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
         
-    assert size == values.nrx + values.nlink
+    #assert size == values.num_node*(values.nrx + values.nlink), f'{size} {values.nrx} {values.nlink}'
+    assert size == values.nrx + values.nlink, f'{size} {values.nrx} {values.nlink}'
 
     if values.method == 'mpi':
         assert values.nmsg != 0
