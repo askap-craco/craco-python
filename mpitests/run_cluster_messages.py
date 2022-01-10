@@ -307,7 +307,7 @@ def be_receiver(values):
                                     #log.info(sum_data)
                                     assert sum_data == 10, f'Invalid sum_data {sum_data}'
                                 if values.test == 'increment':
-                                    #log.info(sum_data)
+                                    #log.info(f'{sum_data}, {block_index}, {rdma_buffers[tx][block_index][message_index,0:10]}')
                                     assert sum_data == 10*block_index, f'Invalid sum_data {sum_data} at {block_index}'
                         
             for tx in range(num_transmitters):
@@ -374,7 +374,8 @@ def be_transmitter(values):
             for i in range(values.num_blks):
                 for j in range(values.num_cmsgs):
                     rdma_buffers[i][j,0:10] = i
-
+                    #assert sum(rdma_buffers[i][j,0:10]) == 10*i
+                    
         numCompletionsTotal = 0
         world.Barrier() # receiver should be ready before transmitter is ready
         start = time.time()
