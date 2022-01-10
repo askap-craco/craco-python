@@ -256,7 +256,7 @@ def be_receiver(values):
         pair_with_transmitters(values, rdma_receivers, num_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, num_transmitters)
         
-        log.info(f'rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
+        log.info(f'{socket.gethostname()}, rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
         
         numMissingTotal = np.zeros(num_transmitters, dtype=int)
         numMessagesTotal = np.zeros(num_transmitters, dtype=int)
@@ -368,7 +368,7 @@ def be_transmitter(values):
 
         rdma_buffers = setup_buffers_for_single_rdma(values, rdma_transmitter)
 
-        log.info(f'rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
+        log.info(f'{socket.gethostname()}, rdma_buffers for transmitter shape is {np.array(rdma_buffers).shape}')
 
         if values.test == 'ones':
             for i in range(values.num_blks):
