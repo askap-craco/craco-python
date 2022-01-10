@@ -16,6 +16,8 @@ import mpi4py
 import time
 import random
 
+import socket
+
 import mpi4py.rc
 mpi4py.rc.threads = False
 from mpi4py import MPI
@@ -70,6 +72,8 @@ size = world.Get_size()
 def receive_with_mpi(values, status, num_transmitters):
     # Receive messages
     msg = np.zeros(values.msg_size)
+
+    #log.info(socket.gethostname())
 
     start = time.time()
     for imsg in range(values.nmsg):
