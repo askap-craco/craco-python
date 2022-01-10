@@ -1,3 +1,12 @@
 #!/bin/bash
 
-source /data/fast/den15c/venv3.7/bin/activate; mpirun -c 3 /data/fast/den15c/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+export WORKDIR=/data/seren-01/fast/den15c
+# run with mpi_seren.sh
+#source $WORKDIR/venv3.7/bin/activate; mpirun -c 3 $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+
+# run with mpirun -c 3 mpi_seren.sh
+#source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+
+# run with mpirun -c 2 mpi_seren.sh
+source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 1 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+#source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 1 --method mpi --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000

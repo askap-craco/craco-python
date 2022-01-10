@@ -70,7 +70,7 @@ size = world.Get_size()
 def receive_with_mpi(values, status, num_transmitters):
     # Receive messages
     msg = np.zeros(values.msg_size)
-    
+
     start = time.time()
     for imsg in range(values.nmsg):
         # TODO: extra loop over the number of transmitters I'm exxpecting
