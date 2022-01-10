@@ -146,20 +146,21 @@ def create_rdma_transmitter(values):
 
     return rdma_transmitter
 
-def send_receivers_info(values, rdma_receivers, num_transmitters):
-    
-    for tx in range(num_transmitters):            
-        rdma_receiver_psn = rdma_receivers[tx].getPacketSequenceNumber()
-        rdma_receiver_qpn = rdma_receivers[tx].getQueuePairNumber()
-        rdma_receiver_gid = np.frombuffer(rdma_receivers[tx].getGidAddress(), dtype=np.uint8)
-        rdma_receiver_lid = rdma_receivers[tx].getLocalIdentifier()
+def send_receivers_info(values, rdma_receivers, my_transmitters):
+    index = 0
+    for tx in my_transmitters:            
+        rdma_receiver_psn = rdma_receivers[index].getPacketSequenceNumber()
+        rdma_receiver_qpn = rdma_receivers[index].getQueuePairNumber()
+        rdma_receiver_gid = np.frombuffer(rdma_receivers[index].getGidAddress(), dtype=np.uint8)
+        rdma_receiver_lid = rdma_receivers[index].getLocalIdentifier()
         rdma_receiver_info = {'rank':rank, 'psn':rdma_receiver_psn, 'qpn': rdma_receiver_qpn,
                               'gid': rdma_receiver_gid, 'lid':rdma_receiver_lid}
         
         transmitter_rank = tx + values.nrx
         log.info(f'Sending the rdma receiver info {rdma_receiver_info} to a rdma transmitter with rank {transmitter_rank}')
         world.send(rdma_receiver_info, dest=int(transmitter_rank), tag=1)
-
+        index += 1
+        
 def send_transmitter_info(rdma_transmitter, receiver_rank):
     rdma_transmitter_psn = rdma_transmitter.getPacketSequenceNumber()
     rdma_transmitter_qpn = rdma_transmitter.getQueuePairNumber()
@@ -172,9 +173,10 @@ def send_transmitter_info(rdma_transmitter, receiver_rank):
     log.info(f'Sending rdma transmitter info {rdma_transmitter_info} to a rdma receiver with rank {receiver_rank}')
     world.send(rdma_transmitter_info, dest=int(receiver_rank), tag=1)
         
-def pair_with_transmitters(values, rdma_receivers, num_transmitters, status):
+def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
     # recv informaton from transmitters
-    for tx in range(num_transmitters):
+    index = 0
+    for tx in my_transmitters:
         transmitter_rank = tx + values.nrx
         
         rdma_transmitter_info = world.recv(source=transmitter_rank, tag=MPI.ANY_TAG, status=status)
@@ -185,11 +187,11 @@ def pair_with_transmitters(values, rdma_receivers, num_transmitters, status):
         rdma_transmitter_gid = rdma_transmitter_info['gid']
         rdma_transmitter_lid = rdma_transmitter_info['lid']
         
-        rdma_receivers[tx].setPacketSequenceNumber(rdma_transmitter_psn)
-        rdma_receivers[tx].setQueuePairNumber(rdma_transmitter_qpn)
-        rdma_receivers[tx].setGidAddress(rdma_transmitter_gid)
-        rdma_receivers[tx].setLocalIdentifier(rdma_transmitter_lid)
-        rdma_receivers[tx].setupRdma(identifierFileName)
+        rdma_receivers[index].setPacketSequenceNumber(rdma_transmitter_psn)
+        rdma_receivers[index].setQueuePairNumber(rdma_transmitter_qpn)
+        rdma_receivers[index].setGidAddress(rdma_transmitter_gid)
+        rdma_receivers[index].setLocalIdentifier(rdma_transmitter_lid)
+        rdma_receivers[index].setupRdma(identifierFileName)
 
 def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
@@ -252,8 +254,8 @@ def be_receiver(values):
         
     if values.method == 'rdma':
         rdma_receivers = create_rdma_receivers(values, num_transmitters)
-        send_receivers_info(values, rdma_receivers, num_transmitters)
-        pair_with_transmitters(values, rdma_receivers, num_transmitters, status)
+        send_receivers_info(values, rdma_receivers, my_transmitters)
+        pair_with_transmitters(values, rdma_receivers, my_transmitters, status)
         rdma_buffers = setup_buffers_for_multiple_rdma(values, rdma_receivers, num_transmitters)
         
         log.info(f'{socket.gethostname()}, rdma_buffers for receiver shape is {np.array(rdma_buffers).shape}')
