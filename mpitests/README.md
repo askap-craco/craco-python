@@ -10,6 +10,8 @@ We have following user cases:
 - Case 3: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 - Case 4: One transmitter and one receiver running on seperate nodes, with multiple pairs of transmitters and receivers;
 
+## Case 1: Two transmitters and one receiver running on the same node, but only use one node
+
 ## Case 2: One transmitter and one receiver running on the same node, use multiple nodes
 
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file with all 10 nodes should look like as follow. 
