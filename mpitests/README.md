@@ -1,4 +1,4 @@
-# MPI to test RoCE on SEREN clusterl
+# MPI to test RoCE on SEREN cluster
 
 Assume that
 1. We have a Python virtual environment setup and it is at `/data/seren-01/fast/den15c/venv3.7`;
@@ -7,8 +7,8 @@ Assume that
 We have following user cases:
 - Case 1: Two transmitters and one receiver running on the same node, but only use one node;
 - Case 2: One transmitter and one receiver running on the same node, use multiple nodes;
-- Case 3: One transmitter and one receiver running on seperate node, only use two nodes;
-
+- Case 3: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
+- Case 4: One transmitter and one receiver running on seperate nodes, with multiple pairs of transmitters and receivers;
 
 ## Case 2: One transmitter and one receiver running on the same node, use multiple nodes
 
@@ -167,9 +167,9 @@ Please be aware that, for the test here:
 2. Make sure that all nodes in `mpi_seren.txt` are up and running fine;
 3. The test here only for throughput check, not for test with result comparison, like the `--test=ones` or `--test=increment`. Test with result comparison will harm the performance so that receiver will not be able to receive all packets. Which will cause the script hangs as receivers may wait for missed packets forever.
 
-## Case 3: One transmitter and one receiver running on seperate node, only use two nodes;
+## Case 3: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver
 
-1. Write the hostname of selected two nodes along with `slots=1` into a file like `mpi_seren.txt`, the file with `seren-01` and `seren-02` as selected nodes should look like as follow. 
+1. Write the hostname of selected two nodes along with `slots=1` into a file like `mpi_seren.txt`, the file with `seren-01` and `seren-02` as selected nodes should look like as follow. In this case, we only have one pair of transmitter and receiver.
 ```
 seren-01 slots=1
 seren-02 slots=1
@@ -184,6 +184,7 @@ source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster
 ```
 
 3. Run `mpirun -map-by ppr:1:node --rank-by node -hostfile /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.txt /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.sh` to exacuth the job with MPI.
+
 Once the execution is done, we should see print out information as follow:
 ```
 INFO:__main__:seren-01, rdma_buffers for receiver shape is (1, 10, 100, 65536)
@@ -207,3 +208,60 @@ The above print out information tells us that we successfully finish the test an
 Please be aware that, for the test here:
 1. We can also select other nodes by updating the file `mpi_seren.txt`;
 2. We need to make sure that both selected nodes are up and run fine;
+3. `--nrx` and `--nlink` is determined by the number of transmitter and receiver pair.
+
+## Case 4: One transmitter and one receiver running on seperate nodes, with multiple pairs of transmitters and receivers
+
+We can easily update Case 3 to Case 4.
+
+1. Add more nodes along with `slots=1` into a file like `mpi_seren.txt`, the file with `seren-01`, `seren-02` and `seren-03` and `seren-04` as selected nodes should look like as follow. In this case, we will have two pairs of transmitters and receivers. 
+```
+seren-01 slots=1
+seren-02 slots=1
+seren-03 slots=1
+seren-04 slots=1
+```
+2. Update ` --nrx` and `--nlink` with correct number of transmitter and receiver pairs, for two pairs of transmitters and receivers, we have:
+
+```
+#!/bin/bash
+
+export WORKDIR=/data/seren-01/fast/den15c
+source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 2 --nlink 2 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+```
+
+3. Run `mpirun -map-by ppr:1:node --rank-by node -hostfile /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.txt /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.sh` to exacuth the job with MPI.
+
+Once the execution is done, we should see print out information as follow:
+```
+INFO:__main__:seren-03, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for receiver shape is (1, 10, 100, 65536)
+INFO:__main__:seren-02, rdma_buffers for receiver shape is (1, 10, 100, 65536)
+INFO:__main__:seren-04, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:Rank 0 receiver from transmitter 0, elapsed time is 0.5364596843719482 seconds
+INFO:__main__:Rank 0 receiver from transmitter 0, data rate is 97.7311092097819 Gbps
+INFO:__main__:Rank 0 receiver from transmitter 0, message missed is 0
+INFO:__main__:Rank 0 receiver from transmitter 0, message received is 100000
+INFO:__main__:Rank 0 receiver from transmitter 0, message total is 100000
+INFO:__main__:Rank 0 receiver from transmitter 0, message loss rate is 0.0
+
+INFO:__main__:Rank 0 transmitter elapsed time is 0.5364863872528076 seconds
+INFO:__main__:Rank 0 transmitter data rate is 97.72624477663412 Gbps
+
+INFO:__main__:Rank 1 transmitter elapsed time is 0.5365962982177734 seconds
+INFO:__main__:Rank 1 transmitter data rate is 97.7062275198965 Gbps
+
+INFO:__main__:Rank 1 receiver from transmitter 0, elapsed time is 0.5365936756134033 seconds
+INFO:__main__:Rank 1 receiver from transmitter 0, data rate is 97.7067050595898 Gbps
+INFO:__main__:Rank 1 receiver from transmitter 0, message missed is 0
+INFO:__main__:Rank 1 receiver from transmitter 0, message received is 100000
+INFO:__main__:Rank 1 receiver from transmitter 0, message total is 100000
+INFO:__main__:Rank 1 receiver from transmitter 0, message loss rate is 0.0
+
+INFO:	Receive Visibilities ending 0
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 0
+```
+
+The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100~Gbps.

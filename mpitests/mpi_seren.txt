@@ -11,3 +11,5 @@
 
 seren-01 slots=1
 seren-02 slots=1
+seren-03 slots=1
+seren-04 slots=1
