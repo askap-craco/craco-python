@@ -12,7 +12,7 @@ We have following user cases:
 
 ## Case 2:
 
-1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`
+1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file should looks like as follow. 
 ```
 seren-01 slots=2
 seren-02 slots=2
@@ -26,7 +26,7 @@ seren-09 slots=2
 seren-10 slots=2
 ```
 
-2. Run `source /data/seren-01/fast/den15c/venv3.7/bin/activate` to bring up a Python3 virtual environment;
+2. Run `source /data/seren-01/fast/den15c/venv3.7/bin/activate` to bring up the Python3 virtual environment;
 3. Run '/data/seren-01/fast/den15c/craco-python/mpitests/run_cluster_messages.py --nrx 10 --nlink 10 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000` to launch 10 transmitters and 10 receivers running on 10 nodes, each node has one transmitter and one receiver talking to each other.
 
 Once the execution is done, we will be able to see print out information as follow:
@@ -152,3 +152,10 @@ INFO:	Receive Visibilities ending 0
 INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
+
+The above print out information tells us that we successfully finish the test and the bandwidth on each node is about 100~Gbps.
+
+Please be aware that, for the test here:
+1. The number of nodes in `mpi_seren.txt` should matach the number given by `--nrx` and `--nlink`;
+2. Make sure that all nodes in `mpi_seren.txt` are up and running fine;
+3. The test here only for throughput check, not for test with result comparison, like the `--test=ones` or `--test=increment`. Test with result comparison will harm the performance so that receiver will not be able to receive all packets. Which will cause the script hangs as receivers may wait for missed packets forever. 
