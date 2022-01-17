@@ -1,10 +1,13 @@
-seren-01 slots=2
-seren-02 slots=2
-seren-03 slots=2
-seren-04 slots=2
-seren-05 slots=2
-seren-06 slots=2
-seren-07 slots=2
-seren-08 slots=2
-seren-09 slots=2
-seren-10 slots=2
+#seren-01 slots=2
+#seren-02 slots=2
+#seren-03 slots=2
+#seren-04 slots=2
+#seren-05 slots=2
+#seren-06 slots=2
+#seren-07 slots=2
+#seren-08 slots=2
+#seren-09 slots=2
+#seren-10 slots=2
+
+seren-01 slots=1
+seren-02 slots=1
