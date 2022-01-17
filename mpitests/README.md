@@ -25,11 +25,18 @@ seren-08 slots=2
 seren-09 slots=2
 seren-10 slots=2
 ```
+2. Write a shell script `mpi_seren.sh` in `/data/seren-01/fast/den15c/craco-python/mpitests` to define the job which will be done by MPI, the following script is an example in `bash`:
 
-2. Run `source /data/seren-01/fast/den15c/venv3.7/bin/activate` to bring up the Python3 virtual environment;
-3. Run `/data/seren-01/fast/den15c/craco-python/mpitests/run_cluster_messages.py --nrx 10 --nlink 10 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000` to launch 10 transmitters and 10 receivers running on 10 nodes, each node has one transmitter and one receiver talking to each other.
+```
+#!/bin/bash
 
-Once the execution is done, we will be able to see print out information as follow:
+export WORKDIR=/data/seren-01/fast/den15c
+source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 10 --nlink 10 --method rdma --msg-size 65536 --num-blks 10 --num-cmsgs 100 --nmsg 100_000
+```
+
+3. Run `mpirun -map-by ppr:2:node --rank-by node -hostfile /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.txt /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.sh` to exacuth the job with MPI.
+
+Once the execution is done, we should see print out information as follow:
 ```
 INFO:__main__:Rank 0 transmitter elapsed time is 0.5373530387878418 seconds
 INFO:__main__:Rank 0 receiver from transmitter 0, elapsed time is 0.5373380184173584 seconds
