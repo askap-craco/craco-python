@@ -6,11 +6,11 @@ Assume that
 
 We have following user cases:
 - Case 1: Two transmitters and one receiver running on the same node, but only use one node;
-- Case 2: One transmitter and one receiver running on the same node, use all 10 nodes;
-- Case 3: One transmitter and one receiver running on seperate node, only use 2 nodes;
+- Case 2: One transmitter and one receiver running on the same node, use all multiple nodes;
+- Case 3: One transmitter and one receiver running on seperate node, only use two nodes;
 
 
-## Case 2:
+## Case 2: One transmitter and one receiver running on the same node, use all multiple nodes
 
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file should looks like as follow. 
 ```
@@ -156,6 +156,6 @@ INFO:	Receive Visibilities ending 0
 The above print out information tells us that we successfully finish the test and the bandwidth on each node is about 100~Gbps.
 
 Please be aware that, for the test here:
-1. The number of nodes in `mpi_seren.txt` should matach the number given by `--nrx` and `--nlink`;
+1. The example above is for a test with 10 nodes. We can change the number of nodes to any number in range (0 10], but the number of nodes in `mpi_seren.txt` should matach the number given by `--nrx` and `--nlink`;
 2. Make sure that all nodes in `mpi_seren.txt` are up and running fine;
 3. The test here only for throughput check, not for test with result comparison, like the `--test=ones` or `--test=increment`. Test with result comparison will harm the performance so that receiver will not be able to receive all packets. Which will cause the script hangs as receivers may wait for missed packets forever. 
