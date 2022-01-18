@@ -15,7 +15,45 @@ We have following user cases:
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with one pair of three;
 - Case 7: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with multiple pairs of three;
 
-## Case 1: Two transmitters and one receiver running on the same node, receivers run on the same process, transmitters run on seperate processes, but only use one node;
+## Case 1: Two transmitters and one receiver running on the same node, receivers run on the same process, transmitters run on seperate processes, but only use one node
+
+1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
+2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
+3. Run `mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 1_000_000` there to execute `run_cluster_messages.py` with MPI.
+
+Once the execution is done, we should see print out information as follow:
+```
+INFO:__main__:seren-01, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for receiver shape is (2, 10, 100, 65536)
+INFO:__main__:Rank 0 transmitter elapsed time is 10.084518432617188 seconds
+INFO:__main__:Rank 0 transmitter data rate is 51.98939379239491 Gbps
+
+INFO:__main__:Rank 1 transmitter elapsed time is 10.085363626480103 seconds
+INFO:__main__:Rank 1 transmitter data rate is 51.98503687298204 Gbps
+
+INFO:__main__:Rank 0 receiver from transmitter 0, elapsed time is 10.085368156433105 seconds
+INFO:__main__:Rank 0 receiver from transmitter 0, data rate is 51.98501352333627 Gbps
+INFO:__main__:Rank 0 receiver from transmitter 0, message missed is 0
+INFO:__main__:Rank 0 receiver from transmitter 0, message received is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 0, message total is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 0, message loss rate is 0.0
+
+INFO:__main__:Rank 0 receiver from transmitter 1, elapsed time is 10.085368156433105 seconds
+INFO:__main__:Rank 0 receiver from transmitter 1, data rate is 51.98501352333627 Gbps
+INFO:__main__:Rank 0 receiver from transmitter 1, message missed is 0
+INFO:__main__:Rank 0 receiver from transmitter 1, message received is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 1, message total is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 1, message loss rate is 0.0
+
+INFO:	Receive Visibilities ending 0
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 0
+```
+
+Which proves that we successfully finish the execution there. Given we use a 100~Gbps NiC to do the test and we have two data streams there, each stream has about 50~Gbps available network bandwidth, which is exactly what we see here.  
+
 
 ## Case 2: One transmitter and one receiver running on the same node, use multiple nodes
 
