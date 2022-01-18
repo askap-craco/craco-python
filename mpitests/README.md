@@ -52,7 +52,7 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-Which proves that we successfully finish the execution there. Given we use a 100~Gbps NiC to do the test and we have two data streams there, each stream has about 50~Gbps available network bandwidth, which is exactly what we see here.  
+Which proves that we successfully finish the execution there. Given that we use a 100~Gbps NiC to do the test and we have two data streams there, each stream has about 50~Gbps available network bandwidth, which is exactly what we see here.  
 
 
 ## Case 2: One transmitter and one receiver running on the same node, use multiple nodes
