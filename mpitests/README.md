@@ -1,11 +1,12 @@
 # MPI to test RoCE on SEREN cluster
 
-Assume that
+All demos here assume that
 1. We have a Python virtual environment setup and it is at `/data/seren-01/fast/den15c/venv3.7`;
 2. We have a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests` to launch MPI transmitters and receivers with given options.
 
 `run_cluster_messages.py` has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
+## Summaries of demos
 We have demos for following user cases:
 -  One transmitter and one receiver running on the same node, use multiple nodes;
 -  One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
