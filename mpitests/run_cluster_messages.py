@@ -108,6 +108,7 @@ def create_rdma_receivers(values, num_transmitters):
     # Setup rdma receiver
     mode = runMode.RECV_MODE
     rdmaDeviceName = None #"mlx5_1"
+    #rdmaDeviceName = "mlx5_1"
     rdmaPort = 1
     gidIndex = -1
     
@@ -131,6 +132,7 @@ def create_rdma_transmitter(values):
     # Setup rdma transmitter 
     mode = runMode.SEND_MODE
     rdmaDeviceName = None #"mlx5_1"
+    #rdmaDeviceName = "mlx5_2"
     rdmaPort = 1
     gidIndex = -1
     
