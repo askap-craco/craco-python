@@ -272,7 +272,7 @@ INFO:	Receive Visibilities ending 0
 
 The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100~Gbps.
 
-# [Case 4](#case_4) 
+# [Case 4](#demos) 
 
 1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
 2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
