@@ -5,10 +5,15 @@ Assume that
 2. We have a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests` to launch MPI transmitters and receivers with given options.
 
 We have following user cases:
-- Case 1: Two transmitters and one receiver running on the same node, but only use one node;
+- Case 1: Two transmitters and two receiver running on the same node, but only use one node;
 - Case 2: One transmitter and one receiver running on the same node, use multiple nodes;
 - Case 3: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 - Case 4: One transmitter and one receiver running on seperate nodes, with multiple pairs of transmitters and receivers;
+
+- Case 1: Two transmitters and two receivers running on the same node, but only use one node;
+- Case 5: Two transmitters and two receivers running on the same node, but use multiple nodes;
+- Case 6: Two transmitters and two receivers running on seperate nodes, but with one pair of two;
+- Case 7: Two transmitters and two receivers running on seperate nodes, but with multiple pairs of two;
 
 ## Case 1: Two transmitters and one receiver running on the same node, but only use one node
 

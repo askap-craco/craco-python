@@ -194,7 +194,8 @@ def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
         rdma_receivers[index].setGidAddress(rdma_transmitter_gid)
         rdma_receivers[index].setLocalIdentifier(rdma_transmitter_lid)
         rdma_receivers[index].setupRdma(identifierFileName)
-
+        index += 1
+        
 def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
     log.info(f'Got rdma receiver info {rdma_receiver_info} from rdma receiver with rank={status.Get_source()} tag={status.Get_tag()}')
@@ -413,7 +414,6 @@ def _main():
     parser.add_argument('--msg-size', type=int, default=65536)
     parser.add_argument('--num-blks', type=int, default=10)
     parser.add_argument('--num-cmsgs', type=int, default=100)
-    parser.add_argument('--num_node', type=int, default=2)
     parser.add_argument('--send-delay', type=int, help='delay in microseconds for RDMA sender/transmitter', default=0)
     parser.add_argument('--method', default='mpi', help='mpi or rdma')
     parser.add_argument('--test', default='throughput', help='throughput, ones or increment')
@@ -428,7 +428,6 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
         
-    #assert size == values.num_node*(values.nrx + values.nlink), f'{size} {values.nrx} {values.nlink}'
     assert size == values.nrx + values.nlink, f'{size} {values.nrx} {values.nlink}'
 
     if values.method == 'mpi':
