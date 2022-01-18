@@ -15,7 +15,7 @@ We have demos for following user cases:
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;
 - Case 7: The same as Case 6, but with multiple pairs of three;
 
-## [Case 1](#case_1)
+## [Case 1](case_1)
 
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file with all 10 nodes should look like as follow. 
 ```
@@ -271,7 +271,7 @@ INFO:	Receive Visibilities ending 0
 
 The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100~Gbps.
 
-## [Case 4](#case_4) 
+## [Case 4](case_4) 
 
 1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
 2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
