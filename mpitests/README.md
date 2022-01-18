@@ -15,7 +15,7 @@ We have following user cases:
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with one pair of three;
 - Case 7: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with multiple pairs of three;
 
-## Case 1: Two transmitters and one receiver running on the same node, but only use one node
+## Case 1: Two transmitters and one receiver running on the same node, receivers run on the same process, transmitters run on seperate processes, but only use one node;
 
 ## Case 2: One transmitter and one receiver running on the same node, use multiple nodes
 
