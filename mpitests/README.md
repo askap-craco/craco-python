@@ -7,7 +7,7 @@ Assume that
 `run_cluster_messages.py` has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
 We have demos for following user cases:
-- Case 1: One transmitter and one receiver running on the same node, use multiple nodes;
+- [Case 1: One transmitter and one receiver running on the same node, use multiple nodes;](#Case_1)
 - Case 2: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 - Case 3: The same as Case 2, but with multiple pairs of transmitters and receivers;
 
@@ -16,7 +16,7 @@ We have demos for following user cases:
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;
 - Case 7: The same as Case 6, but with multiple pairs of three;
 
-## Case 1
+## [Case 1](#Case_1)
 
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file with all 10 nodes should look like as follow. 
 ```
