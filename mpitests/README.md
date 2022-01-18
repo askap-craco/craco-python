@@ -166,7 +166,7 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-The above print out information tells us that we successfully finish the test and the bandwidth on each node is about 100~Gbps.
+The above print out information tells us that we successfully finish the test and the bandwidth on each node is about 100 Gbps.
 
 Please be aware that, for the test here:
 1. The example above is for a test with 10 nodes. We can change the number of nodes to any number in a range (0 10], but the number of nodes in `mpi_seren.txt` should matach the number given by `--nrx` and `--nlink`;
@@ -209,7 +209,7 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` is about 100~Gbps.
+The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` is about 100 Gbps.
 
 Please be aware that, for the test here:
 1. We can also select other nodes by updating the file `mpi_seren.txt`;
@@ -270,7 +270,7 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100~Gbps.
+The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100 Gbps.
 
 ## Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node
 
@@ -309,4 +309,4 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-Which proves that we successfully finish the execution there. Given that we use a 100~Gbps NiC to do the test and we have two data streams there, each stream has about 50~Gbps available network bandwidth, which is exactly what we see here.  
+Which proves that we successfully finish the execution there. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.  
