@@ -7,16 +7,15 @@ Assume that
 `run_cluster_messages.py` has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
 We have demos for following user cases:
-- [Case 1: One transmitter and one receiver running on the same node, use multiple nodes;](#Case_1)
+- [Case 1: One transmitter and one receiver running on the same node, use multiple nodes;](#case_1)
 - Case 2: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 - Case 3: The same as Case 2, but with multiple pairs of transmitters and receivers;
-
-- Case 4: Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node;
+- [Case 4: Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node;](#case_4)
 - Case 5: The same as Case 4, but with multiple nodes;
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;
 - Case 7: The same as Case 6, but with multiple pairs of three;
 
-## [Case 1](#Case_1)
+## [Case 1](#case_1)
 
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file with all 10 nodes should look like as follow. 
 ```
@@ -272,7 +271,7 @@ INFO:	Receive Visibilities ending 0
 
 The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100~Gbps.
 
-## Case 4: Two transmitters and one receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node
+## [Case 4](#case_4) 
 
 1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
 2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
