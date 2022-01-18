@@ -18,6 +18,8 @@ We have demos for following user cases:
 
 ## One transmitter and one receiver running on the same node, use multiple nodes
 
+The demo here has transmitter and receiver using the same network interface. 
+
 1. Write the hostname of all nodes along with `slots=2` into a file like `mpi_seren.txt`, the file with all 10 nodes should look like as follow. 
 ```
 seren-01 slots=2
@@ -274,6 +276,8 @@ The above print out information tells us that we successfully finish the test an
 
 ## Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node
 
+The demo here has all transmitters and receivers running on the same network interface.
+
 1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
 2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
 3. Run `mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 1_000_000` there to execute `run_cluster_messages.py` with MPI.
@@ -309,4 +313,4 @@ INFO:	Receive Visibilities ending 1
 INFO:	Receive Visibilities ending 0
 ```
 
-Which proves that we successfully finish the execution there. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.  
+Which proves that we successfully finish the execution there. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
