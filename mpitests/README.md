@@ -6,7 +6,7 @@ All demos here assume that
 
 `run_cluster_messages.py` has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
-## Summaries of demos
+## Summary of demos
 We have demos for following user cases:
 -  One transmitter and one receiver running on the same node, use multiple nodes;
 -  One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
