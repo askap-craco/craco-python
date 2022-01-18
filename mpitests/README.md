@@ -4,13 +4,12 @@ Assume that
 1. We have a Python virtual environment setup and it is at `/data/seren-01/fast/den15c/venv3.7`;
 2. We have a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests` to launch MPI transmitters and receivers with given options.
 
-We have following user cases:
+We have demos for following user cases:
 - Case 1: Two transmitters and two receiver running on the same node, but only use one node;
 - Case 2: One transmitter and one receiver running on the same node, use multiple nodes;
 - Case 3: One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 - Case 4: One transmitter and one receiver running on seperate nodes, with multiple pairs of transmitters and receivers;
 
-- Case 1: Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, but only use one node;
 - Case 5: Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, but use multiple nodes;
 - Case 6: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with one pair of three;
 - Case 7: Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, but with multiple pairs of three;
