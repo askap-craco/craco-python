@@ -195,6 +195,7 @@ def pair_with_transmitters(values, rdma_receivers, my_transmitters, status):
         rdma_receivers[index].setLocalIdentifier(rdma_transmitter_lid)
         rdma_receivers[index].setupRdma(identifierFileName)
         index += 1
+        log.info(f"setup receiver done {index}")
         
 def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     rdma_receiver_info = world.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
@@ -218,6 +219,8 @@ def pair_with_receiver(rdma_transmitter, identifierFileName, status):
     
     rdma_transmitter.setupRdma(identifierFileName)
 
+    log.info("setup transmitter done")
+    
 def setup_buffers_for_single_rdma(values, rdma):
     rdma_buffers = []
     for iblock in range(values.num_blks):
