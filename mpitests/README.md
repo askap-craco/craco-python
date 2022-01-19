@@ -37,9 +37,9 @@ We have demos for following user cases:
 -  One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
 -  Similar to the previous demo, but with multiple pairs of transmitters and receivers;
 -  Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node;
--  Similar to the previous demo, but with multiple nodes;
--  Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;
--  Similar to the previous demo, but with multiple pairs of three;
+~-  Similar to the previous demo, but with multiple nodes;~
+~-  Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;~
+~-  Similar to the previous demo, but with multiple pairs of three;~
 
 ## One transmitter and one receiver running on the same node, use multiple nodes
 
@@ -432,6 +432,6 @@ INFO:	Receive Visibilities ending 0
 
 Which proves that we successfully finish the execution on two nodes. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
 
-## Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three
+~## Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three~
 
-## Similar to the previous demo, but with multiple pairs of three
+~## Similar to the previous demo, but with multiple pairs of three~
