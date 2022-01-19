@@ -1,7 +1,8 @@
-# MPI to test RoCE on SEREN cluster
+# Demos with MPI to test RoCE on SEREN cluster
 
-All demos here assume that
-1. We have a Python 3 virtual environment setup which has following packages installed. To run the demo here, I also assume that a proper environment exists at `/data/seren-01/fast/den15c/venv3.7`
+We have to do some general setups before we run the demos here.
+
+1. Setup a Python 3 virtual environment with following packages installed. For the demos discussed here, I assume that a proper environment exists at `/data/seren-01/fast/den15c/venv3.7` on `seren-01`.
 ```
 cycler==0.11.0
 fonttools==4.28.5
