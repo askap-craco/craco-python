@@ -245,7 +245,7 @@ Please be aware that, for the test here:
 
 ## Similar to the previous demo, but with multiple pairs of transmitters and receivers
 
-We can easily update the previous demo to run it with multiple pairs of transmitters and receivers. .
+We can easily update the previous demo to run it with multiple pairs of transmitters and receivers, here is a demo with two pairs.
 
 1. Add more nodes along with `slots=1` into a file like `mpi_seren.txt`, the file with `seren-01`, `seren-02` and `seren-03` and `seren-04` as selected nodes should look like as follow. In this case, we will have two pairs of transmitters and receivers. 
 ```
@@ -353,3 +353,81 @@ Please be aware that
 1. Comparing with previous demos, `--nrx` and `--nlink` are setup in a different way here. `--nrx` is 1 but we actually have two receivers running on the same process, `--nlink` is 2 and we have two transmitters running on seperate processes;
 
 ## Similar to the previous demo, but with multiple nodes
+
+We can easily update the previous demo to run with multiple nodes, here is a demo with two nodes.
+
+1. Write the hostname of two selected nodes along with `slots=3` into a file like `mpi_seren.txt`, the file with `seren-01` and `seren-02` as selected should look like as follow.
+
+```
+seren-01 slots=3
+seren-02 slots=3
+```
+
+2. Write a shell script `mpi_seren.sh` in `/data/seren-01/fast/den15c/craco-python/mpitests` to define the job which will be done by MPI, the following script is an example in `bash`:
+```
+#!/bin/bash
+
+export WORKDIR=/data/seren-01/fast/den15c
+source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 2 --nlink 4 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 1_000_000
+```
+
+3. Run `mpirun -map-by ppr:3:node --rank-by node -hostfile /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.txt /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.sh` to exacuth the job with MPI.
+
+```
+INFO:__main__:seren-02, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-02, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for transmitter shape is (10, 100, 65536)
+INFO:__main__:seren-02, rdma_buffers for receiver shape is (2, 10, 100, 65536)
+INFO:__main__:seren-01, rdma_buffers for receiver shape is (2, 10, 100, 65536)
+INFO:__main__:Rank 2 transmitter elapsed time is 10.13222336769104 seconds
+INFO:__main__:Rank 2 transmitter data rate is 51.74461527090043 Gbps
+
+INFO:__main__:Rank 0 transmitter elapsed time is 10.132301330566406 seconds
+INFO:__main__:Rank 0 transmitter data rate is 51.74421712255687 Gbps
+
+INFO:__main__:Rank 0 receiver from transmitter 0, elapsed time is 10.132305383682251 seconds
+INFO:__main__:Rank 0 receiver from transmitter 0, data rate is 51.74419642388087 Gbps
+INFO:__main__:Rank 0 receiver from transmitter 0, message missed is 0
+INFO:__main__:Rank 0 receiver from transmitter 0, message received is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 0, message total is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 0, message loss rate is 0.0
+
+INFO:__main__:Rank 0 receiver from transmitter 1, elapsed time is 10.132305383682251 seconds
+INFO:__main__:Rank 0 receiver from transmitter 1, data rate is 51.74419642388087 Gbps
+INFO:__main__:Rank 0 receiver from transmitter 1, message missed is 0
+INFO:__main__:Rank 0 receiver from transmitter 1, message received is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 1, message total is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 1, message loss rate is 0.0
+
+INFO:__main__:Rank 3 transmitter elapsed time is 10.132390975952148 seconds
+INFO:__main__:Rank 3 transmitter data rate is 51.74375932041374 Gbps
+
+INFO:__main__:Rank 1 transmitter elapsed time is 10.132384061813354 seconds
+INFO:__main__:Rank 1 transmitter data rate is 51.74379462933328 Gbps
+
+INFO:__main__:Rank 1 receiver from transmitter 0, elapsed time is 10.13242244720459 seconds
+INFO:__main__:Rank 1 receiver from transmitter 0, data rate is 51.7435986045612 Gbps
+INFO:__main__:Rank 1 receiver from transmitter 0, message missed is 0
+INFO:__main__:Rank 1 receiver from transmitter 0, message received is 1000000
+INFO:__main__:Rank 1 receiver from transmitter 0, message total is 1000000
+INFO:__main__:Rank 1 receiver from transmitter 0, message loss rate is 0.0
+
+INFO:__main__:Rank 1 receiver from transmitter 1, elapsed time is 10.13242244720459 seconds
+INFO:__main__:Rank 1 receiver from transmitter 1, data rate is 51.7435986045612 Gbps
+INFO:__main__:Rank 1 receiver from transmitter 1, message missed is 0
+INFO:__main__:Rank 1 receiver from transmitter 1, message received is 1000000
+INFO:__main__:Rank 1 receiver from transmitter 1, message total is 1000000
+INFO:__main__:Rank 1 receiver from transmitter 1, message loss rate is 0.0
+
+INFO:	Receive Visibilities ending 0
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 0
+INFO:	Receive Visibilities ending 1
+INFO:	Receive Visibilities ending 0
+INFO:	Receive Visibilities ending 0
+```
+
+Which proves that we successfully finish the execution on two nodes. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
