@@ -29,16 +29,16 @@ six==1.16.0
    - Bring up the above Python 3 virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate` if we do not have it up and running.
    - Run `pip install -e .` in the repository directory to install the package with development mode.
 
-For the demos here, I assume that these repositories are at `/data/seren-01/fast/den15c' and we will find  a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests`. The Python script will be used to launch MPI transmitters and receivers. It has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
+For the demos here, I assume that these repositories are at `/data/seren-01/fast/den15c' and we will find  a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests`. The Python script will be used to launch MPI transmitters and receivers. It has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo separately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
 ## Summary of demos
 We have demos for following user cases:
 -  One transmitter and one receiver running on the same node, use multiple nodes;
--  One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver;
+-  One transmitter and one receiver running on separate nodes, with one pair of transmitter and receiver;
 -  Similar to the previous demo, but with multiple pairs of transmitters and receivers;
--  Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node;
+-  Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on separate processes, with only one node;
 ~-  Similar to the previous demo, but with multiple nodes;~
-~-  Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three;~
+~-  Two transmitters and two receivers running on separate nodes, receivers run on the same node, transmitters run on separate nodes, with one pair of three;~
 ~-  Similar to the previous demo, but with multiple pairs of three;~
 
 ## One transmitter and one receiver running on the same node, use multiple nodes
@@ -200,7 +200,7 @@ Please be aware that, for the test here:
 2. Make sure that all nodes in `mpi_seren.txt` are up and running fine;
 3. The test here only for throughput check, not for test with result comparison, like the `--test=ones` or `--test=increment`. Test with result comparison will harm the performance so that receiver will not be able to receive all packets. Which will cause the script hangs as receivers may wait for missed packets forever.
 
-## One transmitter and one receiver running on seperate nodes, with one pair of transmitter and receiver
+## One transmitter and one receiver running on separate nodes, with one pair of transmitter and receiver
 
 1. Write the hostname of selected two nodes along with `slots=1` into a file like `mpi_seren.txt`, the file with `seren-01` and `seren-02` as selected nodes should look like as follow. In this case, we only have one pair of transmitter and receiver.
 ```
@@ -299,7 +299,7 @@ INFO:	Receive Visibilities ending 0
 
 The above print out information tells us that we successfully finish the test and the bandwidth sending data from `seren-02` to `seren-01` and from `seren-04` to `seren-03` is about 100 Gbps.
 
-## Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node
+## Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on separate processes, with only one node
 
 1. Write the hostname of one selected node along with `slots=3` into a file like `mpi_seren.txt`, the file with `seren-01` as selected should look like as follow. 
 ```
@@ -350,7 +350,7 @@ INFO:	Receive Visibilities ending 0
 Which proves that we successfully finish the execution there. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
 
 Please be aware that
-1. Comparing with previous demos, `--nrx` and `--nlink` are setup in a different way here. `--nrx` is 1 but we actually have two receivers running on the same process, `--nlink` is 2 and we have two transmitters running on seperate processes;
+1. Comparing with previous demos, `--nrx` and `--nlink` are setup in a different way here. `--nrx` is 1 but we actually have two receivers running on the same process, `--nlink` is 2 and we have two transmitters running on separate processes;
 
 ## Similar to the previous demo, but with multiple nodes
 
@@ -432,6 +432,6 @@ INFO:	Receive Visibilities ending 0
 
 Which proves that we successfully finish the execution on two nodes. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
 
-~## Two transmitters and two receivers running on seperate nodes, receivers run on the same node, transmitters run on seperate nodes, with one pair of three~
+~## Two transmitters and two receivers running on separate nodes, receivers run on the same node, transmitters run on separate nodes, with one pair of three~
 
 ~## Similar to the previous demo, but with multiple pairs of three~
