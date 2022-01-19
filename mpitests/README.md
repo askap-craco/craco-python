@@ -16,13 +16,20 @@ pkg-resources==0.0.0
 pybind11==2.9.0
 pyparsing==3.0.6
 python-dateutil==2.8.2
--e git+git@github.com:askap-craco/python-rdma-transport.git@d89034beaf154aafdae1e6fe880810f15f76cdfe#egg=rdma_transport
 six==1.16.0
 ```
 
-2. We have a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests` to launch MPI transmitters and receivers with given options.
+2. Setup `python-rdma-transport` on `seren-01`:
+   - Checkout `python-rdma-transport` repository with `git clone --recurse-submodules https://github.com/askap-craco/python-rdma-transport.git`. `--recurse-submodules` is required here as we have dependent one submodule `rdma-data-transport`.
+   - Bring up the above Python 3 virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`.
+   - Install the package with `pip install .` in the directory of `python-rdma-transport`.
 
-`run_cluster_messages.py` has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
+3. Setup `craco-python` on `seren-01` with development mode:
+   - Checkout `craco-python` repository with `git clone https://github.com/askap-craco/craco-python.git`
+   - Bring up the above Python 3 virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate` if we do not have it up and running.
+   - Run `pip install -e .` in the repository directory to install the package with development mode.
+
+For the demos here, I assume that these repositories are at `/data/seren-01/fast/den15c' and we will find  a Python script `run_cluster_messages.py` at `/data/seren-01/fast/den15c/craco-python/mpitests`. The Python script will be used to launch MPI transmitters and receivers. It has help to tell us how to use it. For the demos here, we will set `--method` as `rdma`, will use default setup for `--test` option, the setup of `--nrx` and `--nlink` will be discussed in each demo seperately. `--num-blks`, `--nun-cmsgs` and `--msg-size` are important for performace, but using the setup given in the following demos should be good enough. `--nmsg` is the number of messages, which should not be too big or too small. 
 
 ## Summary of demos
 We have demos for following user cases:
