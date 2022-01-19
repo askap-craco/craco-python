@@ -301,11 +301,20 @@ The above print out information tells us that we successfully finish the test an
 
 ## Two transmitters and two receivers running on the same node, receivers run on the same process, transmitters run on seperate processes, with only one node
 
-The demo here has all transmitters and receivers running on the same network interface.
+1. Write the hostname of one selected node along with `slots=3` into a file like `mpi_seren.txt`, the file with `seren-01` as selected should look like as follow. 
+```
+seren-01 slots=3
+```
+2. Write a shell script `mpi_seren.sh` in `/data/seren-01/fast/den15c/craco-python/mpitests` to define the job which will be done by MPI, the following script is an example in `bash`:
 
-1. Bring up Python virtual environment with `source /data/seren-01/fast/den15c/venv3.7/bin/activate`
-2. Go to directory `/data/seren-01/fast/den15c/craco-python/mpitests`
-3. Run `mpirun -c 3 run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 1_000_000` there to execute `run_cluster_messages.py` with MPI.
+```
+#!/bin/bash
+
+export WORKDIR=/data/seren-01/fast/den15c
+source $WORKDIR/venv3.7/bin/activate; $WORKDIR/craco-python/mpitests/run_cluster_messages.py --nrx 1 --nlink 2 --method rdma --msg-size 65_536 --num-blks 10 --num-cmsgs 100 --nmsg 1_000_000
+```
+
+3. Run `mpirun -map-by ppr:3:node --rank-by node -hostfile /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.txt /data/seren-01/fast/den15c/craco-python/mpitests/mpi_seren.sh` to exacuth the job with MPI.
 
 Once the execution is done, we should see print out information as follow:
 ```
@@ -322,7 +331,7 @@ INFO:__main__:Rank 0 receiver from transmitter 0, elapsed time is 10.08536815643
 INFO:__main__:Rank 0 receiver from transmitter 0, data rate is 51.98501352333627 Gbps
 INFO:__main__:Rank 0 receiver from transmitter 0, message missed is 0
 INFO:__main__:Rank 0 receiver from transmitter 0, message received is 1000000
-INFO:__main__:Rank 0 receiver from transmitter 0, message total is 1000000
+INFO:__main__:Rank 0 receiver from transmitter 0, message total is 1000000z
 INFO:__main__:Rank 0 receiver from transmitter 0, message loss rate is 0.0
 
 INFO:__main__:Rank 0 receiver from transmitter 1, elapsed time is 10.085368156433105 seconds
@@ -339,3 +348,8 @@ INFO:	Receive Visibilities ending 0
 ```
 
 Which proves that we successfully finish the execution there. Given that we use a 100 Gbps NiC to do the test and we have two data streams there, each stream has about 50 Gbps available network bandwidth, which is exactly what we see here.
+
+Please be aware that
+1. Comparing with previous demos, `--nrx` and `--nlink` are setup in a different way here. `--nrx` is 1 but we actually have two receivers running on the same process, `--nlink` is 2 and we have two transmitters running on seperate processes;
+
+## Similar to the previous demo, but with multiple nodes
