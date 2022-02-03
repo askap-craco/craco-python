@@ -18,11 +18,9 @@
  # normally with just the line below (after uncommenting)
  # .
 
-docutils
 grpcio
 dill
 sphinx
-docutils
 #astropy==4.1
 #attrs==21.2.0
 #backcall==0.2.0
