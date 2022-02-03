@@ -4,7 +4,8 @@
  # in editable mode
  # KB - I'm not sure we want to do this, as setup.py references this file for the dependencies
  #  -e .
- numpy
+sphinx
+numpy
  matplotlib
  astropy
  pytz
@@ -20,7 +21,6 @@
 
 grpcio
 dill
-sphinx
 #astropy==4.1
 #attrs==21.2.0
 #backcall==0.2.0
