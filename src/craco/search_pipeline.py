@@ -3,9 +3,10 @@ import numpy as np
 from pylab import *
 import os
 import pyxrt
-from craco_testing.pyxrtutil import *
+from .pyxrtutil import *
 import time
 import pickle
+import copy
 
 from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
@@ -294,7 +295,7 @@ class Pipeline:
         # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
         NBOX = 8
         self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        print(f"Boxcar history {self.boxcar_history.nparr.shape} {self.boxcar_history.nparr.size} {self.boxcar_history.nparr.itemsize}")
+        print(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
         log.info('Allocating candidates')
 
         # small buffer
@@ -331,7 +332,9 @@ class Pipeline:
         assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
 
         starts = []
-    
+
+
+
         if values.run_fdmt:
             # temporary: finish FDMT before starting image pipeline on same tblk
             #starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
@@ -339,6 +342,8 @@ class Pipeline:
             self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk).wait(0)
         
         if values.run_image:
+            # need to clear candidates so if there are no candidates before it's run, nothing happens
+            self.clear_candidates() 
             for cu in self.ffts:
                 starts.append(cu(fft_cfg, fft_cfg))
             
@@ -350,6 +355,16 @@ class Pipeline:
             
 
         return starts
+
+    def clear_candidates(self):
+        '''
+        Clear the candidate array
+        '''
+        # thisis probably a bit extreme, because it sets the whole candidate array to 0, but we
+        # We could just set the first entry to zero - I'll work that out later
+        self.candidates.clear()
+        assert len(self.get_candidates()) == 0
+        
 
     def get_candidates(self):
         '''
@@ -363,8 +378,25 @@ class Pipeline:
         ncand = np.argmax(self.candidates.nparr['snr'] == 0)
         return self.candidates.nparr[:ncand]
 
-    def reset_boxcar_history(self):
-        self.boxcar_history.clear()
+    def clear_buffers(self, values):
+        '''
+        Clear main buffer and boxcar and history
+        Works wehtehr we've decieded to map the buffers or not
+
+        For some reason you can't just set the values. But you can run the FDMT 11 times and it will work        '''
+        self.inbuf.nparr[:] = 0
+        self.inbuf.copy_to_device()
+        logging.info('Clearing mainbuf data NBLK=%s', NBLK)
+        for ibuf, buf in enumerate(self.all_mainbufs):
+            buf.clear()
+            
+        for tblk in range(NBLK):
+            self.run(tblk, values)
+            #for ibuf, buf in enumerate(self.all_mainbufs):
+            #    buf.copy_from_device()
+            #    logging.info('tblk=%d ibuf=%d mean=%s', tblk, ibuf, buf.nparr.mean())
+
+        
 
 def location2pix(location, npix=256):
 
@@ -383,15 +415,20 @@ def location2pix(location, npix=256):
 
 location2pix = np.vectorize(location2pix)
 
-def print_candidates(candidates, npix):
-    print(f"snr\t(vpix, upix)\tboxc_width\ttime\tdm")
-    #for candidate in np.sort(candidates):
-    for candidate in candidates:
-        location = candidate['loc_2dfft']
-        vpix, upix = location2pix(location, npix)
+def cand2str(candidate, npix, iblk):
+    location = candidate['loc_2dfft']
+    vpix, upix = location2pix(location, npix)
+    snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
+    s = f"{snr:.1f}\t{upix}\t{vpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}"
+    return s
 
-        snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
-        print(f"{snr:.3f}\t({upix}, {vpix})\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}")
+cand_str_header = '# SNR\tupix\tvpix\tboxc_width\ttime\tdm\tiblk\n'
+    
+
+def print_candidates(candidates, npix, iblk):
+    print(cand_str_header)
+    for candidate in candidates:
+        print(cand2str(candidate, npix, iblk))
 
 def grid_candidates(cands, field='snr', npix=256):
     g = np.zeros((npix, npix))
@@ -399,7 +436,7 @@ def grid_candidates(cands, field='snr', npix=256):
         vpix, upix = location2pix(cand['loc_2dfft'], npix)
         if field == 'candidx':
             d = candidx
-        if field == 'count':
+        elif field == 'count':
             d = 1.0
         else:
             d = cand[field]
@@ -412,29 +449,36 @@ def waitall(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
 
+def wait_for_starts(starts, call_start):
+    wait_start = time.perf_counter()
+    for istart, start in enumerate(starts):
+        log.info(f'Waiting for istart={istart} start={start}')
+        start.wait(0) # 0 means wait forever
+        wait_end = time.perf_counter()
+        log.info(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
+
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
-    parser.add_argument('-r', '--run_fdmt',  action='store_true', help='Run FDMT pipeline')
-    parser.add_argument('-R', '--run_image', action='store_true', help='Run Image pipeline')
+    parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
+    parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
-    parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
+    #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
     parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
-    parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
-    parser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
-    parser.add_argument('-N', '--nuvmax',    action='store', type=int, help='Maximum number of UV allowed.')
-    parser.add_argument('-C', '--ncin',      action='store', type=int, help='Numer of channels for sub fdmt')
-    parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
+    #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
+    #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
+    #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
+    #parser.add_argument('-N', '--nuvmax',    action='store', type=int, help='Maximum number of UV allowed.')
+    #parser.add_argument('-C', '--ncin',      action='store', type=int, help='Numer of channels for sub fdmt')
+    #parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
     
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for candidate grouper')
-    
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed')
     parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per beam')
     
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
@@ -443,15 +487,22 @@ def get_parser():
     
     # These three are not used in PipelinePlan ...
     parser.add_argument('-W', '--boxcar_weight', type=str,   help='Boxcar weighting type', choices=('sum','avg','sqrt'), default='sum')
-    parser.add_argument('-f', '--fdmt_scale',    type=float, help='Scale FDMT output by this amount')
+    parser.add_argument('--input-scale', type=float, help='Multiply input by this scale factor before rounding to int16', default=1.0)
     parser.add_argument('-F', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
+    parser.add_argument('-C','--cand-file', help='Candidate output file txt', default='candidates.txt')
+    parser.add_argument('--dump-mainbufs', type=int, help='Dump main buffer every N blocks', metavar='N')
+    parser.add_argument('--dump-fdmt-hist-buf', type=int, help='Dump FDMT history buffer every N blocks', metavar='N')
+    parser.add_argument('--dump-boxcar-hist-buf', type=int, help='Dump Boxcar history buffer every N blocks', metavar='N')
+    parser.add_argument('--dump-candidates', type=int, help='Dump candidates every N blocks', metavar='N')
+    parser.add_argument('--dump-uvdata', type=int, help='Dump input UV data every N blocks', metavar='N')
+    parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     
     parser.set_defaults(verbose   = False)
-    parser.set_defaults(run_fdmt  = False)
-    parser.set_defaults(run_image = False)
     parser.set_defaults(wait      = False)
     parser.set_defaults(show      = False)
-    
+
+    # A lot of these values are fixed at compile time and should be obtained from the firmware
+    # - they cant be changed at run time
     parser.set_defaults(nblocks   = 1)
     parser.set_defaults(device    = 0)
     parser.set_defaults(npix      = 256)
@@ -462,7 +513,7 @@ def get_parser():
     parser.set_defaults(nuvmax    = 8192)
     parser.set_defaults(ncin      = 32)
     parser.set_defaults(ndout     = 186) # used to be 32
-    parser.set_defaults(threshold = 3.0)
+    parser.set_defaults(threshold = 10.0)
     parser.set_defaults(boxcar_weight = "sum")
     parser.set_defaults(fdmt_scale =1.0)
     parser.set_defaults(fft_scale  =10.0)
@@ -473,6 +524,9 @@ def get_parser():
     #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
 
     return parser
+
+def do_dump(v, iblk):
+    return v is not None and iblk % v == 0
 
 def _main():
     parser = get_parser()
@@ -485,7 +539,7 @@ def _main():
     log.info(f'Values={values}')
 
     mode   = get_mode()
-    device = pyxrt.device(0)
+    device = pyxrt.device(values.device)
     xbin = pyxrt.xclbin(values.xclbin)
     uuid = device.load_xclbin(xbin)
     iplist = xbin.get_ips()
@@ -496,8 +550,12 @@ def _main():
     f = uvfits.open(values.uv)
     plan = PipelinePlan(f, values)
 
-    # Create a pipeline 
-    p = Pipeline(device, xbin, plan)
+    # Create a pipeline
+    alloc_device_only = values.dump_mainbufs >= 1 or \
+                        values.dump_fdmt_hist_buf >= 1 or \
+                        values.dump_boxcar_hist_buf >= 1 
+    
+    p = Pipeline(device, xbin, plan, alloc_device_only)
 
     fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
@@ -508,76 +566,62 @@ def _main():
     if values.wait:
         input('Press any key to continue...')
 
-    logging.info('Clearing data NBLK=%s', NBLK)
-
-#    for ii in range(NBLK):
-#        starts = run(p, ii, values)
-#        waitall(starts)#
-
-#    logging.info('done clearing')
-#    p.mainbuf.copy_from_device()
-#    np.save('mainbuf_after_clearing.npy', p.mainbuf.nparr)
+    # clear buffers
+    p.clear_buffers(values)
 
     
-        
+    candout = open(values.cand_file, 'w')
+    candout.write(cand_str_header)
+    total_candidates = 0
+    bestcand = None
+
     for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
         if iblk >= values.nblocks:
             break
 
-        log.info(iblk)
+        log.debug("Running block %s", iblk)
         
         input_flat = craco.bl2array(input_data)
         fast_baseline2uv(input_flat, uv_out)
-        np.save(f'uv_data_blk{iblk}.npy', uv_out)
-
-        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(float(1<<NBINARY_POINT_FDMTIN)))
+        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
         p.inbuf.copy_to_device()
-        
-        # Now we need to use baselines data    
-        call_start = time.perf_counter()
-        starts = p.run(iblk, values)
-        wait_start = time.perf_counter()
-    
-        for istart, start in enumerate(starts):
-            log.info(f'Waiting for istart={istart} start={start}')
-            start.wait(0)
+        if do_dump(values.dump_uvdata, iblk):
+            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
 
-            wait_end = time.perf_counter()
-            log.info(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
+        call_start = time.perf_counter()
+        starts = p.run(iblk, values) # Run pipeline
+        wait_for_starts(starts, call_start) # wait for all pipelien tasks to finish
+
+        candidates = p.get_candidates()
+        
+        total_candidates += len(candidates)
+        for c in candidates:
+            candout.write(cand2str(c, values.npix, iblk)+'\n')
+
+        if len(candidates) > 0 and values.show_candidate_grid is not None:
+            img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
+            imshow(img, aspect='auto', origin='lower')
+            show()
+
+        if do_dump(values.dump_candidates, iblk):
+            np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
+        if do_dump(values.dump_mainbufs, iblk):
+            for ib, mainbuf in enumerate(p.all_mainbufs):
+                mainbuf.saveto(f'mainbuf_after_run_iblk{iblk}_ib{ib}.npy')
+
+        if do_dump(values.dump_fdmt_hist_buf, iblk):
+            p.fdmt_hist_buf.saveto(f'fdmt_hist_buf_iblk{iblk}.npy')
+
+        if do_dump(values.dump_boxcar_hist_buf, iblk):
+            p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
+                               
 
     f.close()
-    
-    #p.mainbuf.copy_from_device()
-    #log.info(p.mainbuf.nparr.shape)
+    candout.flush()    
+    candout.close()
+    logging.info('Wrote %s candidates to %s', len(candidates), values.cand_file)
 
-    p.candidates.copy_from_device()
-    p.boxcar_history.copy_from_device()
-    log.info(np.all(p.boxcar_history.nparr == 0))
-
-    p.fdmt_hist_buf.copy_to_device()
-    log.info('inbuf', hex(p.inbuf.buf.address()))
-    log.info('histbuf', hex(p.fdmt_hist_buf.buf.address()))
-    log.info('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
-
-    # Copy data from device
-    p.candidates.copy_from_device()
-    candidates = p.candidates.nparr[:]
-
-    for ib, mainbuf in enumerate(p.all_mainbufs):
-        mainbuf.copy_from_device()
-        np.save(f'mainbuf_after_run_b{ib}.npy', mainbuf.nparr)
-
-
-    ## Find first zero output
-    try:
-        last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
-    except:
-        last_candidate_index = len(candidates)
-
-    candidates = candidates[0:last_candidate_index]
-    print(candidates(candidates, p.plan.npix))
-    np.save('candidates.npy', p.candidates.nparr[:last_candidate_index])
                      
 if __name__ == '__main__':
     _main()
