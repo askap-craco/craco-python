@@ -391,7 +391,7 @@ class Pipeline:
             buf.clear()
             
         for tblk in range(NBLK):
-            self.run(tblk, values)
+            waitall(self.run(tblk, values))
             #for ibuf, buf in enumerate(self.all_mainbufs):
             #    buf.copy_from_device()
             #    logging.info('tblk=%d ibuf=%d mean=%s', tblk, ibuf, buf.nparr.mean())
