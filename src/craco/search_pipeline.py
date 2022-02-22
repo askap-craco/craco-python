@@ -300,14 +300,43 @@ class Pipeline:
 
         # small buffer
         # The buffer size here should match the one declared in C code
-        self.candidates = Buffer(NDM_MAX*self.plan.nbox, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+        self.candidates = Buffer(NDM_MAX*self.plan.nbox*16, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+
+        self.starts = None
+
+    def copy_mainbuf(p):
+        '''
+        Make a copy of the main buffer (hwhich had to be split into pieces due to an XRT limitation)
+        Joins it all together and returns a newly allocated buffer
+        Takes a while, adn could be huge
+        '''
+        mainbuf_run = p.all_mainbufs[0]
+        main_nuv = mainbuf_run.shape[0]
+        mainbuf_shape =list(mainbuf_run.shape[:])
+        nbuf = len(p.all_mainbufs)
+        mainbuf_shape[0] *= nbuf
+        mainbuf = np.zeros(mainbuf_shape, dtype=np.int16)
+        for b in range(nbuf):
+            start = b*main_nuv
+            end = (b+1)*main_nuv
+            buf = p.all_mainbufs[b]
+            buf.copy_from_device()
+            d = buf.nparr
+            mainbuf[start:end, ...] = d
+            
+        return mainbuf
 
 
     def run(self, blk, values):
         p = self
+        if self.starts is not None:
+            raise ValueError('ALready started. Call wait()')
+
+        assert self.starts is None
         
-        # To do it properly we need to get number from plan
-        threshold = self.plan.threshold
+        # Should we get the threhsold from values or the plan?
+        # Changes dynamically - values
+        threshold = values.threshold
         threshold = np.uint16(threshold*(1<<NBINARY_POINT_THRESHOLD))
         ndm       = self.plan.nd
 
@@ -333,7 +362,7 @@ class Pipeline:
 
         starts = []
 
-
+        self.call_start = time.perf_counter()
 
         if values.run_fdmt:
             # temporary: finish FDMT before starting image pipeline on same tblk
@@ -343,7 +372,7 @@ class Pipeline:
         
         if values.run_image:
             # need to clear candidates so if there are no candidates before it's run, nothing happens
-            self.clear_candidates() 
+            self.clear_candidates()
             for cu in self.ffts:
                 starts.append(cu(fft_cfg, fft_cfg))
             
@@ -354,7 +383,14 @@ class Pipeline:
                 starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
             
 
-        return starts
+        self.starts = starts
+        return self
+
+    def wait(self):
+        if self.starts is not None:
+            wait_for_starts(self.starts, self.call_start)
+            self.starts = None
+        
 
     def clear_candidates(self):
         '''
@@ -375,8 +411,15 @@ class Pipeline:
         '''
         self.candidates.copy_from_device()
         # argmax stops at the first occurence of 'True'
-        ncand = np.argmax(self.candidates.nparr['snr'] == 0)
-        return self.candidates.nparr[:ncand]
+        c = self.candidates.nparr
+        if c[-1]['snr'] != 0:
+            warnings.warn('Candidate buffer overflowed')
+            candout = c
+        else:
+            ncand = np.argmax(self.candidates.nparr['snr'] == 0)
+            candout = self.candidates.nparr[:ncand]
+
+        return candout
 
     def clear_buffers(self, values):
         '''
@@ -391,7 +434,7 @@ class Pipeline:
             buf.clear()
             
         for tblk in range(NBLK):
-            waitall(self.run(tblk, values))
+            self.run(tblk, values).wait()
             #for ibuf, buf in enumerate(self.all_mainbufs):
             #    buf.copy_from_device()
             #    logging.info('tblk=%d ibuf=%d mean=%s', tblk, ibuf, buf.nparr.mean())
@@ -551,9 +594,9 @@ def _main():
     plan = PipelinePlan(f, values)
 
     # Create a pipeline
-    alloc_device_only = values.dump_mainbufs >= 1 or \
-                        values.dump_fdmt_hist_buf >= 1 or \
-                        values.dump_boxcar_hist_buf >= 1 
+    alloc_device_only = values.dump_mainbufs is not None or \
+                        values.dump_fdmt_hist_buf is not None or \
+                        values.dump_boxcar_hist_buf is not None
     
     p = Pipeline(device, xbin, plan, alloc_device_only)
 
@@ -566,9 +609,7 @@ def _main():
     if values.wait:
         input('Press any key to continue...')
 
-    # clear buffers
     p.clear_buffers(values)
-
     
     candout = open(values.cand_file, 'w')
     candout.write(cand_str_header)
@@ -589,10 +630,8 @@ def _main():
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
 
-        call_start = time.perf_counter()
-        starts = p.run(iblk, values) # Run pipeline
-        wait_for_starts(starts, call_start) # wait for all pipelien tasks to finish
-
+        p.run(iblk, values).wait() # Run pipeline
+        
         candidates = p.get_candidates()
         
         total_candidates += len(candidates)
