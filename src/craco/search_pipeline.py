@@ -48,6 +48,43 @@ HBM_SIZE = int(256*1024*1024)
 NBINARY_POINT_THRESHOLD = 6
 NBINARY_POINT_FDMTIN    = 5
 
+
+def make_fft_config(nplanes:int,
+                    stage1_scale:int = 0,
+                    stage2_scale:int = 7,
+                    bypass_stage1:bool = False,
+                    bypass_transpose:bool = False,
+                    bypass_stage2:bool = False) -> int:
+    '''
+    Generates the FFT config word to execute the FFT.
+    The layout of this word I got from unzipping fft2d_v2020.2_rtl_d09062021.xo
+    And lookint at TEST_SystyolicFFT2D.vhd and fft2d.v, and the result is
+    bit 0 - if 1, bypass stage 1 FFT
+    bit 1 - if 1, bypass tranpsose stage
+    bit 2 - if 1, bypass stage 2 FFT
+    bit 3-5 - shifting to apply at input of the first stage FFT
+    bit 6-8 - shifting to apply at input of the 2nd stage FFT
+    bits 16-31 - number of planes to process
+
+    @returns FFT config word
+    '''
+    assert 0 < nplanes < 1<<16
+    assert 0 <= stage1_scale < 1<<3
+    assert 0 <= stage2_scale << 1<<3
+
+    by_s1 = int(bypass_stage1)
+    by_t = int(bypass_transpose)
+    by_s2 = int(bypass_stage2)
+
+    word = (nplanes & 0xff) << 16 | \
+            (stage2_scale & 0b111) << 6 | \
+            (stage1_scale & 0b111) << 3 | \
+            by_s2 << 2 | \
+            by_t << 1 | \
+            by_s1
+
+    return word
+
 def merge_candidates_width_time(cands):
     '''
     Merges candidates that have overlappign width and times for identical DMs and locations
@@ -352,11 +389,14 @@ class Pipeline:
         load_luts = 1
 
         nplane = ndm*nchunk_time
-        shift1 = 0 # FFT CONFIG register - not sure what this means
-        shift2 = 7 # FFT CONFIG Register - not sure what this means
-        fft_cfg = (nplane << 16) + (shift2 << 6) + (shift1 << 3)
+        fft_shift1 = values.fft_shift1 # How much to shift the stage 1 FFT input by
+        fft_shift2 = values.fft_shift2 # How much to shift the stage 2 FFT input by
+        #fft_cfg = (nplane << 16) + (fft_shift2 << 6) + (fft_shift1 << 3)
+        fft_cfg = make_fft_config(nplane,
+                                   fft_shift1,
+                                   fft_shift2)
 
-        log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={shift1} shift2={shift2} fft_cfg={fft_cfg}\n')
+        log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg}\n')
 
         assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
 
@@ -532,6 +572,8 @@ def get_parser():
     parser.add_argument('-W', '--boxcar_weight', type=str,   help='Boxcar weighting type', choices=('sum','avg','sqrt'), default='sum')
     parser.add_argument('--input-scale', type=float, help='Multiply input by this scale factor before rounding to int16', default=1.0)
     parser.add_argument('-F', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
+    parser.add_argument('--fft-shift1', type=int, help='Shift value for FFT1', default=0)
+    parser.add_argument('--fft-shift2', type=int, help='Shift value for FFT2', default=7)
     parser.add_argument('-C','--cand-file', help='Candidate output file txt', default='candidates.txt')
     parser.add_argument('--dump-mainbufs', type=int, help='Dump main buffer every N blocks', metavar='N')
     parser.add_argument('--dump-fdmt-hist-buf', type=int, help='Dump FDMT history buffer every N blocks', metavar='N')
