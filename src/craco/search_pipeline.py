@@ -228,7 +228,7 @@ class Pipeline:
         self.device = device
         self.xbin = xbin
         self.plan = plan
-
+        self.alloc_device_only_bufers = alloc_device_only_buffers
         self.device_only_buffer_flag = 'normal' if alloc_device_only_buffers else 'device_only'
 
         # If we are on new version of pipeline
@@ -448,7 +448,7 @@ class Pipeline:
         for retry in range(10):
             all_ok = True
             logging.debug('Sleeping 0.4')
-            time.sleep(0.4)
+            time.sleep(0.4) # short enough that any reasomable execution will still be running by the time we poll
             for k in self.all_kernels:
                 reg0 = k.krnl.read_register(0x00)
                 all_ok &= (reg0 == 0x04)
@@ -500,19 +500,23 @@ class Pipeline:
 
         For some reason you can't just set the values. But you can run the FDMT 11 times and it will work        '''
         logging.info('Clearing mainbuf data NBLK=%s', NBLK)
-        for ibuf, buf in enumerate(self.all_mainbufs):
-            buf.clear()
 
-        logging.info('Mainbuf cleared. Clearing input')
-        self.inbuf.nparr[:] = 0
-        self.inbuf.copy_to_device()
+        if self.alloc_device_only_buffers: # if we have the buffers, we just clear them
+            for ibuf, buf in enumerate(self.all_mainbufs):
+                buf.clear()
+                
+            self.inbuf.clear()
+            self.fdmt_hist_buf.clear()
+            self.boxcar_history.clear()
 
-        logging.info('Input cleared. Running pipeline')
 
-        for tblk in range(NBLK):
-            self.run(tblk, values).wait()
+        else: # If we don't have the bfufers, we have to set the input to 0, and run the pipeline NBLK times
+            self.inbuf.clear()
+            logging.info('Input cleared. Running pipeline')
+            for tblk in range(NBLK):
+                self.run(tblk, values).wait()
 
-        logging.info('Finished clearing pipeline')
+            logging.info('Finished clearing pipeline')
         
 
 def location2pix(location, npix=256):
@@ -570,7 +574,7 @@ def wait_for_starts(starts, call_start, timeout=0):
     log.info('Waiting for %d starts', len(starts))
     # I don't know why this helps, but it does, and I don't like it!
     # It was really reliable when it was in there, lets see if its still ok when we remove it.
-    time.sleep(0.1)
+    #time.sleep(0.1)
 
     wait_start = time.perf_counter()
     for istart, start in enumerate(starts):
