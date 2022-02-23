@@ -569,14 +569,15 @@ def waitall(starts):
 def wait_for_starts(starts, call_start, timeout=0):
     log.info('Waiting for %d starts', len(starts))
     # I don't know why this helps, but it does, and I don't like it!
+    # It was really reliable when it was in there, lets see if its still ok when we remove it.
     time.sleep(0.1)
 
     wait_start = time.perf_counter()
     for istart, start in enumerate(starts):
-        log.info(f'Waiting for istart={istart} start={start}')
+        log.debug(f'Waiting for istart={istart} start={start}')
         start.wait(timeout) # 0 means wait forever
         wait_end = time.perf_counter()
-        log.info(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
+        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
 
 
 
