@@ -76,7 +76,7 @@ def make_fft_config(nplanes:int,
     by_t = int(bypass_transpose)
     by_s2 = int(bypass_stage2)
 
-    word = (nplanes & 0xff) << 16 | \
+    word = (nplanes & 0xffff) << 16 | \
             (stage2_scale & 0b111) << 6 | \
             (stage1_scale & 0b111) << 3 | \
             by_s2 << 2 | \
@@ -243,6 +243,9 @@ class Pipeline:
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
         self.boxcarcu = BoxcarCu(device, xbin)
         self.fdmtcu = FdmtCu(device, xbin)
+        self.all_kernels = [self.grid_reader, self.fdmtcu, self.boxcarcu]
+        self.all_kernels.extend(self.grids)
+        self.all_kernels.extend(self.ffts)
 
         log.info(f'lut.shape {lut.shape}')
         log.info(f'nuv {self.plan.fdmt_plan.nuvtotal}')
@@ -323,9 +326,12 @@ class Pipeline:
         # Allocate buffers in sub buffers - this works around an XRT bug that doesn't let you allocate a large buffer
         self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
 
-        # small buffer
+        # DD reader lookup table
         log.info('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest_max), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        #self.ddreader_lut.nparr[:] = plan.ddreader_lut
+        #self.ddreader_lut.copy_to_device()
+
         log.info('Allocating boxcar_history')    
 
         npix = self.plan.npix
@@ -383,6 +389,10 @@ class Pipeline:
         nuv         = self.plan.fdmt_plan.nuvtotal
         nparallel_uv = nuv//2
         nurest       = nuv//8
+
+        assert nuv % 2 == 0
+        assert nuv % 8 == 0
+        
         assert nparallel_uv == self.nparallel_uvin, 'The number from pipeline plan should be the same as we calculated based on indexs from pipeline plan'
 
         # load lookup tables for ddgrid reader- slows thigns down but do it always for now
@@ -391,12 +401,14 @@ class Pipeline:
         nplane = ndm*nchunk_time
         fft_shift1 = values.fft_shift1 # How much to shift the stage 1 FFT input by
         fft_shift2 = values.fft_shift2 # How much to shift the stage 2 FFT input by
-        #fft_cfg = (nplane << 16) + (fft_shift2 << 6) + (fft_shift1 << 3)
-        fft_cfg = make_fft_config(nplane,
+        fft_cfg = (nplane << 16) + (fft_shift2 << 6) + (fft_shift1 << 3)
+        fft_cfg2 = make_fft_config(nplane,
                                    fft_shift1,
                                    fft_shift2)
 
-        log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg}\n')
+        assert fft_cfg == fft_cfg2, f'Bad fft_cfg calculation. {fft_cfg:x}!={fft_cfg2:x}'
+
+        log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x}\n')
 
         assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
 
@@ -408,25 +420,45 @@ class Pipeline:
             # temporary: finish FDMT before starting image pipeline on same tblk
             #starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
             # you have to run teh FDMT on a tblk and run the image pipelien on tblk - 1 if you're doing to run them at the same time.
+            logging.info('Running fdmt')
             self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk).wait(0)
+            logging.info('fdmt complete')
         
         if values.run_image:
             # need to clear candidates so if there are no candidates before it's run, nothing happens
             self.clear_candidates()
+            logging.info('Candidates cleared')
+
+            starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
+
             for cu in self.ffts:
                 starts.append(cu(fft_cfg, fft_cfg))
             
-            starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
-            starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
-
             for cu, grid_lut in zip(self.grids, self.grid_luts):
                 starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
-            
 
+            starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
+
+        logging.info('%d kernels running', len(starts))
         self.starts = starts
+        self.total_retries = 0
         return self
 
     def wait(self):
+        for retry in range(10):
+            all_ok = True
+            logging.debug('Sleeping 0.4')
+            time.sleep(0.4)
+            for k in self.all_kernels:
+                reg0 = k.krnl.read_register(0x00)
+                all_ok &= (reg0 == 0x04)
+                logging.debug(f'{k.name} reg0={reg0:x} all_ok={all_ok} retry={retry}')
+
+            if all_ok:
+                break
+
+        self.total_retries += retry
+
         if self.starts is not None:
             wait_for_starts(self.starts, self.call_start)
             self.starts = None
@@ -467,18 +499,20 @@ class Pipeline:
         Works wehtehr we've decieded to map the buffers or not
 
         For some reason you can't just set the values. But you can run the FDMT 11 times and it will work        '''
-        self.inbuf.nparr[:] = 0
-        self.inbuf.copy_to_device()
         logging.info('Clearing mainbuf data NBLK=%s', NBLK)
         for ibuf, buf in enumerate(self.all_mainbufs):
             buf.clear()
-            
+
+        logging.info('Mainbuf cleared. Clearing input')
+        self.inbuf.nparr[:] = 0
+        self.inbuf.copy_to_device()
+
+        logging.info('Input cleared. Running pipeline')
+
         for tblk in range(NBLK):
             self.run(tblk, values).wait()
-            #for ibuf, buf in enumerate(self.all_mainbufs):
-            #    buf.copy_from_device()
-            #    logging.info('tblk=%d ibuf=%d mean=%s', tblk, ibuf, buf.nparr.mean())
 
+        logging.info('Finished clearing pipeline')
         
 
 def location2pix(location, npix=256):
@@ -532,13 +566,18 @@ def waitall(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
 
-def wait_for_starts(starts, call_start):
+def wait_for_starts(starts, call_start, timeout=0):
+    log.info('Waiting for %d starts', len(starts))
+    # I don't know why this helps, but it does, and I don't like it!
+    time.sleep(0.1)
+
     wait_start = time.perf_counter()
     for istart, start in enumerate(starts):
         log.info(f'Waiting for istart={istart} start={start}')
-        start.wait(0) # 0 means wait forever
+        start.wait(timeout) # 0 means wait forever
         wait_end = time.perf_counter()
         log.info(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
+
 
 
 def get_parser():
@@ -554,6 +593,7 @@ def get_parser():
     #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
     parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
+    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE', type=int, default=1024)
     #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
     #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
     #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
