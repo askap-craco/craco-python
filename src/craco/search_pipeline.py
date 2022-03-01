@@ -16,9 +16,13 @@ from craft.craco_plan import load_plan
 from craft import uvfits
 from craft import craco
 
+from Visibility_injector.inject_in_fake_data import FakeVisibility
+
 from collections import OrderedDict
 
 import logging
+
+
 
 log = logging.getLogger(__name__)
 
@@ -228,7 +232,7 @@ class Pipeline:
         self.device = device
         self.xbin = xbin
         self.plan = plan
-        self.alloc_device_only_bufers = alloc_device_only_buffers
+        self.alloc_device_only_buffers = alloc_device_only_buffers
         self.device_only_buffer_flag = 'normal' if alloc_device_only_buffers else 'device_only'
 
         # If we are on new version of pipeline
@@ -428,7 +432,7 @@ class Pipeline:
             # need to clear candidates so if there are no candidates before it's run, nothing happens
             self.clear_candidates()
             logging.info('Candidates cleared')
-
+            # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
             starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
 
             for cu in self.ffts:
@@ -491,7 +495,8 @@ class Pipeline:
             ncand = np.argmax(self.candidates.nparr['snr'] == 0)
             candout = self.candidates.nparr[:ncand]
 
-        return candout
+        # TODO: think about performance here
+        return candout.copy()
 
     def clear_buffers(self, values):
         '''
@@ -583,8 +588,6 @@ def wait_for_starts(starts, call_start, timeout=0):
         wait_end = time.perf_counter()
         log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
 
-
-
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -626,6 +629,7 @@ def get_parser():
     parser.add_argument('--dump-candidates', type=int, help='Dump candidates every N blocks', metavar='N')
     parser.add_argument('--dump-uvdata', type=int, help='Dump input UV data every N blocks', metavar='N')
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
+    parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
     
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
@@ -657,6 +661,27 @@ def get_parser():
 
 def do_dump(v, iblk):
     return v is not None and iblk % v == 0
+
+
+class VisSource:
+    def __init__(self, plan, fitsfile, values):
+        self.plan = plan
+        self.fitsfile = fitsfile
+        self.values = values
+        if self.values.injection_file is None:
+            self.fv = None
+            log.info('Injectiing data from fits %s', self.fitsfile)
+        else:
+            log.info('Injecting data described by %s', values.injection_file)
+            self.fv = FakeVisibility(plan, values.injection_file, int(1e6))
+
+    def __iter__(self):
+        if self.fv is None:
+            myiter = self.fitsfile.time_blocks(self.plan.nt)
+        else:
+            myiter = self.fv.get_fake_data_block()
+
+        return myiter
 
 def _main():
     parser = get_parser()
@@ -693,6 +718,8 @@ def _main():
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
     uv_out_fixed = np.zeros(uv_shape2, dtype=np.int16)
 
+    vis_source = VisSource(plan, f, values)
+
     if values.wait:
         input('Press any key to continue...')
 
@@ -703,7 +730,8 @@ def _main():
     total_candidates = 0
     bestcand = None
 
-    for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
+
+    for iblk, input_data in enumerate(vis_source):
         if iblk >= values.nblocks:
             break
 
