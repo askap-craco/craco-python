@@ -22,8 +22,6 @@ from collections import OrderedDict
 
 import logging
 
-
-
 log = logging.getLogger(__name__)
 
 #from craco_pybind11 import boxcar, krnl, fdmt_tunable
@@ -675,9 +673,14 @@ class VisSource:
             log.info('Injecting data described by %s', values.injection_file)
             self.fv = FakeVisibility(plan, values.injection_file, int(1e6))
 
+    def __fits_file_iter(self):
+        for input_data in self.fitsfile.time_blocks(self.plan.nt):
+            input_flat = craco.bl2array(input_data) # convert to dictionary - ordered by baseline
+            yield input_flat
+
     def __iter__(self):
         if self.fv is None:
-            myiter = self.fitsfile.time_blocks(self.plan.nt)
+            myiter = self.__fits_file_iter()
         else:
             myiter = self.fv.get_fake_data_block()
 
@@ -731,14 +734,13 @@ def _main():
     bestcand = None
 
 
-    for iblk, input_data in enumerate(vis_source):
+    for iblk, input_flat in enumerate(vis_source):
         if iblk >= values.nblocks:
             break
 
         log.debug("Running block %s", iblk)
-        
-        input_flat = craco.bl2array(input_data)
         fast_baseline2uv(input_flat, uv_out)
+        
         p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
         p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
         p.inbuf.copy_to_device()
