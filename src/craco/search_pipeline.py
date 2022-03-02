@@ -324,7 +324,7 @@ class Pipeline:
         num_mainbufs = 8
         sub_mainbuf_shape  = list(mainbuf_shape)
         sub_mainbuf_shape[0] = (self.plan.nuvrest + num_mainbufs - 1) // num_mainbufs
-        logging.info(f'Mainbuf shape is {mainbuf_shape} breaking into {num_mainbufs} buffers of {sub_mainbuf_shape}')
+        log.info(f'Mainbuf shape is {mainbuf_shape} breaking into {num_mainbufs} buffers of {sub_mainbuf_shape}')
         # Allocate buffers in sub buffers - this works around an XRT bug that doesn't let you allocate a large buffer
         self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
 
@@ -340,7 +340,7 @@ class Pipeline:
         # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
         NBOX = 8
         self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
-        print(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
+        log.info(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
         log.info('Allocating candidates')
 
         # small buffer
@@ -410,7 +410,7 @@ class Pipeline:
 
         assert fft_cfg == fft_cfg2, f'Bad fft_cfg calculation. {fft_cfg:x}!={fft_cfg2:x}'
 
-        log.info(f'\nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x}\n')
+        log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x}\n')
 
         assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
 
@@ -422,14 +422,14 @@ class Pipeline:
             # temporary: finish FDMT before starting image pipeline on same tblk
             #starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
             # you have to run teh FDMT on a tblk and run the image pipelien on tblk - 1 if you're doing to run them at the same time.
-            logging.info('Running fdmt')
+            log.info('Running fdmt')
             self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk).wait(0)
-            logging.info('fdmt complete')
+            log.info('fdmt complete')
         
         if values.run_image:
             # need to clear candidates so if there are no candidates before it's run, nothing happens
             self.clear_candidates()
-            logging.info('Candidates cleared')
+            log.info('Candidates cleared')
             # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
             starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
 
@@ -441,7 +441,7 @@ class Pipeline:
 
             starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
 
-        logging.info('%d kernels running', len(starts))
+        log.info('%d kernels running', len(starts))
         self.starts = starts
         self.total_retries = 0
         return self
@@ -449,12 +449,12 @@ class Pipeline:
     def wait(self):
         for retry in range(10):
             all_ok = True
-            logging.debug('Sleeping 0.4')
+            log.debug('Sleeping 0.4')
             time.sleep(0.4) # short enough that any reasomable execution will still be running by the time we poll
             for k in self.all_kernels:
                 reg0 = k.krnl.read_register(0x00)
                 all_ok &= (reg0 == 0x04)
-                logging.debug(f'{k.name} reg0={reg0:x} all_ok={all_ok} retry={retry}')
+                log.debug(f'{k.name} reg0={reg0:x} all_ok={all_ok} retry={retry}')
 
             if all_ok:
                 break
@@ -486,6 +486,7 @@ class Pipeline:
         self.candidates.copy_from_device()
         # argmax stops at the first occurence of 'True'
         c = self.candidates.nparr
+        log.info('Last candidate is %s', c[-1])
         if c[-1]['snr'] != 0:
             warnings.warn('Candidate buffer overflowed')
             candout = c
@@ -502,7 +503,7 @@ class Pipeline:
         Works wehtehr we've decieded to map the buffers or not
 
         For some reason you can't just set the values. But you can run the FDMT 11 times and it will work        '''
-        logging.info('Clearing mainbuf data NBLK=%s', NBLK)
+        log.info('Clearing mainbuf data NBLK=%s', NBLK)
 
         if self.alloc_device_only_buffers: # if we have the buffers, we just clear them
             for ibuf, buf in enumerate(self.all_mainbufs):
@@ -515,11 +516,11 @@ class Pipeline:
 
         else: # If we don't have the bfufers, we have to set the input to 0, and run the pipeline NBLK times
             self.inbuf.clear()
-            logging.info('Input cleared. Running pipeline')
+            log.info('Input cleared. Running pipeline')
             for tblk in range(NBLK):
                 self.run(tblk, values).wait()
 
-            logging.info('Finished clearing pipeline')
+            log.info('Finished clearing pipeline')
         
 
 def location2pix(location, npix=256):
@@ -594,7 +595,7 @@ def get_parser():
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
     
-    parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks')
+    parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks to process')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
     #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
@@ -635,7 +636,7 @@ def get_parser():
 
     # A lot of these values are fixed at compile time and should be obtained from the firmware
     # - they cant be changed at run time
-    parser.set_defaults(nblocks   = 1)
+    
     parser.set_defaults(device    = 0)
     parser.set_defaults(npix      = 256)
     parser.set_defaults(ndm       = 2)
@@ -735,7 +736,8 @@ def _main():
 
 
     for iblk, input_flat in enumerate(vis_source):
-        if iblk >= values.nblocks:
+        if values.nblocks is not None and iblk >= values.nblocks:
+            log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
 
         log.debug("Running block %s", iblk)
@@ -749,8 +751,9 @@ def _main():
 
         p.run(iblk, values).wait() # Run pipeline
         
-        candidates = p.get_candidates()
-        
+        candidates = p.get_candidates().copy()
+
+        log.info('Got %d candidates in block %d', len(candidates), iblk)
         total_candidates += len(candidates)
         for c in candidates:
             candout.write(cand2str(c, values.npix, iblk)+'\n')
@@ -776,7 +779,7 @@ def _main():
     f.close()
     candout.flush()    
     candout.close()
-    logging.info('Wrote %s candidates to %s', len(candidates), values.cand_file)
+    logging.info('Wrote %s candidates to %s', total_candidates, values.cand_file)
 
                      
 if __name__ == '__main__':
