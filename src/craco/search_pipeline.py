@@ -543,11 +543,12 @@ location2pix = np.vectorize(location2pix)
 def cand2str(candidate, npix, iblk):
     location = candidate['loc_2dfft']
     vpix, upix = location2pix(location, npix)
+    rawsn = candidate['snr']
     snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
-    s = f"{snr:.1f}\t{upix}\t{vpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}"
+    s = f"{snr:.1f}\t{upix}\t{vpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}\t{rawsn}"
     return s
 
-cand_str_header = '# SNR\tupix\tvpix\tboxc_width\ttime\tdm\tiblk\n'
+cand_str_header = '# SNR\tupix\tvpix\tboxc_width\ttime\tdm\tiblk\trawsn\n'
     
 
 def print_candidates(candidates, npix, iblk):
@@ -777,6 +778,11 @@ def _main():
                                
 
     f.close()
+
+    cmdstr =  ' '.join(sys.argv)
+    now = datetime.datetime.now()
+    logstr = '# Run {cmdstr} on {now}\n'
+    candout.write(logstr)
     candout.flush()    
     candout.close()
     logging.info('Wrote %s candidates to %s', total_candidates, values.cand_file)
