@@ -7,10 +7,13 @@ from craco_testing.pyxrtutil import *
 import time
 import pickle
 import copy
+import logging
+
 
 from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
+from craft.craco_plan import get_parser
 from craft.craco_plan import load_plan
 from craco import search_pipeline
 
@@ -137,6 +140,9 @@ def test_imaging_dm0_data0(pipeline, plan):
 
 
 def test_imaging_dm0_allt_tblk0(pipeline, plan):
+    '''
+    Check DM0 pulses arrive at correct time
+    '''
 
     tblk = 0
     # I'm not sure I can calculate expected S/N for a given input level from first principles yet - so we'll
@@ -150,19 +156,8 @@ def test_imaging_dm0_allt_tblk0(pipeline, plan):
     plot = True
     
     for t in [0,7,8, 15]:
-        pipeline.candidates.nparr['snr'] = -1
-        pipeline.candidates.copy_to_device()
-
         # reset boxcar history
-        pipeline.boxcar_history.nparr[:] = 0
-        pipeline.boxcar_history.copy_to_device()
-        for b in pipeline.all_mainbufs:
-            b.nparr[:] = 0
-            #b.nparr[:, 0, tblk, t, :, 0] = input_level
-            #(self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
-            b.copy_to_device()
-
-
+        pipeline.clear_buffers()
         values = copy.deepcopy(plan.values)
         values.run_fdmt = False
         values.run_image = True
@@ -189,108 +184,3 @@ def test_imaging_dm0_allt_tblk0(pipeline, plan):
 
     all_candidates = np.array(all_candidates)
     np.save('dm0_cands.npy', all_candidates)
-
-def _main():
-    parser = get_parser()
-    values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    print(f'Values={values}')
-
-    iplist = xbin.get_ips()
-    for ip in iplist:
-        print(ip.get_name())
-
-    # Create a plan
-
-    f = uvfits.open(values.uv)
-    plan = PipelinePlan(f, values)
-
-    # Create a pipeline 
-    p = Pipeline(device, xbin, plan)
-
-    fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
-    uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-    uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
-    uv_out  = np.zeros(uv_shape, dtype=np.complex64)
-    uv_out_fixed = np.zeros(uv_shape2, dtype=np.int16)
-
-    if values.wait:
-        input('Press any key to continue...')
-
-    logging.info('Clearing data NBLK=%s', NBLK)
-
-#    for ii in range(NBLK):
-#        starts = run(p, ii, values)
-#        waitall(starts)#
-
-#    logging.info('done clearing')
-#    p.mainbuf.copy_from_device()
-#    np.save('mainbuf_after_clearing.npy', p.mainbuf.nparr)
-
-    
-        
-    for iblk, input_data in enumerate(f.time_blocks(plan.nt)):
-        if iblk >= values.nblocks:
-            break
-
-        print(iblk)
-        
-        input_flat = craco.bl2array(input_data)
-        fast_baseline2uv(input_flat, uv_out)
-        np.save(f'uv_data_blk{iblk}.npy', uv_out)
-
-        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.copy_to_device()
-        
-        # Now we need to use baselines data    
-        call_start = time.perf_counter()
-        starts = run(p, iblk, values)
-        wait_start = time.perf_counter()
-    
-        for istart, start in enumerate(starts):
-            print(f'Waiting for istart={istart} start={start}')
-            start.wait(0)
-
-            wait_end = time.perf_counter()
-            print(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
-
-    f.close()
-    
-    #p.mainbuf.copy_from_device()
-    #print(p.mainbuf.nparr.shape)
-
-    p.candidates.copy_from_device()
-    p.boxcar_history.copy_from_device()
-    print(np.all(p.boxcar_history.nparr == 0))
-
-    p.fdmt_hist_buf.copy_to_device()
-    print('inbuf', hex(p.inbuf.buf.address()))
-    print('histbuf', hex(p.fdmt_hist_buf.buf.address()))
-    print('fdmt_config_buf', hex(p.fdmt_config_buf.buf.address()))
-
-    # Copy data from device
-    p.candidates.copy_from_device()
-    candidates = p.candidates.nparr[:]
-
-    for ib, mainbuf in enumerate(p.all_mainbufs):
-        mainbuf.copy_from_device()
-        np.save(f'mainbuf_after_run_b{ib}.npy', mainbuf.nparr)
-
-
-    ## Find first zero output
-    try:
-        last_candidate_index = np.where(candidates['snr'] == 0)[0][0]
-    except:
-        last_candidate_index = len(candidates)
-
-    candidates = candidates[0:last_candidate_index]
-    print_candidates(candidates, p.plan.npix)
-    np.save('candidates.npy', p.candidates.nparr[:last_candidate_index])
-                     
-if __name__ == '__main__':
-    _main()
