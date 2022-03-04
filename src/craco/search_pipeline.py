@@ -338,7 +338,7 @@ class Pipeline:
 
         npix = self.plan.npix
         # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
-        NBOX = 8
+        NBOX = 7 # Xinping only saves 7 boxcars for NBOX = 8. TODO: change to 8
         self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         log.info(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
         log.info('Allocating candidates')
@@ -348,6 +348,10 @@ class Pipeline:
         self.candidates = Buffer(NDM_MAX*self.plan.nbox*16, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
         self.starts = None
+        uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+        self.uv_out  = np.zeros(uv_shape, dtype=np.complex64)
+        self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
+
 
     def copy_mainbuf(p):
         '''
@@ -521,6 +525,21 @@ class Pipeline:
                 self.run(tblk, values).wait()
 
             log.info('Finished clearing pipeline')
+
+    def copy_input(self, input_data, values):
+        '''
+        Converts complex input data in [NBL, NC, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
+        Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
+        the copies to the device
+
+        '''
+        self.fast_baseline2uv(self.input_flat, self.uv_out)
+        self.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.inbuf.copy_to_device()
+
+        return self
+        
         
 
 def location2pix(location, npix=256):
@@ -717,7 +736,6 @@ def _main():
     
     p = Pipeline(device, xbin, plan, alloc_device_only)
 
-    fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
     uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
     uv_out  = np.zeros(uv_shape, dtype=np.complex64)
@@ -742,11 +760,8 @@ def _main():
             break
 
         log.debug("Running block %s", iblk)
-        fast_baseline2uv(input_flat, uv_out)
+        p.copy_input(input_flat, values) # take the input into the device
         
-        p.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
-        p.inbuf.copy_to_device()
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
 
@@ -768,7 +783,7 @@ def _main():
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
         if do_dump(values.dump_mainbufs, iblk):
             for ib, mainbuf in enumerate(p.all_mainbufs):
-                mainbuf.saveto(f'mainbuf_after_run_iblk{iblk}_ib{ib}.npy')
+                mainbuf.saveto(f'mainbuf_iblk{iblk}_ib{ib}.npy')
 
         if do_dump(values.dump_fdmt_hist_buf, iblk):
             p.fdmt_hist_buf.saveto(f'fdmt_hist_buf_iblk{iblk}.npy')

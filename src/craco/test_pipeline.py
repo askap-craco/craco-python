@@ -140,6 +140,9 @@ def test_imaging_dm0_data0(pipeline, plan):
 
 
 def test_imaging_dm0_allt_tblk0(pipeline, plan):
+    '''
+    Check DM0 pulses arrive at correct time
+    '''
 
     tblk = 0
     # I'm not sure I can calculate expected S/N for a given input level from first principles yet - so we'll
@@ -153,19 +156,8 @@ def test_imaging_dm0_allt_tblk0(pipeline, plan):
     plot = True
     
     for t in [0,7,8, 15]:
-        pipeline.candidates.nparr['snr'] = -1
-        pipeline.candidates.copy_to_device()
-
         # reset boxcar history
-        pipeline.boxcar_history.nparr[:] = 0
-        pipeline.boxcar_history.copy_to_device()
-        for b in pipeline.all_mainbufs:
-            b.nparr[:] = 0
-            #b.nparr[:, 0, tblk, t, :, 0] = input_level
-            #(self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
-            b.copy_to_device()
-
-
+        pipeline.clear_buffers()
         values = copy.deepcopy(plan.values)
         values.run_fdmt = False
         values.run_image = True

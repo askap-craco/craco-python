@@ -37,16 +37,22 @@ class Buffer:
     def copy_to_device(self):
         if self.nparr is not None:
             self.buf.sync(pyxrt.xclBOSyncDirection.XCL_BO_SYNC_BO_TO_DEVICE,  self.nparr.nbytes, 0)
+
+        return self
                 
     def copy_from_device(self):
         if self.nparr is not None:
             self.buf.sync(pyxrt.xclBOSyncDirection.XCL_BO_SYNC_BO_FROM_DEVICE, self.nparr.nbytes, 0)
+
+        return self
 
     def saveto(self, fname):
         if self.nparr is not None:
             self.copy_from_device()
             log.info(f'Saving buffer {fname}')
             np.save(fname, self.nparr)
+
+        return self
 
 def convert_buffer(b):
     if isinstance(b, Buffer):
