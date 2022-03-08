@@ -19,9 +19,10 @@ def _main():
     nbeam = numprocs
     nant = 30
     nbl = nant*(nant - 1)//2
-    nt = 256*6
-    
-    # Assume we start with all beams for 1 channel
+    nc = 15
+    nt = 128*nc
+    nt = nc
+
     din = np.zeros((nbeam, nbl*nt), dtype=np.int32)
     din.flat = np.arange(din.size)*(rank+1)
     print(f'Shape {din.shape} {din.nbytes} bytes')
@@ -32,9 +33,9 @@ def _main():
     
     send_msg = [din, size, MPI.INT]
     recv_msg = [dout, size, MPI.INT]
-    niter = 10
+    niter = 100
     total_duration = 0
-    print(f'Input for {rank} is {din}')
+    print(f'Input for {rank} is {din.shape}')
     for iter in range(niter):
         start = time.time()
         comm.Alltoall(send_msg, recv_msg)
@@ -47,7 +48,7 @@ def _main():
 
     total_duration /= niter
 
-    print(f'output for {rank} is {dout}')
+    print(f'output for {rank} is {dout.shape}')
     if rank == 0:
         rate = (dout.nbytes*8)/total_duration/1e9
         print(f'Total Exectime = {duration} {rate} Gbps')

@@ -33,19 +33,50 @@ class TestPipeline(MpiPipeline):
         self.beam_process(self.do_beam_processing)
         self.root_process(self.do_root_processing)
         
-        self.values.dtype = np.complex64
+        self.values.dtype = np.int16
         assert self.nchan % self.nfavg == 0, 'NFAVG must divide into nchan'
         self.nchan_out = self.values.nbeam*self.nchan_fout
         self.nant = self.values.nant
         self.nbl = self.nant*(self.nant-1)//2
         self.nhistory_blocks = 8
 
+        self.nblocks = 6 # number of correlator blocks
+        self.ncards_total = self.nblocks * 12 # 12 cards per block
+        self.samples_per_int = 16
+        
 
     def do_root_processing(self):
         pass
 
     def do_beam_processing(self):
         v = self.values
+        
+        # Each beam procesor receives data from a fraction of the cards
+        ncards_per_beam = self.ncards_total // v.nbeam
+        cor_cards_per_beam = np.ones(v.nbeam, dtype=np.int32)*ncards_per_beam
+
+        # But the above division isn't even. Who will receive those extra cards? Poor things. Must feel lonely
+        # and which cards will I receive?
+        # Each node has 2 gpu processe
+        # Load extra card onto nodes first, then come back and add them to GPUs
+        nleft = self.ncards_total % v.nbeam # number of cards left that haven't been assigned yet
+        nnodes = v.nbeam // 2
+        for node in range(nnodes)
+            for gpu in range(2):
+                cor_cards_per_beam[2*node + gpu] += 1
+                nleft = nleft - 1
+                if nleft = 0:
+                    break
+
+        beamid  = self.beamno
+        start_card = cor_cards_per_beam[:beamid].sum()
+        end_card = start_card + cor_cards_per_beam[beamid]
+        
+        self.my_cards = slice(start_card, end_card)
+
+        log.info('Rank %d beamno %d recevies data from %d  cards: %s', self.rank, self.beamno, cor_cards_per_beam[beamid], self.my_cards)
+        
+
         self.input_data = np.zeros((v.nbeam, v.nchan_rx, self.nbl, v.nt), dtype=v.dtype)
         self.calibrated_data = np.zeros((v.nbeam*v.nchan_rx, self.nbl, v.nt), dtype=v.dtype)
         assert self.input_data.size == self.calibrated_data.size, 'Transpose must be regular, currently'
@@ -53,7 +84,6 @@ class TestPipeline(MpiPipeline):
         self.cal_avg = np.zeros_like(self.cal_recv)
         self.calibration = np.ones_like(self.calibrated_data)
         self.sky = np.zeros_like(self.calibrated_data)
-
         self.history_buffer = np.zeros((self.nhistory_blocks, self.nchan_out, self.nbl, v.nt), dtype=v.dtype)
 
         for blk in range(self.nblocks):
@@ -75,15 +105,52 @@ class TestPipeline(MpiPipeline):
 
 
     def read(self):
-        # Dummy read
-        self.input_data.flat = np.arange(self.input_data.size)*blk
+        '''
+        Reads data from FPGAS via RMDA
         
+        @returns list of np arrays - one from each of the ntx FPGAs transmitting to this receiver
+        Each NP array has a shape [NcoarseChan*Nbeam, NT_per_bf_frame, NfineChan, Nbl, 2]  with dtype=np.int16
+        A beamformer frame is 110ms, so depending on the requested sampling rate, you'd get a different NT_per_bf_frame
+        The coarse-channel-beam ordering is complicated. See https://confluence.csiro.au/display/AKUP/Firmware+Design
+        Basically it's in [Freq, Beam] order for beams 0-31 inclusive. THen you get another round of [Freq, Beam] order
+        for beams 32-35 inclusive. The 6 fine channels sent by a particular FPGA are guaranteed non-contiguous - 
+        But all FPGAs from single chassis (6 FPGAS) process a contiguous set of 4 MHz of bandiwdth = NFPGA=6 x NCoarse=44 
+        = 24 fine channels.
+        Exactly how the channels are transposed between FPGAS is complicated and TBC.
+        Each Corelator card / chassis contains 6 FPGAS. The channels from a single card are contiguous set.
+        Each beam process receives data from an integer number of cards. There are 72 cards total, so if we process 20 beams, each 
+        beam processor receives data from either 3 or 4 cards. The way we load up cards into beams probably isn't all that important.
+
+        For current setup:
+        NcoarseChan = 4
+        Nbeam = 36
+        NT_per_bf_frame = 2048 / samples_per_int = 2048/16 = 128 (1.7ms sample)
+        NfineChan = 6 (FPGA has summed 9 x 18 kHz channels to give 166kHz channels)
+        Nbl = configurable. 435 for 32 antennas
+        2 = complex
+        '''
+        ncoarse_chan = 4
+        nbeam = 36 # FPGAS send a fixed number of beams. We need to select the ones we want
+        nt_per_bf_frame = 2048 // self.samples_per_int
+        nfine_chan = 6 # Fixed, unless the firmware team can sm more channels
+        fpga_data_shape = (ncoarse_chan*nbeam, nt_per_bf_frame, nfine_chan, 2)
+
+        fgpa_data = []
+
+        for cardid in range(self.my_cards[0], self.my_cards[1]):
+            for fpga in range(6):
+                d = np.zeros(fpga_data_shape, dtype=np.int16)
+                fpga_data.append(d)
+
+        self.fpga_data = fpga_data
+
+        return fpga_data
 
     def prepare(self):
-        self.tavg = self.input_data.mean(axis=2)
-        self.nchan_favg = v.nchan_rx // v.nfavg
-        self.calibrated_data = self.input_data * self.calibration - self.sky
-        self.favg = self.input_data.reshape(v.nbeam, self.chan_favg, v.nfavg, v.nt).mean(axis=2)
+        #self.tavg = self.input_data.mean(axis=2)
+        #self.nchan_favg = v.nchan_rx // v.nfavg
+        #self.calibrated_data = self.input_data * self.calibration - self.sky
+        #self.favg = self.input_data.reshape(v.nbeam, self.chan_favg, v.nfavg, v.nt).mean(axis=2)
 
     def transpose(self):
         size = np.prod(self.favg.shape[1:])
@@ -112,11 +179,7 @@ class TestPipeline(MpiPipeline):
             self.sky += 1
 
     def baseline2uv(self):
-        
-                    
-            
-
-                
+        pass
         
     def read_and_transpose(self):
         nbeam = self.nbeam
@@ -138,7 +201,7 @@ class TestPipeline(MpiPipeline):
 
         comm = self.get_beam_communicator('read_and_transpose')
         pre_prank = self.get_beam_rank('prep')
-        beamid = self.get_beam()
+        beamid = self.beamid
 
         print(f'Input for {rank} is {din}')
         for i in range(self.niter):
@@ -183,7 +246,16 @@ class TestPipeline(MpiPipeline):
                 plan = comm.recv()
             else:
                 raise ValueError(f'Unknown tag:{status.tag}')
-        
+
+
+    @property
+    def beamid(self):
+        '''
+        Returns which beam number we're running
+        '''
+        bno = self.rank - 1 # rank - 0 is root.
+        assert 0 <= bno < self.values.nbeam
+        return bno
 
     def run(self):
         comm = MPI.COMM_WORLD
@@ -197,7 +269,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--nbeam', type=int, help='Nbeam', default=36)
+    parser.add_argument('--nbeam', type=int, help='Nbeam', default=20)
     parser.add_argument('--nchan_rx', type=int, help='Nchan', default=36*10)
     parser.add_argument('--nant', type=int, help='Nchan', default=30)
     parser.add_argument('--nt', type=int, help='NT', default=256)
