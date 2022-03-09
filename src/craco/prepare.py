@@ -2,6 +2,15 @@
 """
 Prepare data from FPGAs suitable for transposing
 
+ A note on the FPGA data
+
+ fpga_data = list numpy arrays. length of the list is the number of FPGAS of interest (nfpga)
+    Each input data has shape  = (ncoarse_chan*nbeam, nt_per_bf_frame,  nbl, 2) np.int16
+    where ncoarse_chan = 4, nbeam = 36, nt_per_bf_frame is variable (2048 // 16, usually), and  nbl is configurable
+    every array should have the same shape
+    It's a funny shape because ..... digital design reasons we wont' go into
+
+
 Copyright (C) CSIRO 2022
 """
 import pylab
@@ -20,124 +29,107 @@ ncoarse_channels=4
 nfine_channels=6
 nbeams=36
 
-
-
 @jit(nopython=True)
 def coarse_beam_gen(beam_mask=0xfffffffff):
-    '''Generator replicates the crazy ordering of beams and channels in the ASKAP correlator
-    Yields (channel, beam) pairs
+    '''
+    Generator replicates the crazy ordering of beams and channels in the ASKAP correlator
+    yields tuples (coarse_channel, outbeam, inbeam, cbslot)
     Zero indexed
-    @param beam_mask contains 1 if you want that beam. Zero otherwise.
+    where
+    coarse_channel is the coarse_channel index (0-3)
+    outbeam is the output beam index (0 - (the number of ones in the mask))
+    inbeam - the input beam index (0-36)
+    cbslot - the channel*slot index
+    @param beam_mask contains 1 if you want that beam.
+
+    >>> list(coarse_beam_gen(0x1))
+    [(0, 0, 0, 0), (1, 0, 0, 32), (2, 0, 0, 64), (3, 0, 0, 96)]
+
+    >>> list(coarse_beam_gen(0x13))
+    [(0, 0, 0, 0),
+    (0, 1, 1, 1),
+    (0, 2, 4, 4),
+    (1, 0, 0, 32),
+    (1, 1, 1, 33),
+    (1, 2, 4, 36),
+    (2, 0, 0, 64),
+    (2, 1, 1, 65),
+    (2, 2, 4, 68),
+    (3, 0, 0, 96),
+    (3, 1, 1, 97),
+    (3, 2, 4, 100)]
+
+    >>> list(coarse_beam_gen(0x180000000))
+    [(0, 0, 31, 31),
+    (1, 0, 31, 63),
+    (2, 0, 31, 95),
+    (3, 0, 31, 127),
+    (0, 1, 32, 128),
+    (1, 1, 32, 132),
+    (2, 1, 32, 136),
+    (3, 1, 32, 140)]
     '''
     slot = 0
+
     for c in range(4):
+        outbeam = 0
         for b in range(32):
             if (beam_mask >> b) & 0x1 == 1:
-                yield (c, b, slot)
+                yield (c, outbeam, b, slot)
+                outbeam += 1
 
             slot += 1
+
+    end_outbeam = outbeam
 
     for c in range(4):
+        outbeam = end_outbeam
         for b in range(32, 36):
             if (beam_mask >> b) & 0x1 == 1:
-                yield (c, b, slot)
+                yield (c, outbeam, b, slot)
+                outbeam += 1
 
             slot += 1
-            
 
 
-@jit(nopython=True)
-def do_prepare_numba(input_data, channel_map, calibration_data, sky_model, output_data, block_average, scale=1.0, beam_mask=0xfffffffff, check=False):
+def freqavg(fpga_data: list, channel_map: np.ndarray, output_data: np.ndarray, beam_mask:int =0xfffffffff):
     '''
-    Prepares input data
-    @param input data = list numpy arrays. length of the list is the number of FPGAS of interest (nfpga)
-    Each input data has shape  = (ncoarse_chan*nbeam, nt_per_bf_frame, nfine_chan, nbl, 2) np.int16
-    where ncoarse_chan = 4, nbeam = 5, nt_per_bf_frame is variable (2048 // 16, usually), nfine_chan = 6 and  nbl is configurable
-    every array should have the same shape
-    It's a funny shape because ..... digital design reasons.
-
-    @param channel_map array length of nfpga*ncoarse_channels*nfine_channls channels that permutes the input to the output mapping
-    @param calibration_data - multiply input but this 
-    @param sky_model - subtract this from calibrated data
-    @output_data suitable for transposing shape = [nbeams, nfpga*ncoarse_channels*nfine_channels
+    Frequency averaging and re-ordering of the data directly from the FPGAs into output_data that can
+    be corner-turned over MPI. Each card comprieses 6 FPGAS. 
+    
+    @param fpga_data list of nump arrays from the fpgas. length=multiple of 6
+    @param channel_map numpy array shape[nfpga, ncoarse_channels] that maps the channel from the given FPGA into the 
+    coarse channel index the output
+    @output_data suitable for transposing shape = [nbeams_out, nfpga*ncoarse_channels, nt, nbl, 2]
     @block_average averaged data
 
     '''
 
-    # how to you make a float32 scalar in numba???? 
-    fscale = np.array([scale], dtype=np.float32)
-    nfpga = len(input_data)
-    total_nchan = nfpga*ncoarse_channels*nfine_channels
-    inshape = input_data[0].shape
-    nctimesb, nt, nfine_chan, nbl, expect2 = inshape
-
-
-    if check:
-        assert expect2 == 2
-        assert nfine_chan == nfine_channels
-        assert nctimesnb == ncoarse_channels*nbeams
-        assert inshape == np.int16
-
-        assert calibration_data.shape == (total_nchan, nbl)
-        assert calibration_data.dtype == np.complex64
-
-        assert sky_model.shape == (total_nchan, nbl)
-        assert sky_model.dtype == np.complex64
-
-        assert block_average.shape == (total_nchan, nbl)
-        assert block_average.dtype == np.complex64
-
-    for ifpga, input_data in enumerate(input_data):
-        # create complex 64 view without making a copy (I think?). Remove last dimension as it's aborbed into complex
-        incomplex = input_data.view(dtype=np.complex64)[...,0]
-        for islot, (coarse_channel, beam, cbslot) in enumerate(coarse_beam_gen(beam_mask)):
-            for t in prange(nt):
-                for fine_channel in prange(nfine_chan):
-                    total_channel = ifpga*ncoarse_channels*nfine_channels + coarse_channel*nfine_channels + fine_channel
-                    out_channel = channel_map[total_channel]
-                    ind = incomplex[cbslot, t, :]
-                    block_average[total_channel, :] += ind  # calculate average over time as complex64
-                    
-                    # calculate output in complex64
-                    dout = ind*calibration_data[total_channel,:] - sky_model[total_channel, :]
-                    output[beam, total_channel, t,:] = dout*fscale # cast to int16
-
-    return output_data, block_average
-        
-
-def _main():
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument(dest='files', nargs='+')
-    parser.set_defaults(verbose=False)
-    values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-
-    nfpga = 6*12
-    data = []
-    nt = 128
-    nbl = 435
-    dshape = (nbeams*ncoarse_channels,  nt, nfine_chanels, nbl, 2)
-    for f in range(nfpga):
-        data.append(np.arange(np.prod(dshape), dtype=np.int16).reshape(dshape))
-
-    ntotal_nchan = nfpga*ncoarse_channels*nfine_channels
-    calibration_data = np.zeros((total_nchan, nbl), dtype=np.complex64)
-    skymodel_data = calibration_data.copy()
-    block_average = skymodel_data.copy()
-    calibration_data[:] = 1
-    channel_map = np.arange(total_nchan, dtype=np.int32)
-    output_data = np.zeros((nbeam, total_nchan, nt, nbl, 2), dtype=np.int16)
-    do_prepare_numba(input_data, channel_map, calibration_data, sky_model_data, output_data, block_average, scale=1.0, beam_mask=0xfffffffff, check=False)
-
+    nfpga = len(fpga_data)
+    nchan_input = nfpga*ncoarse_channels*nfine_channels
+    nchan_output = nfpga*ncoarse_channels
     
+    inshape = fpga_data[0].shape
+    nctimesnb, nt, nbl, expect2 = inshape
+    nbeams_out = output_data.shape[0]
 
-    
 
-if __name__ == '__main__':
-    _main()
+    assert expect2 == 2
+    assert nctimesnb == ncoarse_channels*nbeams
+    assert channel_map.shape== (nfpga, ncoarse_channels)
+    assert output_data.shape[1:] == (nchan_output, nt, nbl, 2)
+
+
+    for ifpga, indata in enumerate(fpga_data):
+        for coarse_channel, outbeam, inbeam, cbslot in coarse_beam_gen(beam_mask):
+            outchan = channel_map[ifpga, coarse_channel]
+            output_data[outbeam, outchan, :, :,:] += indata[cbslot, :, :, :]
+
+    return output_data
+
+def rescale(input_data, output_data, scale=1):
+    '''
+    Rescale the input data into the output data
+    Useful for compressing the output to reduce network bandwidth
+    '''
+    output_data[:] = (input_data // scale)
