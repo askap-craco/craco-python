@@ -125,7 +125,7 @@ def freqavg(fpga_data: list, channel_map: np.ndarray, output_data: np.ndarray, b
             outchan = channel_map[ifpga, coarse_channel]
             output_data[outbeam, outchan, :, :,:] += indata[cbslot, :, :, :]
 
-    return output_data
+    return output_dataw
 
 def rescale(input_data, output_data, scale=1):
     '''
