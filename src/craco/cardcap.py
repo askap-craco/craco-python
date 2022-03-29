@@ -42,7 +42,7 @@ def get_single_packet_dtype(nprod, enable_debug_hdr):
     else:
         dtype = []
                      
-    dtype.append(('data', '<i2', (nprod,)))
+    dtype.append(('data', '<i2', (nprod,2)))
     return np.dtype(dtype)
 
 
@@ -117,13 +117,17 @@ def run(values):
     rdmaPort = values.port
     gidIndex = values.gid_index
     # In mike's test setup he sends beam0, channel 155, samples 0,1,2,3. Samp=0 is FIRST, 1,2 are MIDDLE and 3 is LAST with immediate.
+    # I.e. there are 4 packets per "message"
+    npacket_per_msg = 4*16
     nbeam = 1
     nchan = 1
     nsamp = 4
-    nprod = 1024
+    nprod = 512
+    
     enable_debug_header = True
     packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
-    msg_size = packet_dtype.itemsize
+
+    msg_size = packet_dtype.itemsize*npacket_per_msg
     num_blks = values.num_blks
     num_cmsgs = values.num_cmsgs
     nmsg = 1000000
@@ -131,6 +135,7 @@ def run(values):
     card = 4
     fpga = 2
     send_delay = 0
+
     log.info(f'Listening on {device} port {rdmaPort} for {msg_size} {num_blks} {num_cmsgs} {nmsg}')
 
     rx = RdmaTransport(mode,
@@ -143,14 +148,14 @@ def run(values):
                        rdmaPort,
                        gidIndex)
 
-    rx.checkImmediate = True
+    rx.checkImmediate = False
     psn = rx.getPacketSequenceNumber()
     qpn = rx.getQueuePairNumber()
     gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
 
     gids = '-'.join([f'{x:d}' for x in gid])
 
-    log.info('RX PSN %d QPN %d =0x{%x} GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
+    log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
     dst_mac = bytes(ipv6_to_mac(gid))
     src_mac = bytes(src_mac_of(shelf, card, fpga))
     src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
@@ -174,7 +179,7 @@ def run(values):
         m = rx.get_memoryview(iblock)
         mnp = np.frombuffer(m, dtype=packet_dtype)
         mnp[:] = 0
-        mnp.shape = (num_cmsgs,)
+        mnp.shape = (num_cmsgs, npacket_per_msg)
         log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
         rdma_buffers.append(mnp)
 
@@ -199,7 +204,12 @@ def run(values):
     total_completions = 0
     total_missing = 0
 
-
+    while True:
+        s = rdma_buffers[0][0]['data'][:16].sum()
+        if s != 0:
+            print(s)
+            break
+        
     
     while True:
         rx.waitRequestsCompletion()
@@ -223,7 +233,6 @@ def run(values):
             message_index = index%num_cmsgs
             d = rdma_buffers[block_index][message_index]
             print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
-            print(f'{d.shape} {d.dtype}')
             #np.save(outf, d) # numpy way
             d.tofile(outf) # save raw bytes
             

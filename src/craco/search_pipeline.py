@@ -330,7 +330,9 @@ class Pipeline:
 
         # DD reader lookup table
         log.info('Allocating ddreader_lut')
-        self.ddreader_lut = Buffer((NDM_MAX + self.plan.nuvrest_max), np.uint32, device, self.grid_reader.group_id(5)).clear()
+        ddreader_lut_size = (NDM_MAX + self.plan.nuvrest_max) # old version
+        ddreader_lut_size = len(plan.ddreader_lut)
+        self.ddreader_lut = Buffer(ddreader_lut_size, np.uint32, device, self.grid_reader.group_id(5)).clear()
         self.ddreader_lut.nparr[:] = plan.ddreader_lut
         self.ddreader_lut.copy_to_device()
 
