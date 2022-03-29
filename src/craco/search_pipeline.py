@@ -528,22 +528,20 @@ class Pipeline:
 
             log.info('Finished clearing pipeline')
 
-    def copy_input(self, input_data, values):
+    def copy_input(self, input_flat, values):
         '''
         Converts complex input data in [NBL, NC, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
         the copies to the device
 
         '''
-        self.fast_baseline2uv(self.input_flat, self.uv_out)
-        self.inbuf.nparr[:,:,:,:,0] = np.round(uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
-        self.inbuf.nparr[:,:,:,:,1] = np.round(uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.fast_baseline2uv(input_flat, self.uv_out)
+        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
         self.inbuf.copy_to_device()
 
         return self
         
-        
-
 def location2pix(location, npix=256):
 
     npix_half = npix//2
@@ -754,7 +752,6 @@ def _main():
     candout.write(cand_str_header)
     total_candidates = 0
     bestcand = None
-
 
     for iblk, input_flat in enumerate(vis_source):
         if values.nblocks is not None and iblk >= values.nblocks:
