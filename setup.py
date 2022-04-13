@@ -61,6 +61,7 @@ if __name__ == '__main__':
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
                                 'pipeline=craco.pipeline:_main',
+                                'cardcap=craco.cardcap:_main',
                                 'search_pipeline=craco.search_pipeline:_main']
         },
         classifiers=['Development Status :: 3 - Alpha',
