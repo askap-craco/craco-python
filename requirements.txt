@@ -4,8 +4,14 @@
  # in editable mode
  # KB - I'm not sure we want to do this, as setup.py references this file for the dependencies
  #  -e .
+wheel
+ # sphinx needs docutils==0.17
+
+docutils==0.17
 sphinx
+
 numpy
+h5py
  matplotlib
  astropy
  pytz

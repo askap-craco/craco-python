@@ -12,12 +12,14 @@ import os
 import sys
 import logging
 import roce_packetizer
+from craft.fitswriter import FitsTableWriter
 
 from rdma_transport import RdmaTransport
 from rdma_transport import runMode
 from rdma_transport import ibv_wc
 from rdma_transport import ibv_wc_status
 import rdma_transport
+import socket 
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
             ('nprod','<u2'),# Word 6
             ('flags','<u1'), # (sync_bit, last_packet, enable_debug_header, enable_test_data
             ('zero1','<u1'), # padding
-            ('zero2','<u4'), # word 7
+            ('version','<u4'), # Version
             ('zero3','<u4') # word 8
 ]
             
@@ -109,136 +111,141 @@ def src_mac_of(shelf, card, fpga):
     mac[5] = 0# fpga - don't want fpgas to have different mac Addresses - this might confused the swith
     
     return mac
-    
-def run(values):
-    rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
-    mode = runMode.RECV_MODE
-    device = values.device
-    rdmaPort = values.port
-    gidIndex = values.gid_index
-    # In mike's test setup he sends beam0, channel 155, samples 0,1,2,3. Samp=0 is FIRST, 1,2 are MIDDLE and 3 is LAST with immediate.
-    # I.e. there are 4 packets per "message"
-    npacket_per_msg = 4*16
-    nbeam = 1
-    nchan = 1
-    nsamp = 4
-    nprod = 512
-    
-    enable_debug_header = True
-    packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
 
-    msg_size = packet_dtype.itemsize*npacket_per_msg
-    num_blks = values.num_blks
-    num_cmsgs = values.num_cmsgs
-    nmsg = 1000000
-    shelf = 3
-    card = 4
-    fpga = 2
-    send_delay = 0
 
-    log.info(f'Listening on {device} port {rdmaPort} for {msg_size} {num_blks} {num_cmsgs} {nmsg}')
-
-    rx = RdmaTransport(mode,
-                       msg_size,
-                       num_blks,
-                       num_cmsgs,
-                       nmsg,
-                       send_delay,
-                       device,
-                       rdmaPort,
-                       gidIndex)
-
-    rx.checkImmediate = False
-    psn = rx.getPacketSequenceNumber()
-    qpn = rx.getQueuePairNumber()
-    gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
-
-    gids = '-'.join([f'{x:d}' for x in gid])
-
-    log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
-    dst_mac = bytes(ipv6_to_mac(gid))
-    src_mac = bytes(src_mac_of(shelf, card, fpga))
-    src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
-    log.debug('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
-    
-    hdr = roce_packetizer.roce_header()
-    hdr.setup(src_mac, dst_mac, qpn, psn)
-    hbytes = bytes(hdr.to_array(True))
-    print('Header is')
-    hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-    print(hstring)
-    with open('header.txt', 'w') as fout:
-        fout.write(hstring)
+class CardCapturer:
+    def __init__(self, values):
+        rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
+        mode = runMode.RECV_MODE
+        device = values.device
+        rdmaPort = values.port
+        gidIndex = values.gid_index
+        # In mike's test setup he sends beam0, channel 155, samples 0,1,2,3. Samp=0 is FIRST, 1,2 are MIDDLE and 3 is LAST with immediate.
+        # I.e. there are 4 packets per "message"
+        nbeam = 36
+        nchan = 4
+        nsamp = 2048//64
+        npacket_per_msg= nbeam*nchan*nsamp
+        nprod = 930
         
-    with open('header.bin','wb') as fout:
-        fout.write(hbytes)
-
-    
-    rdma_buffers = []
-    for iblock in range(num_blks):
-        m = rx.get_memoryview(iblock)
-        mnp = np.frombuffer(m, dtype=packet_dtype)
-        mnp[:] = 0
-        mnp.shape = (num_cmsgs, npacket_per_msg)
-        log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
-        rdma_buffers.append(mnp)
-
-    outf = open('capture.dat', 'wb')
-    #import ipdb; ipdb.set_trace()
-
-    if values.prompt:
-        psn = int(input("PSN: "))
-        qpn = int(input("QPN: "))
-        gidstr = input("GID: ")
-        src_gid = np.array(list(map(int, gidstr.split("-"))), dtype=np.uint8)
+        enable_debug_header = True
+        packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
         
-    rx.setPacketSequenceNumber(psn)
-    rx.setQueuePairNumber(qpn)
-    rx.setGidAddress(src_gid)
-    rx.setLocalIdentifier(0)
-    rx.setupRdma(None)
-    log.info("Setup RDMA")
-
-    rx.issueRequests()
-    log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
-    total_completions = 0
-    total_missing = 0
-
-    while True:
-        s = rdma_buffers[0][0]['data'][:16].sum()
-        if s != 0:
-            print(s)
-            break
+        msg_size = packet_dtype.itemsize*npacket_per_msg
+        num_blks = values.num_blks
+        num_cmsgs = values.num_cmsgs
+        nmsg = 1000000
+        shelf = 3
+        card = 4
+        fpga = 2
+        send_delay = 0
         
+        log.info(f'Listening on {device} port {rdmaPort} for {msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg}')
+        
+        rx = RdmaTransport(mode,
+                           msg_size,
+                           num_blks,
+                           num_cmsgs,
+                           nmsg,
+                           send_delay,
+                           device,
+                           rdmaPort,
+                           gidIndex)
+
+        rx.checkImmediate = False
+        psn = rx.getPacketSequenceNumber()
+        qpn = rx.getQueuePairNumber()
+        gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
+        
+        gids = '-'.join([f'{x:d}' for x in gid])
     
-    while True:
-        rx.waitRequestsCompletion()
-        rx.pollRequests()
-        ncompletions = rx.get_numCompletionsFound()
-        nmissing = rx.get_numMissingFound()
-        completions = rx.get_workCompletions()
-        total_completions += ncompletions
-        total_missing += nmissing
-        assert ncompletions == len(completions)
-        print(f'\rCompletions={ncompletions} {len(completions)}')
-        for c in completions:
-            #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
-            index = c.wr_id
-            nbytes = c.byte_len
-            immediate = c.imm_data
-            # Get data for buffer regions
-            block_index = index//num_cmsgs
+        log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
+        dst_mac = bytes(ipv6_to_mac(gid))
+        src_mac = bytes(src_mac_of(shelf, card, fpga))
+        src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
+        log.debug('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
     
-            # now it is data for each message
-            message_index = index%num_cmsgs
-            d = rdma_buffers[block_index][message_index]
-            print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
-            #np.save(outf, d) # numpy way
-            d.tofile(outf) # save raw bytes
+        hdr = roce_packetizer.roce_header()
+        hdr.setup(src_mac, dst_mac, qpn, psn)
+        hbytes = bytes(hdr.to_array(True))
+        print('Header is')
+        hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
+        print(hstring)
+        with open('header.txt', 'w') as fout:
+            fout.write(hstring)
+        
+        with open('header.bin','wb') as fout:
+            fout.write(hbytes)
+
+    
+        rdma_buffers = []
+        for iblock in range(num_blks):
+            m = rx.get_memoryview(iblock)
+            mnp = np.frombuffer(m, dtype=packet_dtype)
+            mnp[:] = 0
+            mnp.shape = (num_cmsgs, npacket_per_msg)
+            log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
+            rdma_buffers.append(mnp)
+
             
+        if values.prompt:
+            psn = int(input("PSN: "))
+            qpn = int(input("QPN: "))
+            gidstr = input("GID: ")
+            src_gid = np.array(list(map(int, gidstr.split("-"))), dtype=np.uint8)
+        
+        rx.setPacketSequenceNumber(psn)
+        rx.setQueuePairNumber(qpn)
+        rx.setGidAddress(src_gid)
+        rx.setLocalIdentifier(0)
+        rx.setupRdma(None)
+        log.info("Setup RDMA")
 
         rx.issueRequests()
         log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
+        total_completions = 0
+        total_missing = 0
+        curr_imm = 0
+        nmiss = 0
+        byteswap = False
+
+        with FitsTableWriter(values.outfile, packet_dtype, byteswap) as w:
+            while True:
+                rx.waitRequestsCompletion()
+                rx.pollRequests()
+                ncompletions = rx.get_numCompletionsFound()
+                nmissing = rx.get_numMissingFound()
+                completions = rx.get_workCompletions()
+                total_completions += ncompletions
+                total_missing += nmissing
+                assert ncompletions == len(completions)
+                #print(f'\rCompletions={ncompletions} {len(completions)}')
+                for c in completions:
+                    #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
+                    index = c.wr_id
+                    nbytes = c.byte_len
+                    immediate = c.imm_data
+                    immediate = socket.ntohl(immediate)
+                    if immediate != curr_imm:
+                        missed  = (immediate - curr_imm)
+                        nmiss += missed
+                        print(f'Missed {missed} nmiss={nmiss}')
+
+                    curr_imm = immediate+1
+                    
+                    # Get data for buffer regions
+                    block_index = index//num_cmsgs
+                    
+                    # now it is data for each message
+                    message_index = index%num_cmsgs
+                    d = rdma_buffers[block_index][message_index]
+                    print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
+                    #np.save(outf, d) # numpy way
+                    #d.tofile(outf) # save raw bytes
+                    w.write(d[:nbytes]) # write to fitsfile
+                    
+                rx.issueRequests()
+                #log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex} nmiss={nmiss}")
         
 
 
@@ -253,6 +260,7 @@ def _main():
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
     parser.add_argument('-e','--debug-header', help='Enabel debug header', action='store_true', default=False)
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
+    parser.add_argument('-f', '--outfile', help='Data output file')
 
     
     parser.set_defaults(verbose=False)
@@ -262,7 +270,10 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    run(values)
+
+
+
+    CardCapturer(values)
     
 
 if __name__ == '__main__':
