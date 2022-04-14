@@ -124,9 +124,20 @@ class CardCapturer:
         # I.e. there are 4 packets per "message"
         nbeam = 36
         nchan = 4
-        nsamp = 2048//64
-        npacket_per_msg= nbeam*nchan*nsamp
-        nprod = 930
+        nsamp_per_frame = 2048
+        nsamp_per_integration = 32
+        include_autos = True
+        nant = 30
+        npol = 2
+        nint_per_frame = nsamp_per_frame // nsamp_per_integration
+        nbl = nant*(nant-1)//2
+        nprod = nbl
+        if include_autos:
+            nprod += nant
+
+        nprod *= npol
+        npacket_per_msg= nbeam*nchan*nint_per_frame
+
         
         enable_debug_header = True
         packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
@@ -258,7 +269,9 @@ def _main():
     parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=0)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
-    parser.add_argument('-e','--debug-header', help='Enabel debug header', action='store_true', default=False)
+    parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
+    #parser.add_argument('-s','--pol-sum', help='Enable pol-sum', action='store_true', default=True)
+    #parser.add_argument('--dual-pol', help='Enable dual pol', action='store_false', target='pol_sum')
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
 

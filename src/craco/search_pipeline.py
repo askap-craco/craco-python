@@ -22,6 +22,8 @@ from collections import OrderedDict
 
 import logging
 
+DM_CONSTANT = 4.15 # milliseconds - Shri Kulkarni will kill me
+
 log = logging.getLogger(__name__)
 
 #from craco_pybind11 import boxcar, krnl, fdmt_tunable
@@ -561,19 +563,34 @@ location2pix = np.vectorize(location2pix)
 
 def cand2str(candidate, npix, iblk):
     location = candidate['loc_2dfft']
-    vpix, upix = location2pix(location, npix)
+    lpix, mpix = location2pix(location, npix)
     rawsn = candidate['snr']
     snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
-    s = f"{snr:.1f}\t{upix}\t{vpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}\t{rawsn}"
+    s = f"{snr:.1f}\t{lpix}\t{mpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}\t{rawsn}"
     return s
 
-cand_str_header = '# SNR\tupix\tvpix\tboxc_width\ttime\tdm\tiblk\trawsn\n'
+cand_str_header = '# SNR\tlpix\tmpix\tboxc_width\ttime\tdm\tiblk\trawsn\n'
+cand_str_wcs_header = cand_str_header[:-1] + "total_sample\tobstime_sec\tmjd\tdm_pccm3\tra_deg\tdec_deg\n"
     
 
-def print_candidates(candidates, npix, iblk):
+def print_candidates(candidates, npix, iblk, plan=None):
     print(cand_str_header)
     for candidate in candidates:
         print(cand2str(candidate, npix, iblk))
+
+def print_candidates_with_wcs(candidates, iblk, plan):
+    for c in candidates:
+        s = cand2str(c, plan.npix, iblk)
+        total_sample = iblk*plan.nt + candidate['time']
+        tsamp_s = plan.tsamp_s
+        obstime_sec = total_sample*plan.tsamp_s
+        mjd = plan.tstart.mjd + tsamp_s/3600./24./
+        dmdelay_ms = candidate['dm']*tsamp_s.to(u.millisecond)
+        dm_pccm3 = dmdelay_ms / DM_CONSTANT / (plan.fmin**-2 - plan.fmax**-2)
+        lpix,mpix = location2pix(location, plan.npix)
+        ra_deg, dec_deg = plan.wcs.wcs_pix2world([lpix,mpix])
+        s2 = f'{total_sample}\t{obstime_sec:0.4f}\t{mjd:0.9f}\t{dm_pccm3:0.2f}\t{ra_deg:0.8f}\t{dec_deg:0.6f}'
+        print(s1+s1+'\n')
 
 def grid_candidates(cands, field='snr', npix=256):
     g = np.zeros((npix, npix))
@@ -620,7 +637,7 @@ def get_parser():
     #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
     parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE', type=int, default=1024)
+    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
     #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
     #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
     #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
