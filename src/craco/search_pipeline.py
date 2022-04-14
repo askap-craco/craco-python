@@ -20,9 +20,11 @@ from Visibility_injector.inject_in_fake_data import FakeVisibility
 
 from collections import OrderedDict
 
+from astropy import units
+
 import logging
 
-DM_CONSTANT = 4.15 # milliseconds - Shri Kulkarni will kill me
+DM_CONSTANT = 4.15 # milliseconds and GHz- Shri Kulkarni will kill me
 
 log = logging.getLogger(__name__)
 
@@ -122,7 +124,7 @@ def merge_candidates_width_time(cands):
                 best_cand =  max(curr_cand, key=lambda c:c['snr'])
                 yield best_cand
                 curr_cand = [cand]
-        else: # change of pixel or DM
+        else: # change of pixelor DM
             best_cand =  max(curr_cand, key=lambda c:c['snr'])
             yield best_cand
             curr_cand = [cand]
@@ -570,7 +572,7 @@ def cand2str(candidate, npix, iblk):
     return s
 
 cand_str_header = '# SNR\tlpix\tmpix\tboxc_width\ttime\tdm\tiblk\trawsn\n'
-cand_str_wcs_header = cand_str_header[:-1] + "total_sample\tobstime_sec\tmjd\tdm_pccm3\tra_deg\tdec_deg\n"
+cand_str_wcs_header = cand_str_header[:-1] + "\ttotal_sample\tobstime_sec\tmjd\tdm_pccm3\tra_deg\tdec_deg\n"
     
 
 def print_candidates(candidates, npix, iblk, plan=None):
@@ -578,19 +580,23 @@ def print_candidates(candidates, npix, iblk, plan=None):
     for candidate in candidates:
         print(cand2str(candidate, npix, iblk))
 
+def cand2str_wcs(c, iblk, plan):
+    s1 = cand2str(c, plan.npix, iblk)
+    total_sample = iblk*plan.nt + c['time']
+    tsamp_s = plan.tsamp_s
+    obstime_sec = total_sample*plan.tsamp_s
+    mjd = plan.tstart.mjd + obstime_sec.value/3600/24
+    dmdelay_ms = c['dm']*tsamp_s.to(units.millisecond)
+    
+    dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
+    lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
+    coord = plan.wcs.pixel_to_world(lpix, mpix)
+    s2 = f'{total_sample}\t{obstime_sec.value:0.4f}\t{mjd:0.9f}\t{dm_pccm3.value:0.2f}\t{coord.ra.deg:0.8f}\t{coord.dec.deg:0.6f}'
+    return s1+s2
+
 def print_candidates_with_wcs(candidates, iblk, plan):
     for c in candidates:
-        s = cand2str(c, plan.npix, iblk)
-        total_sample = iblk*plan.nt + candidate['time']
-        tsamp_s = plan.tsamp_s
-        obstime_sec = total_sample*plan.tsamp_s
-        mjd = plan.tstart.mjd + tsamp_s/3600./24./
-        dmdelay_ms = candidate['dm']*tsamp_s.to(u.millisecond)
-        dm_pccm3 = dmdelay_ms / DM_CONSTANT / (plan.fmin**-2 - plan.fmax**-2)
-        lpix,mpix = location2pix(location, plan.npix)
-        ra_deg, dec_deg = plan.wcs.wcs_pix2world([lpix,mpix])
-        s2 = f'{total_sample}\t{obstime_sec:0.4f}\t{mjd:0.9f}\t{dm_pccm3:0.2f}\t{ra_deg:0.8f}\t{dec_deg:0.6f}'
-        print(s1+s1+'\n')
+        print(cand2str_wcs(c, iblk, plan))
 
 def grid_candidates(cands, field='snr', npix=256):
     g = np.zeros((npix, npix))
@@ -788,7 +794,7 @@ def _main():
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str(c, values.npix, iblk)+'\n')
+            candout.write(cand2str_wcs(c, plan, iblk)+'\n')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
