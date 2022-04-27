@@ -255,7 +255,6 @@ def genvis_1PS_at_phase_center(blvec, fvec, apparent_stokes_intensity=None, igno
     ----------------------------------------------------------------------------
     """
         
-        
     src_dircos_pc = NP.array([0.0, 0.0, 1.0])
     return genvis_1PS(blvec, src_dircos_pc, fvec, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w)
 
