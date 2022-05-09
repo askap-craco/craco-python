@@ -794,7 +794,7 @@ def _main():
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str_wcs(c, plan, iblk)+'\n')
+            candout.write(cand2str_wcs(c, iblk, plan)+'\n')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
