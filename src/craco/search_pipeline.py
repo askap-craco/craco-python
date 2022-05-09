@@ -772,7 +772,7 @@ def _main():
     p.clear_buffers(values)
     
     candout = open(values.cand_file, 'w')
-    candout.write(cand_str_header)
+    candout.write(cand_str_wcs_header)
     total_candidates = 0
     bestcand = None
 
