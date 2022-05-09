@@ -818,7 +818,7 @@ def _main():
 
     cmdstr =  ' '.join(sys.argv)
     now = datetime.datetime.now()
-    logstr = '# Run {cmdstr} on {now}\n'
+    logstr = f'# Run {cmdstr} on {now}\n'
     candout.write(logstr)
     candout.flush()    
     candout.close()
