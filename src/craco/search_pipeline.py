@@ -682,7 +682,7 @@ def get_parser():
     
     parser.set_defaults(device    = 0)
     parser.set_defaults(npix      = 256)
-    parser.set_defaults(ndm       = 2)
+    parser.set_defaults(ndm       = 512)
     parser.set_defaults(nt        = 256)
     parser.set_defaults(nbox      = 8)
     parser.set_defaults(nuvwide   = 8)
