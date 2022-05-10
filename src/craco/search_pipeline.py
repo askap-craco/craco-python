@@ -643,7 +643,7 @@ def get_parser():
     #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
     parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
+    #parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
     #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
     #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
     #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
@@ -818,7 +818,7 @@ def _main():
 
     cmdstr =  ' '.join(sys.argv)
     now = datetime.datetime.now()
-    logstr = f'# Run {cmdstr} on {now}\n'
+    logstr = f'# Run {cmdstr} finished on {now}\n'
     candout.write(logstr)
     candout.flush()    
     candout.close()

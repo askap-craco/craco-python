@@ -19,7 +19,10 @@ from rdma_transport import runMode
 from rdma_transport import ibv_wc
 from rdma_transport import ibv_wc_status
 import rdma_transport
-import socket 
+import socket
+from craft.cmdline import strrange
+from craco.epics.craco import Craco as CracoEpics
+
 
 log = logging.getLogger(__name__)
 
@@ -138,10 +141,8 @@ class CardCapturer:
         nprod *= npol
         npacket_per_msg= nbeam*nchan*nint_per_frame
 
-        
         enable_debug_header = True
         packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
-        
         msg_size = packet_dtype.itemsize*npacket_per_msg
         num_blks = values.num_blks
         num_cmsgs = values.num_cmsgs
@@ -188,7 +189,23 @@ class CardCapturer:
         with open('header.bin','wb') as fout:
             fout.write(hbytes)
 
-    
+
+        ctrl = CracoEpics(values.prefix)
+        ctrl.set_roce_header(values.block, values.card, values.fpga, hbytes)
+        fpgaMask = 0x3f
+        enMultiDest = False
+        enPktzrDbugHdr = enable_debug_header
+        enPktzrTestData = False
+        lsbPosition = 8
+        sumPols = 1
+        integSelect = 32
+        # configure CRACO on all FPGAS
+        craco.configure(fpgaMask, enMultiDest, enPktzDbgHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
+
+        # start CRACO (enabling packetiser, craco subsystem and firing event)
+        craco.start()
+
+        
         rdma_buffers = []
         for iblock in range(num_blks):
             m = rx.get_memoryview(iblock)
@@ -274,7 +291,10 @@ def _main():
     #parser.add_argument('--dual-pol', help='Enable dual pol', action='store_false', target='pol_sum')
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
-
+    parser.add_argument('-b','--block',help='Correlator block to talk to', default=1, type=int) 
+    parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=int)
+    parser.add_argument('-k','--fpga', help='FPGA range to talk to', default=1, type=int)
+    parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
