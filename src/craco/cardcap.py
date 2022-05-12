@@ -119,6 +119,8 @@ def src_mac_of(shelf, card, fpga):
 class CardCapturer:
     def __init__(self, values):
         rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
+        log.info('Starting card capture %s', values)
+        self.values = values
         mode = runMode.RECV_MODE
         device = values.device
         rdmaPort = values.port
@@ -128,21 +130,26 @@ class CardCapturer:
         nbeam = 36
         nchan = 4
         nsamp_per_frame = 2048
-        nsamp_per_integration = 32
+        nsamp_per_integration = values.samples_per_integration
         include_autos = True
         nant = 30
-        npol = 2
+        npol = 1 if values.sum_pols == 1 else 2
         nint_per_frame = nsamp_per_frame // nsamp_per_integration
         nbl = nant*(nant-1)//2
         nprod = nbl
+        
         if include_autos:
             nprod += nant
 
         nprod *= npol
+
+        nprod = 930 #DEBUG
+        
         npacket_per_msg= nbeam*nchan*nint_per_frame
 
-        enable_debug_header = True
+        enable_debug_header = values.debug_header
         packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
+        self.packet_dtype = packet_dtype
         msg_size = packet_dtype.itemsize*npacket_per_msg
         num_blks = values.num_blks
         num_cmsgs = values.num_cmsgs
@@ -151,8 +158,9 @@ class CardCapturer:
         card = 4
         fpga = 2
         send_delay = 0
+        self.num_cmsgs = num_cmsgs
         
-        log.info(f'Listening on {device} port {rdmaPort} for {msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg}')
+        log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nprod={nprod} npol={npol}')
         
         rx = RdmaTransport(mode,
                            msg_size,
@@ -163,6 +171,8 @@ class CardCapturer:
                            device,
                            rdmaPort,
                            gidIndex)
+
+        self.rx = rx
 
         rx.checkImmediate = False
         psn = rx.getPacketSequenceNumber()
@@ -189,24 +199,24 @@ class CardCapturer:
         with open('header.bin','wb') as fout:
             fout.write(hbytes)
 
+        hdr_size = 36*17 # words
 
-        ctrl = CracoEpics(values.prefix)
-        ctrl.set_roce_header(values.block, values.card, values.fpga, hbytes)
+        hint = np.zeros(hdr_size, dtype=np.uint32)
+
+        beam0_header = list(np.frombuffer(hbytes, dtype=np.uint32))
+        hint[:len(beam0_header)] = beam0_header
+        print(list(map(hex,beam0_header)))
+
         fpgaMask = 0x3f
-        enMultiDest = False
+        enMultiDest = False # fixed
         enPktzrDbugHdr = enable_debug_header
-        enPktzrTestData = False
-        lsbPosition = 8
-        sumPols = 1
-        integSelect = 32
-        # configure CRACO on all FPGAS
-        craco.configure(fpgaMask, enMultiDest, enPktzDbgHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
-
-        # start CRACO (enabling packetiser, craco subsystem and firing event)
-        craco.start()
-
+        enPktzrTestData = values.enable_test_data
+        lsbPosition = values.lsb_position
+        sumPols = values.sum_pols
+        integSelect = values.samples_per_integration
         
         rdma_buffers = []
+        self.rdma_buffers = rdma_buffers
         for iblock in range(num_blks):
             m = rx.get_memoryview(iblock)
             mnp = np.frombuffer(m, dtype=packet_dtype)
@@ -229,51 +239,75 @@ class CardCapturer:
         rx.setupRdma(None)
         log.info("Setup RDMA")
 
+        self.byteswap = False
+
+        # configure CRACO on all FPGAS
+        logging.info('Starting CRACO via EPICS')
+        ctrl = CracoEpics(values.prefix+':')
+        print(values.block, values.card, values.fpga, hbytes)
+        ctrl.stop()
+        ctrl.set_roce_header(values.block, values.card, values.fpga, hint)
+        ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
+        # start CRACO (enabling packetiser, craco subsystem and firing event)
+        try:
+            w = FitsTableWriter(values.outfile, self.packet_dtype, self.byteswap)
+            ctrl.start()
+            self.save_data(w)
+        except KeyboardInterrupt as e:
+            print(f'Got an exceptio  {e}')
+        finally:
+            ctrl.stop()
+            w.close()
+
+
+    def save_data(self, w):
+        rx = self.rx
+        values = self.values
         rx.issueRequests()
         log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
         total_completions = 0
         total_missing = 0
         curr_imm = 0
         nmiss = 0
-        byteswap = False
+        num_cmsgs = self.num_cmsgs
 
-        with FitsTableWriter(values.outfile, packet_dtype, byteswap) as w:
-            while True:
-                rx.waitRequestsCompletion()
-                rx.pollRequests()
-                ncompletions = rx.get_numCompletionsFound()
-                nmissing = rx.get_numMissingFound()
-                completions = rx.get_workCompletions()
-                total_completions += ncompletions
-                total_missing += nmissing
-                assert ncompletions == len(completions)
-                #print(f'\rCompletions={ncompletions} {len(completions)}')
-                for c in completions:
-                    #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
-                    index = c.wr_id
-                    nbytes = c.byte_len
-                    immediate = c.imm_data
-                    immediate = socket.ntohl(immediate)
-                    if immediate != curr_imm:
-                        missed  = (immediate - curr_imm)
-                        nmiss += missed
-                        print(f'Missed {missed} nmiss={nmiss}')
+        while True:
+            rx.waitRequestsCompletion()
+            rx.pollRequests()
+            ncompletions = rx.get_numCompletionsFound()
+            nmissing = rx.get_numMissingFound()
+            completions = rx.get_workCompletions()
+            total_completions += ncompletions
+            total_missing += nmissing
+            assert ncompletions == len(completions)
+            #print(f'\rCompletions={ncompletions} {len(completions)}')
+            for c in completions:
+                #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
+                index = c.wr_id
+                nbytes = c.byte_len
+                immediate = c.imm_data
+                immediate = socket.ntohl(immediate)
+                if immediate != curr_imm:
+                    missed  = (immediate - curr_imm)
+                    nmiss += missed
+                    print(f'Missed {missed} nmiss={nmiss}')
 
-                    curr_imm = immediate+1
+                curr_imm = immediate+1
                     
-                    # Get data for buffer regions
-                    block_index = index//num_cmsgs
+                # Get data for buffer regions
+                block_index = index//num_cmsgs
+                
+                # now it is data for each message
+                message_index = index%num_cmsgs
+                d = self.rdma_buffers[block_index][message_index]
+                #print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
+                #np.save(outf, d) # numpy way
+                #d.tofile(outf) # save raw bytes
+                w.write(d[:nbytes]) # write to fitsfile
                     
-                    # now it is data for each message
-                    message_index = index%num_cmsgs
-                    d = rdma_buffers[block_index][message_index]
-                    print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
-                    #np.save(outf, d) # numpy way
-                    #d.tofile(outf) # save raw bytes
-                    w.write(d[:nbytes]) # write to fitsfile
-                    
-                rx.issueRequests()
-                #log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex} nmiss={nmiss}")
+            rx.issueRequests()
+            #log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex} nmiss={nmiss}")
+
         
 
 
@@ -295,6 +329,10 @@ def _main():
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=int)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default=1, type=int)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
+    parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
+    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=8)
+    parser.add_argument('--sum-pols', help='Sum polarisations 0=No, 1=yes', type=int, choices=(0,1), default=1)
+    parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -302,9 +340,6 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-
-
-
 
     CardCapturer(values)
     
