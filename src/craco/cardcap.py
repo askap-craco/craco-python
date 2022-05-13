@@ -11,6 +11,8 @@ import numpy as np
 import os
 import sys
 import logging
+import warnings
+
 import roce_packetizer
 from craft.fitswriter import FitsTableWriter
 
@@ -40,13 +42,39 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
 ]
             
 
-def get_single_packet_dtype(nprod, enable_debug_hdr):
+def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=False):
+    '''
+    Gets the numpy dtype of a single ROCE packet sent from the correlator.
+
+    if enable_debug_hdr the debug dtype is added
+    The data shape is (nint, nbl, npol, 2)
+
+    nint is the number of time integrations
+    nbl is the number of baselines
+    npol is the number of polarisations
+    2 is for complex
+
+    Whether sum_pols is true or false, a single packet always contiains 2xnbl entries. This is how
+    John's firmware works.
+
+    if sum_pols is True, npol=1, nint=2
+    if sum_pols is False, npol=2, nint=1
+    
+    '''
+
     if enable_debug_hdr:
         dtype = debughdr[:]
     else:
         dtype = []
+
+    if sum_pols:
+        npol = 1
+        nint = 2
+    else: # dual-pol mode
+        npol = 2
+        nint = 1
                      
-    dtype.append(('data', '<i2', (nprod,2)))
+    dtype.append(('data', '<i2', (nint, nbl, npol, 2)))
     return np.dtype(dtype)
 
 
@@ -130,24 +158,20 @@ class CardCapturer:
         nchan = 4
         nsamp_per_frame = 2048
         nsamp_per_integration = values.samples_per_integration
+        nint_per_frame = nsamp_per_frame // nsamp_per_integration
+        
         include_autos = True
         nant = 30
-        npol = 1 if values.sum_pols == 1 else 2
-        nint_per_frame = nsamp_per_frame // nsamp_per_integration
         nbl = nant*(nant-1)//2
-        nprod = nbl
-        
+
         if include_autos:
-            nprod += nant
+            nbl += nant
 
-        nprod *= npol
+        npol = 1 if values.pol_sum else 2
 
-        nprod = 930 #DEBUG
-        
-        npacket_per_msg= nbeam*nchan*nint_per_frame
-
+        npacket_per_msg= nbeam*nchan*nint_per_frame*npol
         enable_debug_header = values.debug_header
-        packet_dtype = get_single_packet_dtype(nprod, enable_debug_header)
+        packet_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum)
         self.packet_dtype = packet_dtype
         msg_size = packet_dtype.itemsize*npacket_per_msg
         num_blks = values.num_blks
@@ -159,7 +183,7 @@ class CardCapturer:
         send_delay = 0
         self.num_cmsgs = num_cmsgs
         
-        log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nprod={nprod} npol={npol}')
+        log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype}')
         
         rx = RdmaTransport(mode,
                            msg_size,
@@ -211,8 +235,17 @@ class CardCapturer:
         enPktzrDbugHdr = enable_debug_header
         enPktzrTestData = values.enable_test_data
         lsbPosition = values.lsb_position
-        sumPols = values.sum_pols
-        integSelect = values.samples_per_integration
+        # lsbposition=0 is bits 15-0 from 27-bit accumulator ouput.
+        # lsbPosition=1 is bits 16-1
+        # ..
+        # lsbPosition=11 = bits 27-11 (see discussion from john on mattermost)
+        assert 0 <= lsbPosition <= 11, 'Unsupported LSB position'
+        sumPols = 1 if values.pol_sum else 0
+        integSelectMap = {16:0, 32:1, 64:2}
+        # -- "00" : 16 samples = 864us
+        # -- "01" : 32 samples = 1,728us (default)
+        # -- "10" : 64 samples = 3,456us
+        integSelect = integSelectMap[values.samples_per_integration]
         
         rdma_buffers = []
         self.rdma_buffers = rdma_buffers
@@ -244,9 +277,10 @@ class CardCapturer:
         logging.info('Starting CRACO via EPICS')
         ctrl = CracoEpics(values.prefix+':')
         card_freqs = ctrl.get_channel_frequencies(values.block, values.card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
-        fdiffs = fpga_freqs[:, :, 1:] - fpga_freqs[:, :, :-1]
-        print('Frequency offsets from first in a set of 6')
-        print(fdiffs)
+        fdiffs = card_freqs[:, :, 1:] - card_freqs[:, :, :-1]
+        if fdiffs[0,0,0] == 0:
+            warnings.warn("Invalid channel frequencies")
+
         assert np.all(fdiffs == fdiffs[0,0,0])
         # fine channels are summed
         avg_freqs = card_freqs.mean(axis=2) # shape is (6 fpgas, 4 coarse channels)
@@ -297,7 +331,7 @@ class CardCapturer:
                 if immediate != curr_imm:
                     missed  = (immediate - curr_imm)
                     nmiss += missed
-                    print(f'Missed {missed} nmiss={nmiss}')
+                    print(f'Missed {missed} nmiss={nmiss} nbytes={nbytes}')
 
                 curr_imm = immediate+1
                     
@@ -328,8 +362,6 @@ def _main():
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
-    #parser.add_argument('-s','--pol-sum', help='Enable pol-sum', action='store_true', default=True)
-    #parser.add_argument('--dual-pol', help='Enable dual pol', action='store_false', target='pol_sum')
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
     parser.add_argument('-b','--block',help='Correlator block to talk to', default=1, type=int) 
@@ -338,8 +370,11 @@ def _main():
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
     parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=12)
-    parser.add_argument('--sum-pols', help='Sum polarisations 0=No, 1=yes', type=int, choices=(0,1), default=1)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
+
+    pol_group = parser.add_mutually_exclusive_group(required=True)
+    pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
+    pol_group.add_argument('--dual-pol', help='Dual pol mode', action='store_true')
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

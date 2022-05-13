@@ -35,6 +35,13 @@ class EpicsSubsystem:
         """
         return self.write(f"acx:s{block:02d}:c{card:02d}:{pvname}", value)
 
+    def read_correlator_card(self, block: int, card: int, pvname: str):
+        """
+        write to a correlator card PV
+        """
+        return self.read(f"acx:s{block:02d}:c{card:02d}:{pvname}").data
+
+
     def call_ioc_function(self, funcname: str, parameters: dict):
         """
         execute an ASKAP style IOC function

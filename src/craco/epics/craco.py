@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from .pyepics import EpicsSubsystem
+from .epics import EpicsSubsystem
 
 
 class Craco(EpicsSubsystem):

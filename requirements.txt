@@ -9,6 +9,7 @@ wheel
 
 docutils==0.17
 sphinx
+pyepics
 
 numpy
 #h5py
