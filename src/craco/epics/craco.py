@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from .epics import EpicsSubsystem
+from .pyepics import EpicsSubsystem
 
 
 class Craco(EpicsSubsystem):
@@ -46,3 +46,6 @@ class Craco(EpicsSubsystem):
         stop CRACO
         """
         self.write("cracoStop", 1)
+
+    def get_channel_frequencies(self, block: int, card: int):
+        return self.read_correlator_card(block, card, 'F_processCorrelations:skyFreqList')
