@@ -23,7 +23,6 @@ import socket
 from craft.cmdline import strrange
 from craco.epics.craco import Craco as CracoEpics
 
-
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
@@ -244,7 +243,15 @@ class CardCapturer:
         # configure CRACO on all FPGAS
         logging.info('Starting CRACO via EPICS')
         ctrl = CracoEpics(values.prefix+':')
-        print(values.block, values.card, values.fpga, hbytes)
+        card_freqs = ctrl.get_channel_frequencies(values.block, values.card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
+        fdiffs = fpga_freqs[:, :, 1:] - fpga_freqs[:, :, :-1]
+        print('Frequency offsets from first in a set of 6')
+        print(fdiffs)
+        assert np.all(fdiffs == fdiffs[0,0,0])
+        # fine channels are summed
+        avg_freqs = card_freqs.mean(axis=2) # shape is (6 fpgas, 4 coarse channels)
+        
+        print(values.block, values.card, values.fpga, hbytes, avg_freqs)
         ctrl.stop()
         ctrl.set_roce_header(values.block, values.card, values.fpga, hint)
         ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
@@ -330,7 +337,7 @@ def _main():
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default=1, type=int)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
-    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=8)
+    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=12)
     parser.add_argument('--sum-pols', help='Sum polarisations 0=No, 1=yes', type=int, choices=(0,1), default=1)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
     
