@@ -128,9 +128,9 @@ def mac_to_ipv6(mac):
 
 
 def src_mac_of(shelf, card, fpga):
-    assert 0 <= shelf <= 256
-    assert 0 <= card <= 256
-    assert 0 <= fpga <= 256
+    assert 1 <= shelf <= 8
+    assert 1 <= card <= 12
+    assert 0 <= fpga <= 6
     mac = bytearray(6)
     # Anything with teh 2nd nibble as 2, 6, A, E is Locally Administered https://serverfault.com/questions/40712/what-range-of-mac-addresses-can-i-safely-use-for-my-virtual-machines
     mac[0] = 0xaa 
@@ -138,9 +138,152 @@ def src_mac_of(shelf, card, fpga):
     mac[2] = 0xf6
     mac[3] = shelf
     mac[4] = card
-    mac[5] = 0# fpga - don't want fpgas to have different mac Addresses - this might confused the swith
+
+    # Every 2nd FPGA is conneted to the same fibre
+    mac[5] = fpga % 2 
     
     return mac
+
+hdr_size = 36*17 # words
+
+class FpgaCapturer:
+    def __init__(self, ccap, fpga):
+        self.ccap = ccap
+        values = ccap.values
+
+        mode = runMode.RECV_MODE
+        device = values.device
+        rdmaPort = values.port
+        gidIndex = values.gid_index
+        msg_size = self.ccap.msg_size
+        npacket_per_msg = self.ccap.npacket_per_msg
+        num_blks = values.num_blks
+        num_cmsgs = values.num_cmsgs
+        nmsg = 1000000
+        shelf = values.block
+        card = values.card
+        send_delay = 0
+        num_cmsgs = num_cmsgs
+        rx = RdmaTransport(mode,
+                           msg_size,
+                           num_blks,
+                           num_cmsgs,
+                           nmsg,
+                           send_delay,
+                           device,
+                           rdmaPort,
+                           gidIndex)
+
+        self.rx = rx
+        rx.checkImmediate = False
+        psn = rx.getPacketSequenceNumber()
+        qpn = rx.getQueuePairNumber()
+        gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
+        gids = '-'.join([f'{x:d}' for x in gid])
+    
+        log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
+        dst_mac = bytes(ipv6_to_mac(gid))
+        src_mac = bytes(src_mac_of(shelf, card, fpga))
+        src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
+        log.info('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
+        log.info('Src GID %s Dst GID %s', mac_str(src_gid), mac_str(gid))
+       
+        hdr = roce_packetizer.roce_header()
+        hdr.setup(src_mac, dst_mac, qpn, psn)
+        hbytes = bytes(hdr.to_array(True))
+        print('Header is')
+        hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
+        print(hstring)
+        with open(f'header_fpga{fpga}.txt', 'w') as fout:
+            fout.write(hstring)
+        
+        with open(f'header_{fpga}.bin','wb') as fout:
+            fout.write(hbytes)
+
+
+        hint = np.zeros(hdr_size, dtype=np.uint32)
+        beam0_header = list(np.frombuffer(hbytes, dtype=np.uint32))
+        hint[:len(beam0_header)] = beam0_header
+        print(list(map(hex,beam0_header)))
+
+                
+        rdma_buffers = []
+        self.rdma_buffers = rdma_buffers
+        for iblock in range(num_blks):
+            m = rx.get_memoryview(iblock)
+            mnp = np.frombuffer(m, dtype=ccap.packet_dtype)
+            mnp[:] = 0
+            mnp.shape = (num_cmsgs, npacket_per_msg)
+            log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
+            rdma_buffers.append(mnp)
+
+        if values.prompt:
+            psn = int(input("PSN: "))
+            qpn = int(input("QPN: "))
+            gidstr = input("GID: ")
+            src_gid = np.array(list(map(int, gidstr.split("-"))), dtype=np.uint8)
+        
+        rx.setPacketSequenceNumber(psn)
+        rx.setQueuePairNumber(qpn)
+        rx.setGidAddress(src_gid)
+        rx.setLocalIdentifier(0)
+        rx.setupRdma(None)
+        log.info(f"Setup RDMA for fpga {fpga}")
+
+        ccap.ctrl.set_roce_header(shelf, card, fpga, hint)
+        self.curr_imm = 0
+        self.nmiss = 0
+        self.total_completions = 0
+        self.total_missing = 0
+
+
+    def issue_requests(self):
+        rx = self.rx
+        rx.issueRequests()
+        log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
+
+    def write_data(self, w):
+        rx = self.rx
+        msg_size = self.ccap.msg_size
+        rx.waitRequestsCompletion()
+        rx.pollRequests()
+        ncompletions = rx.get_numCompletionsFound()
+        nmissing = rx.get_numMissingFound()
+        completions = rx.get_workCompletions()
+        self.total_completions += ncompletions
+        self.total_missing += nmissing
+        assert ncompletions == len(completions)
+        num_cmsgs = self.ccap.num_cmsgs
+        #print(f'\rCompletions={ncompletions} {len(completions)}')
+        for c in completions:
+            #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
+            index = c.wr_id
+            nbytes = c.byte_len
+            assert nbytes == msg_size, f'Unexpected messages size. Was={nbytes} expected={msg_size}'
+            immediate = c.imm_data
+            immediate = socket.ntohl(immediate)
+            if immediate != self.curr_imm:
+                missed  = (immediate - self.curr_imm)
+                self.nmiss += missed
+                print(f'Missed {missed} nmiss={self.nmiss} nbytes={nbytes}')
+
+            self.curr_imm = immediate+1
+                    
+            # Get data for buffer regions
+            block_index = index//num_cmsgs
+                
+            # now it is data for each message
+            message_index = index%num_cmsgs
+            d = self.rdma_buffers[block_index][message_index]
+            print(d.dtype)
+            print(f"version={d[0]['version']} d={d[0]['nprod']}")
+            print(d['version'])
+            
+                #print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
+                #np.save(outf, d) # numpy way
+                #d.tofile(outf) # save raw bytes
+            w.write(d[:nbytes]) # write to fitsfile
+        rx.issueRequests()
 
 
 class CardCapturer:
@@ -167,69 +310,27 @@ class CardCapturer:
         if include_autos:
             nbl += nant
 
-        npol = 1 if values.pol_sum else 2
+        npacket_per_msg= nbeam*nchan*nint_per_frame
 
-        npacket_per_msg= nbeam*nchan*nint_per_frame*npol
+        if values.pol_sum:
+            npacket_per_msg //= 2
+            
         enable_debug_header = values.debug_header
         packet_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum)
         self.packet_dtype = packet_dtype
         msg_size = packet_dtype.itemsize*npacket_per_msg
+        self.msg_size = msg_size
+        self.npacket_per_msg = npacket_per_msg
         num_blks = values.num_blks
         num_cmsgs = values.num_cmsgs
         nmsg = 1000000
-        shelf = 3
-        card = 4
-        fpga = 2
+        shelf = values.block
+        card = values.card
         send_delay = 0
         self.num_cmsgs = num_cmsgs
         
         log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype}')
         
-        rx = RdmaTransport(mode,
-                           msg_size,
-                           num_blks,
-                           num_cmsgs,
-                           nmsg,
-                           send_delay,
-                           device,
-                           rdmaPort,
-                           gidIndex)
-
-        self.rx = rx
-
-        rx.checkImmediate = False
-        psn = rx.getPacketSequenceNumber()
-        qpn = rx.getQueuePairNumber()
-        gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
-        
-        gids = '-'.join([f'{x:d}' for x in gid])
-    
-        log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
-        dst_mac = bytes(ipv6_to_mac(gid))
-        src_mac = bytes(src_mac_of(shelf, card, fpga))
-        src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
-        log.debug('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
-    
-        hdr = roce_packetizer.roce_header()
-        hdr.setup(src_mac, dst_mac, qpn, psn)
-        hbytes = bytes(hdr.to_array(True))
-        print('Header is')
-        hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-        print(hstring)
-        with open('header.txt', 'w') as fout:
-            fout.write(hstring)
-        
-        with open('header.bin','wb') as fout:
-            fout.write(hbytes)
-
-        hdr_size = 36*17 # words
-
-        hint = np.zeros(hdr_size, dtype=np.uint32)
-
-        beam0_header = list(np.frombuffer(hbytes, dtype=np.uint32))
-        hint[:len(beam0_header)] = beam0_header
-        print(list(map(hex,beam0_header)))
-
         fpgaMask = 0x3f
         enMultiDest = False # fixed
         enPktzrDbugHdr = enable_debug_header
@@ -246,53 +347,34 @@ class CardCapturer:
         # -- "01" : 32 samples = 1,728us (default)
         # -- "10" : 64 samples = 3,456us
         integSelect = integSelectMap[values.samples_per_integration]
-        
-        rdma_buffers = []
-        self.rdma_buffers = rdma_buffers
-        for iblock in range(num_blks):
-            m = rx.get_memoryview(iblock)
-            mnp = np.frombuffer(m, dtype=packet_dtype)
-            mnp[:] = 0
-            mnp.shape = (num_cmsgs, npacket_per_msg)
-            log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
-            rdma_buffers.append(mnp)
-
-            
-        if values.prompt:
-            psn = int(input("PSN: "))
-            qpn = int(input("QPN: "))
-            gidstr = input("GID: ")
-            src_gid = np.array(list(map(int, gidstr.split("-"))), dtype=np.uint8)
-        
-        rx.setPacketSequenceNumber(psn)
-        rx.setQueuePairNumber(qpn)
-        rx.setGidAddress(src_gid)
-        rx.setLocalIdentifier(0)
-        rx.setupRdma(None)
-        log.info("Setup RDMA")
-
         self.byteswap = False
 
         # configure CRACO on all FPGAS
         logging.info('Starting CRACO via EPICS')
         ctrl = CracoEpics(values.prefix+':')
-        card_freqs = ctrl.get_channel_frequencies(values.block, values.card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
+        card_freqs = ctrl.get_channel_frequencies(shelf, card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
         fdiffs = card_freqs[:, :, 1:] - card_freqs[:, :, :-1]
         if fdiffs[0,0,0] == 0:
             warnings.warn("Invalid channel frequencies")
 
-        assert np.all(fdiffs == fdiffs[0,0,0])
+        #assert np.all(fdiffs == fdiffs[0,0,0]), f'Unexpected fdiffs {fdiffs[0,0,0]}'
         # fine channels are summed
         avg_freqs = card_freqs.mean(axis=2) # shape is (6 fpgas, 4 coarse channels)
-        
-        print(values.block, values.card, values.fpga, hbytes, avg_freqs)
+
         ctrl.stop()
-        ctrl.set_roce_header(values.block, values.card, values.fpga, hint)
         ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
+        self.ctrl = ctrl
+
+        log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
+
+        #self.clear_headers()
+        self.fpga_cap = [FpgaCapturer(self, fpga) for fpga in values.fpga]
+
         # start CRACO (enabling packetiser, craco subsystem and firing event)
         try:
             w = FitsTableWriter(values.outfile, self.packet_dtype, self.byteswap)
-            ctrl.start()
+            ctrl.start_shelf(shelf, [card])
+            log.info('Started OK. Now saving data')
             self.save_data(w)
         except KeyboardInterrupt as e:
             print(f'Got an exceptio  {e}')
@@ -300,57 +382,21 @@ class CardCapturer:
             ctrl.stop()
             w.close()
 
+    def clear_headers(self):
+        zerohdr = np.zeros(hdr_size, dtype=np.uint32)
+        for c in range(1,12):
+            for f in range(1,6):
+                self.ctrl.set_roce_header(self.values.block, c, f, zerohdr)
+                
 
     def save_data(self, w):
-        rx = self.rx
-        values = self.values
-        rx.issueRequests()
-        log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
-        total_completions = 0
-        total_missing = 0
-        curr_imm = 0
-        nmiss = 0
-        num_cmsgs = self.num_cmsgs
+
+        for fpga in self.fpga_cap:
+            fpga.issue_requests()
 
         while True:
-            rx.waitRequestsCompletion()
-            rx.pollRequests()
-            ncompletions = rx.get_numCompletionsFound()
-            nmissing = rx.get_numMissingFound()
-            completions = rx.get_workCompletions()
-            total_completions += ncompletions
-            total_missing += nmissing
-            assert ncompletions == len(completions)
-            #print(f'\rCompletions={ncompletions} {len(completions)}')
-            for c in completions:
-                #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
-                index = c.wr_id
-                nbytes = c.byte_len
-                immediate = c.imm_data
-                immediate = socket.ntohl(immediate)
-                if immediate != curr_imm:
-                    missed  = (immediate - curr_imm)
-                    nmiss += missed
-                    print(f'Missed {missed} nmiss={nmiss} nbytes={nbytes}')
-
-                curr_imm = immediate+1
-                    
-                # Get data for buffer regions
-                block_index = index//num_cmsgs
-                
-                # now it is data for each message
-                message_index = index%num_cmsgs
-                d = self.rdma_buffers[block_index][message_index]
-                #print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
-                #np.save(outf, d) # numpy way
-                #d.tofile(outf) # save raw bytes
-                w.write(d[:nbytes]) # write to fitsfile
-                    
-            rx.issueRequests()
-            #log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex} nmiss={nmiss}")
-
-        
-
+            for fpga in self.fpga_cap:
+                fpga.write_data(w)
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -364,12 +410,12 @@ def _main():
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
-    parser.add_argument('-b','--block',help='Correlator block to talk to', default=1, type=int) 
+    parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=int) 
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=int)
-    parser.add_argument('-k','--fpga', help='FPGA range to talk to', default=1, type=int)
+    parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
-    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=12)
+    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=11)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)

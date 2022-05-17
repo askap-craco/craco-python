@@ -20,13 +20,13 @@ class EpicsSubsystem:
         """
         return caget(f"{self._prefix}{pvname}")
 
-    def write(self, pvname: str, value: Any, timeout: float = 5.0):
+    def write(self, pvname: str, value: Any, timeout: float = 5.0, wait=True):
         """
         write to EPICS PV
         """
         print(f"{self._prefix}{pvname} = {value}")
         return caput(
-            f"{self._prefix}{pvname}", value, timeout=timeout, wait=True
+            f"{self._prefix}{pvname}", value, timeout=timeout, wait=wait
         )
 
     def write_correlator_card(self, block: int, card: int, pvname: str, value: Any):
