@@ -739,7 +739,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     log.info(f'Values={values}')
-    assert values.max_ndm == MAX_NDM
+    assert values.max_ndm == NDM_MAX
 
     mode   = get_mode()
     device = pyxrt.device(values.device)
