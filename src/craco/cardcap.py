@@ -394,9 +394,14 @@ class CardCapturer:
         for fpga in self.fpga_cap:
             fpga.issue_requests()
 
+        nblk = 0
         while True:
             for fpga in self.fpga_cap:
                 fpga.write_data(w)
+
+            nblk += 1
+            if nblk >= self.values.num_msgs:
+                break
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -407,6 +412,7 @@ def _main():
     parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=0)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
+    parser.add_argument('--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
@@ -415,8 +421,9 @@ def _main():
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
-    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser', type=int, default=11)
+    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser: (1 to 11)', type=int, default=11)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
+
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
