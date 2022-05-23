@@ -24,8 +24,12 @@ import rdma_transport
 import socket
 from craft.cmdline import strrange
 from craco.epics.craco import Craco as CracoEpics
+from astropy.time import Time
 
 log = logging.getLogger(__name__)
+
+FINE_CHANBW = 1.0*32./27./64. # MHz
+FINE_TSAMP = 1.0/FINE_CHANBW # Microseconds
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 debughdr = [('frame_id', '<u8'), # Words 1,2
@@ -255,6 +259,7 @@ class FpgaCapturer:
         assert ncompletions == len(completions)
         num_cmsgs = self.ccap.num_cmsgs
         #print(f'\rCompletions={ncompletions} {len(completions)}')
+        beam = self.ccap.values.beam
         for c in completions:
             #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
             index = c.wr_id
@@ -278,11 +283,13 @@ class FpgaCapturer:
             print(d.dtype)
             print(f"version={d[0]['version']} d={d[0]['nprod']}")
             print(d['version'])
+            #w.write(d[:nbytes]) # write to fitsfile
+            if beam is not None:
+                mask = d['beam_number'] == beam 
+                d = d[mask]
+
+            w.write(d) # write to fitsfield
             
-                #print(f'nbytes={nbytes} imm={immediate} 0x{immediate:x} index={index} {c.status}')
-                #np.save(outf, d) # numpy way
-                #d.tofile(outf) # save raw bytes
-            w.write(d[:nbytes]) # write to fitsfile
         rx.issueRequests()
 
 
@@ -302,7 +309,7 @@ class CardCapturer:
         nsamp_per_frame = 2048
         nsamp_per_integration = values.samples_per_integration
         nint_per_frame = nsamp_per_frame // nsamp_per_integration
-        
+        tsamp = nsamp_per_integration * FINE_TSAMP # microsec
         include_autos = True
         nant = 30
         nbl = nant*(nant-1)//2
@@ -360,6 +367,46 @@ class CardCapturer:
         #assert np.all(fdiffs == fdiffs[0,0,0]), f'Unexpected fdiffs {fdiffs[0,0,0]}'
         # fine channels are summed
         avg_freqs = card_freqs.mean(axis=2) # shape is (6 fpgas, 4 coarse channels)
+        fch1 = avg_freqs[0,0]
+        fpga_foff = avg_freqs[1:,:] - avg_freqs[:-1,:]
+        coarse_foff = avg_freqs[:,1:] - avg_freqs[:,:-1]
+
+        print('FPGA FOFF', fpga_foff)
+        print('Coarse FOFF', coarse_foff)
+        print(fpga_foff == fpga_foff[0,0])
+        print(fpga_foff - fpga_foff[0,0])
+
+        assert np.all(fpga_foff - fpga_foff[0,0] < 1e-6), 'FPGA frequency offset not always the same'
+        assert np.all(coarse_foff - coarse_foff[0,0] < 1e-6), 'Coarse frequency offset not always the same'
+
+
+        hdr = {}
+        
+        now = Time.now()
+        now.format = 'fits'
+        hdr['MJDNOW'] = now.mjd
+        hdr['JDNOW'] = now.jd
+        hdr['UTCNOW'] = str(now)
+        hdr['FCH1'] = fch1
+        hdr['FOFFFPGA'] = fpga_foff[0,0]
+        hdr['FOFFCHAN'] = coarse_foff[0,0]
+        hdr['SHELF'] = shelf
+        hdr['CARD'] = card
+        hdr['ARGV'] = ' '.join(sys.argv)
+        hdr['LSBPOS'] = lsbPosition
+        hdr['POLSUM'] = int(values.pol_sum)
+        hdr['DUALPOL'] = int(values.dual_pol)
+        hdr['INTEGSE'] = integSelect
+        hdr['SAMPINT'] = values.samples_per_integration
+        hdr['PREFIX'] = values.prefix
+        hdr['TESTDATA'] = int(values.enable_test_data)
+        hdr['DEBUGHDR'] = int(enable_debug_header)
+        hdr['DEVICE'] = device
+        hdr['RDMAPORT'] = rdmaPort
+        hdr['GIDINDEX'] = gidIndex
+        hdr['TSAMP'] = tsamp/1e6
+        hdr['BEAM'] = -1 if values.beam is None else values.beam
+        hdr['FPGA'] = str(values.fpga)
 
         ctrl.stop()
         ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
@@ -372,7 +419,7 @@ class CardCapturer:
 
         # start CRACO (enabling packetiser, craco subsystem and firing event)
         try:
-            w = FitsTableWriter(values.outfile, self.packet_dtype, self.byteswap)
+            w = FitsTableWriter(values.outfile, self.packet_dtype, self.byteswap, hdr)
             ctrl.start_shelf(shelf, [card])
             log.info('Started OK. Now saving data')
             self.save_data(w)
@@ -421,7 +468,8 @@ def _main():
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
-    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser: (1 to 11)', type=int, default=11)
+    parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
+    parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser (0-11)', type=int, default=11)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
 
 
