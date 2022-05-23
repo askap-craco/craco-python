@@ -20,7 +20,7 @@ class EpicsSubsystem:
         """
         return caproto.sync.client.read(f"{self._prefix}{pvname}")
 
-    def write(self, pvname: str, value: Any, timeout: float = 5.0):
+    def write(self, pvname: str, value: Any, timeout: float = 10.0, wait: bool=True):
         """
         write to EPICS PV
         """

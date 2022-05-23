@@ -540,8 +540,8 @@ class Pipeline:
 
         '''
         self.fast_baseline2uv(input_flat, self.uv_out)
-        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
-        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale))
+        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale))
         self.inbuf.copy_to_device()
 
         return self
@@ -643,7 +643,7 @@ def get_parser():
     #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
     parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
     parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    #parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
+    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
     #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
     #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
     #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
@@ -739,6 +739,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     log.info(f'Values={values}')
+    assert values.max_ndm == NDM_MAX
 
     mode   = get_mode()
     device = pyxrt.device(values.device)

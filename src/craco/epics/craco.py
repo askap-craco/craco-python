@@ -1,6 +1,16 @@
 #!/usr/bin/env python
-#from .epics import EpicsSubsystem
-from .pyepics import EpicsSubsystem
+# At MATES we need:
+# export EPICS_CA_AUTO_ADDR_LIST=no
+# export EPICS_CA_ADDR_LIST=202.9.15.255
+# with
+from .epics import EpicsSubsystem
+# 
+# 
+# AT MRO We need
+# export EPICS_CA_NAME_SERVERS="alderman:35021 bolton:41037
+#
+# and
+#from .pyepics import EpicsSubsystem
 
 
 class Craco(EpicsSubsystem):
@@ -75,12 +85,12 @@ class Craco(EpicsSubsystem):
         """
         Write the CRACO ROCE Headers
 
-        :param block: block number 2..7
+        :param block: block number 1..7
         :param card: card number 1..12
         :param fpga: fpga number 1..6
         :param headers: headers in beam order 36 * 17 words
         """
-        assert 2 <= block <= 7, f'Invalid block {block}'
+        assert 1 <= block <= 7, f'Invalid block {block}'
         assert 1 <= card <= 12, f'Invalid card {card}'
         assert 1 <= fpga <= 6, f'Invalid FPGA {fpga}'
         return self.write_correlator_card(
@@ -97,7 +107,7 @@ class Craco(EpicsSubsystem):
         """
         stop CRACO
         """
-        self.write("cracoStop", 1)
+        self.write("cracoStop", 1, timeout=10.0)
 
     def get_channel_frequencies(self, block: int, card: int):
         return self.read_correlator_card(block, card, 'F_processCorrelations:skyFreqList')
