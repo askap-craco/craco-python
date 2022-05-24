@@ -3,15 +3,14 @@
 # export EPICS_CA_AUTO_ADDR_LIST=no
 # export EPICS_CA_ADDR_LIST=202.9.15.255
 # with
-from .epics import EpicsSubsystem
+#from .epics import EpicsSubsystem
 # 
 # 
 # AT MRO We need
 # export EPICS_CA_NAME_SERVERS="alderman:35021 bolton:41037
 #
 # and
-#from .pyepics import EpicsSubsystem
-
+from .pyepics import EpicsSubsystem
 
 class Craco(EpicsSubsystem):
     """

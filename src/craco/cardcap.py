@@ -423,6 +423,7 @@ class CardCapturer:
         assert np.all(fpga_foff - fpga_foff[0,0] < 1e-6), 'FPGA frequency offset not always the same'
         assert np.all(coarse_foff - coarse_foff[0,0] < 1e-6), 'Coarse frequency offset not always the same'
 
+        syncbat = ctrl.read('F_syncReset:startBat_O')
 
         hdr = {}
         
@@ -474,6 +475,7 @@ class CardCapturer:
             print(f'Got an exceptio  {e}')
         finally:
             ctrl.stop()
+            ctrl.write(f'acx:s{shelf:02d}:evtf:craco:enable', 0, wait=False)
             w.close()
 
     def clear_headers(self):
