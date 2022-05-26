@@ -5,9 +5,9 @@ i.e., find the number of seconds that must be added to UTC to compute
 TAI for any timestamp at or after the given time[1].
 
   >>> from datetime import datetime
-  >>> import craco.leapseconds as leapseconds
+  >>> import leapseconds
   >>> leapseconds.dTAI_UTC_from_utc(datetime(2005, 1, 1))
-  datetime.timedelta(seconds=32)
+  datetime.timedelta(0, 32)
   >>> leapseconds.utc_to_tai(datetime(2015, 7, 1))
   datetime.datetime(2015, 7, 1, 0, 0, 36)
   >>> leapseconds.tai_to_utc(datetime(2015, 7, 1, 0, 0, 36))
@@ -186,21 +186,21 @@ def _dTAI_UTC(time, leapsecond_to_time, leapseconds=leapseconds):
 
     >>> from datetime import datetime, timedelta
     >>> _dTAI_UTC(datetime(1972, 1, 1), lambda ls: ls.utc)
-    datetime.timedelta(seconds=10)
+    datetime.timedelta(0, 10)
     >>> tai = lambda ls: ls.utc + ls.dTAI_UTC
     >>> _dTAI_UTC(datetime(2015, 7, 1, 0, 0, 34), tai)
-    datetime.timedelta(seconds=35)
+    datetime.timedelta(0, 35)
     >>> _dTAI_UTC(datetime(2015, 7, 1, 0, 0, 35), tai) # leap second
-    datetime.timedelta(seconds=35)
+    datetime.timedelta(0, 35)
     >>> _dTAI_UTC(datetime(2015, 7, 1, 0, 0, 36), tai)
-    datetime.timedelta(seconds=36)
+    datetime.timedelta(0, 36)
 
     Bulletin C 51 says "NO leap second will be introduced at the end
     of June 2016."[4] and therefore UTC-TAI is still 36
     at 27 June 2016:
 
     >>> _dTAI_UTC(datetime(2016, 6, 27), lambda ls: ls.utc)
-    datetime.timedelta(seconds=36)
+    datetime.timedelta(0, 36)
     """
     leapseconds_list = leapseconds()
     transition_times = list(map(leapsecond_to_time, leapseconds_list))
