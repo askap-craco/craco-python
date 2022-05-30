@@ -25,13 +25,19 @@ import socket
 from craft.cmdline import strrange
 from craco.epics.craco import Craco as CracoEpics
 from astropy.time import Time
+from astropy.io import fits
+from craco import leapseconds
 
 log = logging.getLogger(__name__)
 
+__author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
 FINE_CHANBW = 1.0*32./27./64. # MHz
 FINE_TSAMP = 1.0/FINE_CHANBW # Microseconds
+NFPGA = 6 # number of FPGAs per card
+NCHAN = 4 # number of CRACO output channels per FPGA
 
-__author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
 debughdr = [('frame_id', '<u8'), # Words 1,2
             ('bat', '<u8'), # Words 3,4
             ('beam_number','<u1'), # Word 5
@@ -44,7 +50,46 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
             ('version','<u4'), # Version
             ('zero3','<u4') # word 8
 ]
-            
+
+class CardcapFile:
+    def __init__(self, fname):
+        self.fname = fname
+        hdr1  = fits.getheader(fname)
+        mainhdr = fits.getheader(fname, 1)
+        hdr_nbytes = len(str(hdr1)) + len(str(mainhdr))
+        self.nbl = mainhdr.get('NBL', 465)
+        self.debughdr = int(mainhdr.get('DEBUGHDR')) == 1
+        self.polsum = int(mainhdr.get('POLSUM')) == 1
+        self.dtype = get_single_packet_dtype(self.nbl, self.debughdr, self.polsum)
+
+        self.hdr1 = hdr1
+        self.mainhdr = mainhdr
+        self.hdr_nbytes = hdr_nbytes
+
+    @property
+    def frequencies(self):
+        '''
+        Returns a numpy array of channel frequencies for all FPGAs and channels in a card
+        
+        :returns: np array with shape (NFPGA, NCHAN) with values in MHz
+        '''
+        fch1 = self.mainhdr['FCH1']
+        foff_chan = self.mainhdr['FOFFCHAN']
+        foff_fpga = self.mainhdr['FOFFFPGA']
+        f = np.zeros((NFPGA, NCHAN))
+        for fpga in range(NFPGA):
+            for chan in range(NCHAN):
+                f[fpga, chan] = fch1 + foff_chan*chan + foff_fpga*fpga
+
+        return f
+        
+
+    def load_packets(self, count=-1):
+        with open(self.fname) as f:
+            f.seek(self.hdr_nbytes)
+            packets = np.fromfile(f, dtype=self.dtype, count=count)
+        
+        return packets
 
 def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=False):
     '''
@@ -385,30 +430,41 @@ class CardCapturer:
         
         now = Time.now()
         now.format = 'fits'
-        hdr['MJDNOW'] = now.mjd
-        hdr['JDNOW'] = now.jd
-        hdr['UTCNOW'] = str(now)
-        hdr['FCH1'] = fch1
-        hdr['FOFFFPGA'] = fpga_foff[0,0]
-        hdr['FOFFCHAN'] = coarse_foff[0,0]
-        hdr['SHELF'] = shelf
-        hdr['CARD'] = card
-        hdr['ARGV'] = ' '.join(sys.argv)
-        hdr['LSBPOS'] = lsbPosition
-        hdr['POLSUM'] = int(values.pol_sum)
-        hdr['DUALPOL'] = int(values.dual_pol)
-        hdr['INTEGSE'] = integSelect
-        hdr['SAMPINT'] = values.samples_per_integration
-        hdr['PREFIX'] = values.prefix
-        hdr['TESTDATA'] = int(values.enable_test_data)
-        hdr['DEBUGHDR'] = int(enable_debug_header)
-        hdr['DEVICE'] = device
-        hdr['RDMAPORT'] = rdmaPort
-        hdr['GIDINDEX'] = gidIndex
-        hdr['TSAMP'] = tsamp/1e6
-        hdr['BEAM'] = -1 if values.beam is None else values.beam
-        hdr['FPGA'] = str(values.fpga)
-        hdr['SYNCBAT'] = syncbat
+        dtaiutc = leapseconds.dTAI_UTC_from_utc(now.to_datetime()).seconds
+        dtaiutc2 = (now.tai.datetime - now.datetime).seconds
+
+        hdr['NANT'] = (nant, 'Number of antennas')
+        hdr['NBL'] = (nbl, 'Number of baselines')
+        hdr['AUTOS'] = (include_autos, 'T if autocorrelations are included')
+        hdr['NOWMJD'] = (now.mjd, 'UTC MJD at file creation time')
+        hdr['NOWJD'] = (now.jd, 'UTC JD at file creation time')
+        hdr['NOWTAI'] = (str(now.tai), 'TAI string at file creation time')
+        hdr['NOWSTR'] = (str(now), 'UTC string at file creation time')
+        hdr['NOWUNIX'] = (now.unix, 'Now in UNIX time')
+        hdr['NOWUTAI'] = (now.unix_tai, 'Now in UNIX TAI')
+        hdr['DTAIUTC'] = (dtaiutc, 'TAI-UTC at file creation time from leapseconds.py')
+        hdr['DTAIUTC2'] = (dtaiutc2, 'TAI-UTC at file creation time from astropy')
+        hdr['FCH1'] = (fch1, 'Frequency of fpga=0, channel=0 (MHz)')
+        hdr['FOFFFPGA'] = (fpga_foff[0,0], 'Frequency offset per FPGA')
+        hdr['FOFFCHAN'] = (coarse_foff[0,0], 'Frequency offset per FPGA channel')
+        hdr['SHELF'] = (shelf, 'Correlator shelf/block')
+        hdr['CARD'] = (card, 'Correlator card')
+        hdr['ARGV'] = (' '.join(sys.argv), 'Cardcap command line arguments')
+        hdr['LSBPOS'] = (lsbPosition, 'LSB position')
+        hdr['POLSUM'] = (values.pol_sum, 'T if POLSUM enabled')
+        hdr['DUALPOL'] = (values.dual_pol, 'T if DUAL Pol mode enabled')
+        hdr['INTEGSE'] = (integSelect, 'Integration selection value sent to hardware')
+        hdr['SAMPINT'] = (values.samples_per_integration, 'Number of 18kHz samples per CRACO integration')
+        hdr['PREFIX'] = (values.prefix, 'EPICS prefix. ma=MATES, ak=ASKAP')
+        hdr['TESTDATA'] = (values.enable_test_data, 'T if packetiser test data mode enabled (counting pattern)')
+        hdr['DEBUGHDR'] = (enable_debug_header, 'T if debug header in packetiser is enabled')
+        hdr['DEVICE'] = (device, 'Which network card was used')
+        hdr['RDMAPORT'] = (rdmaPort, 'Which RDMA port was used for RoCE')
+        hdr['GIDINDEX'] = (gidIndex, 'Which GID index was used for RoCE')
+        hdr['TSAMP'] = (tsamp/1e6, 'Sampling time for CRACO integrations (seconds)')
+        hdr['BEAM'] = (-1 if values.beam is None else values.beam, 'Beam downloaded. -1 is all beams')
+        hdr['FPGA'] = (str(values.fpga), 'FPGAs downloaded (comma separated, 1 based)')
+        hdr['SYNCBAT'] = (syncbat, 'Hexadecimal BAT when frame ID was set to 0')
 
         ctrl.stop()
         ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
@@ -426,7 +482,7 @@ class CardCapturer:
             log.info('Started OK. Now saving data')
             self.save_data(w)
         except KeyboardInterrupt as e:
-            print(f'Got an exceptio  {e}')
+            print(f'Closing due to ctrl-C')
         finally:
             ctrl.stop()
             ctrl.write(f'acx:s{shelf:02d}:evtf:craco:enable', 0, wait=False)
@@ -450,6 +506,7 @@ class CardCapturer:
                 fpga.write_data(w)
 
             nblk += 1
+            print(f'nblk={nblk}')
             if nblk >= self.values.num_msgs:
                 break
 
