@@ -463,6 +463,7 @@ class CardCapturer:
         hdr['TSAMP'] = (tsamp/1e6, 'Sampling time for CRACO integrations (seconds)')
         hdr['BEAM'] = (-1 if values.beam is None else values.beam, 'Beam downloaded. -1 is all beams')
         hdr['FPGA'] = (str(values.fpga), 'FPGAs downloaded (comma separated, 1 based)')
+        hdr['NFPGA'] = (len(values.fpga), 'Number of FPGAs downloaded')
         hdr['SYNCBAT'] = (syncbat, 'Hexadecimal BAT when frame ID was set to 0')
         hdr['DSPVER'] = (dspversion, 'Block DSP version')
         hdr['IOCVER'] = (iocversion, "IOC version for block")
