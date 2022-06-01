@@ -24,7 +24,7 @@ class EpicsSubsystem:
         """
         write to EPICS PV
         """
-        print(f"{self._prefix}{pvname} = {value}")
+        #print(f"{self._prefix}{pvname} = {value}")
         return caproto.sync.client.write(
             f"{self._prefix}{pvname}", value, notify=True, timeout=timeout
         )

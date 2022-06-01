@@ -12,6 +12,8 @@ import os
 import sys
 import logging
 import warnings
+import copy
+import time
 
 import roce_packetizer
 from craft.fitswriter import FitsTableWriter
@@ -27,6 +29,7 @@ from craco.epics.craco import Craco as CracoEpics
 from astropy.time import Time
 from astropy.io import fits
 from craco import leapseconds
+
 
 log = logging.getLogger(__name__)
 
@@ -198,8 +201,9 @@ hdr_size = 36*17 # words
 class FpgaCapturer:
     def __init__(self, ccap, fpga):
         self.ccap = ccap
+        self.fpga = fpga
+        self.values = ccap.values
         values = ccap.values
-
         mode = runMode.RECV_MODE
         device = values.device
         rdmaPort = values.port
@@ -240,15 +244,12 @@ class FpgaCapturer:
         hdr = roce_packetizer.roce_header()
         hdr.setup(src_mac, dst_mac, qpn, psn)
         hbytes = bytes(hdr.to_array(True))
-        print('Header is')
         hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-        print(hstring)
         with open(f'header_fpga{fpga}.txt', 'w') as fout:
             fout.write(hstring)
         
         with open(f'header_{fpga}.bin','wb') as fout:
             fout.write(hbytes)
-
 
         hint = np.zeros(hdr_size, dtype=np.uint32)
         beam0_header = list(np.frombuffer(hbytes, dtype=np.uint32))
@@ -284,6 +285,7 @@ class FpgaCapturer:
         self.nmiss = 0
         self.total_completions = 0
         self.total_missing = 0
+        self.total_bytes = 0
 
 
     def issue_requests(self):
@@ -315,7 +317,7 @@ class FpgaCapturer:
             if immediate != self.curr_imm:
                 missed  = (immediate - self.curr_imm)
                 self.nmiss += missed
-                print(f'Missed {missed} nmiss={self.nmiss} nbytes={nbytes}')
+                #print(f'{self.values.block}/{self.values.card}/{self.fpga} Missed {missed} nmiss={self.nmiss} nbytes={nbytes}')
 
             self.curr_imm = immediate+1
                     
@@ -325,9 +327,6 @@ class FpgaCapturer:
             # now it is data for each message
             message_index = index%num_cmsgs
             d = self.rdma_buffers[block_index][message_index]
-            print(d.dtype)
-            print(f"version={d[0]['version']} d={d[0]['nprod']}")
-            print(d['version'])
             #w.write(d[:nbytes]) # write to fitsfile
             if beam is not None:
                 mask = d['beam_number'] == beam 
@@ -339,10 +338,11 @@ class FpgaCapturer:
 
 
 class CardCapturer:
-    def __init__(self, values):
+    def __init__(self, values, primary=False):
         rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
         log.info('Starting card capture %s', values)
         self.values = values
+        self.primary = primary
         mode = runMode.RECV_MODE
         device = values.device
         rdmaPort = values.port
@@ -416,22 +416,21 @@ class CardCapturer:
         fpga_foff = avg_freqs[1:,:] - avg_freqs[:-1,:]
         coarse_foff = avg_freqs[:,1:] - avg_freqs[:,:-1]
 
-        print('FPGA FOFF', fpga_foff)
-        print('Coarse FOFF', coarse_foff)
-        print(fpga_foff == fpga_foff[0,0])
-        print(fpga_foff - fpga_foff[0,0])
-
         assert np.all(fpga_foff - fpga_foff[0,0] < 1e-6), 'FPGA frequency offset not always the same'
         assert np.all(coarse_foff - coarse_foff[0,0] < 1e-6), 'Coarse frequency offset not always the same'
 
         syncbat = ctrl.read('F_syncReset:startBat_O')
 
         hdr = {}
+        self.hdr = hdr
         
         now = Time.now()
         now.format = 'fits'
         dtaiutc = leapseconds.dTAI_UTC_from_utc(now.to_datetime()).seconds
         dtaiutc2 = (now.tai.datetime - now.datetime).seconds
+
+        dspversion = ctrl.read(f"acx:s{block:02d}:S_corFpgaVersion:val")
+        iocversion = ctrk,read(f'acx:s{block:02d}:version')
 
         hdr['NANT'] = (nant, 'Number of antennas')
         hdr['NBL'] = (nbl, 'Number of baselines')
@@ -465,28 +464,61 @@ class CardCapturer:
         hdr['BEAM'] = (-1 if values.beam is None else values.beam, 'Beam downloaded. -1 is all beams')
         hdr['FPGA'] = (str(values.fpga), 'FPGAs downloaded (comma separated, 1 based)')
         hdr['SYNCBAT'] = (syncbat, 'Hexadecimal BAT when frame ID was set to 0')
-
-        ctrl.stop()
-        ctrl.configure(fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
+        hdr['DSPVER'] = (dspversion, 'Block DSP version')
+        hdr['IOCVER'] = (iocversion, "IOC version for block")
+            
         self.ctrl = ctrl
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
+        self.configure_args  = (fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
 
         #self.clear_headers()
         self.fpga_cap = [FpgaCapturer(self, fpga) for fpga in values.fpga]
 
-        # start CRACO (enabling packetiser, craco subsystem and firing event)
+        os.makedirs(os.path.dirname(values.outfile), exist_ok=True)
+
+    def do_writing(self):
+        values = self.values
         try:
-            w = FitsTableWriter(values.outfile, self.packet_dtype, self.byteswap, hdr)
-            ctrl.start_shelf(shelf, [card])
-            log.info('Started OK. Now saving data')
+            w = FitsTableWriter(self.values.outfile, self.packet_dtype, self.byteswap, self.hdr)
+            
+            log.info('Started OK. Now saving data to %s', values.outfile)
             self.save_data(w)
         except KeyboardInterrupt as e:
             print(f'Closing due to ctrl-C')
         finally:
-            ctrl.stop()
-            ctrl.write(f'acx:s{shelf:02d}:evtf:craco:enable', 0, wait=False)
             w.close()
+            if self.primary:
+                self.ctrl.stop()
+                #ctrl.write(f'acx:s{shelf:02d}:evtf:craco:enable', 0, wait=False)
+                self.report_stats()
+
+    def start(self):
+        # start CRACO (enabling packetiser, craco subsystem and firing event)
+        if self.primary:
+            #ctrl.start_shelf(shelf, [card])
+            self.ctrl.start()
+
+    def configure(self):
+        if self.primary:
+            self.ctrl.stop()
+            self.ctrl.configure(*self.configure_args)
+
+    def report_stats(self):
+        log.info(f'Block {self.values.block} card {self.values.card} completions={self.total_completions} bytes={self.total_bytes} missing={self.total_missing}')
+
+    @property
+    def total_completions(self):
+        return [f.total_completions for f in self.fpga_cap]
+
+    @property
+    def total_bytes(self):
+        return [f.total_bytes for f in self.fpga_cap]
+
+    @property
+    def total_missing(self):
+        return [f.total_missing for f in self.fpga_cap]
+
 
     def clear_headers(self):
         zerohdr = np.zeros(hdr_size, dtype=np.uint32)
@@ -506,7 +538,6 @@ class CardCapturer:
                 fpga.write_data(w)
 
             nblk += 1
-            print(f'nblk={nblk}')
             if nblk >= self.values.num_msgs:
                 break
 
@@ -523,8 +554,8 @@ def _main():
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
-    parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=int) 
-    parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=int)
+    parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=strrange) 
+    parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=strrange)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
@@ -544,8 +575,63 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    CardCapturer(values)
-    
+
+    try:
+        import mpi4py.rc
+        mpi4py.rc.threads = False
+        from mpi4py import MPI
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        numprocs = comm.Get_size()
+
+        block_cards  = []
+        procid = 0
+        for blk in values.block:
+            for crd in values.card:
+                block_cards.append((blk, crd))
+                procid += 1
+                if procid > numprocs:
+                    break
+
+        primary = rank == 0
+
+        if rank < len(block_cards):
+            my_block, my_card =  block_cards[rank]
+            my_values = copy.deepcopy(values)
+            my_values.card = my_card
+            my_values.block = my_block
+            my_values.outfile = values.outfile.replace('.fits','')
+            my_values.outfile += f'_b{my_block:02d}_c{my_card:02d}.fits'
+            log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloaing card={my_values.card} block {my_values.block} to {my_values.outfile}')
+            ccap = CardCapturer(my_values, primary)
+        else:
+            log.info(f'Launched too may processes for me to do anything useful. Rank {rank} goin to sleep to get out of the way')
+            my_values = None
+
+        # everyone needs to do barrier
+        comm.Barrier()
+        
+        if rank == 0:
+            ccap.configure()
+            ccap.start()
+
+        comm.Barrier()
+
+        if rank < len(block_cards):
+            ccap.do_writing()
+        
+    except:
+        primary = True
+        log.exception('MPI setup failed. Falling back to vanilla goodness of wonderment')
+        my_values = values
+        my_values.card = values.card[0]
+        my_values.block = values.block[0]
+        ccap = CardCapturer(my_values, primary)
+        ccap.configure()
+        ccap.start()
+        ccap.do_writing()
+
+
 
 if __name__ == '__main__':
     _main()

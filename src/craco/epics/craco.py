@@ -59,6 +59,8 @@ class Craco(EpicsSubsystem):
         ak:acx:s07:c01:F_craco:enablePacketiser_O
         ak:acx:s07:c01:F_craco:enableSubsystem_O
         ak:acx:s07:evtf:craco:enable
+
+        The correct way to run everything is to call start()
         '''
         self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
         for card in range(1, 12+1):

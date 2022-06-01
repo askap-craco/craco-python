@@ -24,7 +24,7 @@ class EpicsSubsystem:
         """
         write to EPICS PV
         """
-        print(f"{self._prefix}{pvname} = {value}")
+        #print(f"{self._prefix}{pvname} = {value}")
         return caput(
             f"{self._prefix}{pvname}", value, timeout=timeout, wait=wait
         )
