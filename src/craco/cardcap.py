@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Template for making scripts to run from the command line
+captures CRACO data from correlator cards
 
 Copyright (C) CSIRO 2020
 """
@@ -14,6 +14,7 @@ import logging
 import warnings
 import copy
 import time
+import socket
 
 import roce_packetizer
 from craft.fitswriter import FitsTableWriter
@@ -39,6 +40,14 @@ FINE_CHANBW = 1.0*32./27./64. # MHz
 FINE_TSAMP = 1.0/FINE_CHANBW # Microseconds
 NFPGA = 6 # number of FPGAs per card
 NCHAN = 4 # number of CRACO output channels per FPGA
+
+def uint8tostr(d):
+    if isinstance(d, str):
+        s = d
+    else:
+        s = ''.join(map(chr, d))
+
+    return s.strip().replace('\x00','')
 
 
 debughdr = [('frame_id', '<u8'), # Words 1,2
@@ -429,8 +438,8 @@ class CardCapturer:
         dtaiutc = leapseconds.dTAI_UTC_from_utc(now.to_datetime()).seconds
         dtaiutc2 = (now.tai.datetime - now.datetime).seconds
 
-        dspversion = ctrl.read(f"acx:s{block:02d}:S_corFpgaVersion:val")
-        iocversion = ctrk,read(f'acx:s{block:02d}:version')
+        dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
+        iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
 
         hdr['NANT'] = (nant, 'Number of antennas')
         hdr['NBL'] = (nbl, 'Number of baselines')
@@ -456,10 +465,10 @@ class CardCapturer:
         hdr['SAMPINT'] = (values.samples_per_integration, 'Number of 18kHz samples per CRACO integration')
         hdr['PREFIX'] = (values.prefix, 'EPICS prefix. ma=MATES, ak=ASKAP')
         hdr['TESTDATA'] = (values.enable_test_data, 'T if packetiser test data mode enabled (counting pattern)')
-        hdr['DEBUGHDR'] = (enable_debug_header, 'T if debug header in packetiser is enabled')
+        hdr['DEBGHDR'] = (enable_debug_header, 'T if debug header in packetiser is enabled')
         hdr['DEVICE'] = (device, 'Which network card was used')
-        hdr['RDMAPORT'] = (rdmaPort, 'Which RDMA port was used for RoCE')
-        hdr['GIDINDEX'] = (gidIndex, 'Which GID index was used for RoCE')
+        hdr['RDMAPRT'] = (rdmaPort, 'Which RDMA port was used for RoCE')
+        hdr['GIDINDX'] = (gidIndex, 'Which GID index was used for RoCE')
         hdr['TSAMP'] = (tsamp/1e6, 'Sampling time for CRACO integrations (seconds)')
         hdr['BEAM'] = (-1 if values.beam is None else values.beam, 'Beam downloaded. -1 is all beams')
         hdr['FPGA'] = (str(values.fpga), 'FPGAs downloaded (comma separated, 1 based)')
@@ -467,6 +476,7 @@ class CardCapturer:
         hdr['SYNCBAT'] = (syncbat, 'Hexadecimal BAT when frame ID was set to 0')
         hdr['DSPVER'] = (dspversion, 'Block DSP version')
         hdr['IOCVER'] = (iocversion, "IOC version for block")
+        hdr['HOST'] = (socket.gethostname(), 'Capture host name')
             
         self.ctrl = ctrl
 
@@ -476,7 +486,9 @@ class CardCapturer:
         #self.clear_headers()
         self.fpga_cap = [FpgaCapturer(self, fpga) for fpga in values.fpga]
 
-        os.makedirs(os.path.dirname(values.outfile), exist_ok=True)
+        thedir = os.path.dirname(values.outfile)
+        if len(thedir.strip()) > 0:
+            os.makedirs(thedir, exist_ok=True)
 
     def do_writing(self):
         values = self.values
