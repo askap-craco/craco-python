@@ -323,6 +323,7 @@ class FpgaCapturer:
             assert nbytes == msg_size, f'Unexpected messages size. Was={nbytes} expected={msg_size}'
             immediate = c.imm_data
             immediate = socket.ntohl(immediate)
+            self.total_bytes += nbytes
             if immediate != self.curr_imm:
                 missed  = (immediate - self.curr_imm)
                 self.nmiss += missed
@@ -413,6 +414,7 @@ class CardCapturer:
         # configure CRACO on all FPGAS
         logging.info('Starting CRACO via EPICS')
         ctrl = CracoEpics(values.prefix+':')
+        self.ctrl = ctrl
         card_freqs = ctrl.get_channel_frequencies(shelf, card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
         fdiffs = card_freqs[:, :, 1:] - card_freqs[:, :, :-1]
         if fdiffs[0,0,0] == 0:
@@ -477,8 +479,11 @@ class CardCapturer:
         hdr['DSPVER'] = (dspversion, 'Block DSP version')
         hdr['IOCVER'] = (iocversion, "IOC version for block")
         hdr['HOST'] = (socket.gethostname(), 'Capture host name')
-            
-        self.ctrl = ctrl
+        self.hdr = hdr
+        self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
+        self.pvhdr('md2:scanId_O', 'SCANID','Scan ID from metadata')
+        self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID rom metadata')
+
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
         self.configure_args  = (fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
@@ -490,11 +495,20 @@ class CardCapturer:
         if len(thedir.strip()) > 0:
             os.makedirs(thedir, exist_ok=True)
 
+    def pvhdr(self, pvname, card, comment):
+        try:
+            v = self.ctrl.read(pvname)
+            self.hdr[card] = (v, comment)
+        except:
+            self.hdr[card] = ('PVERROR',comment)
+
     def do_writing(self):
         values = self.values
         try:
-            w = FitsTableWriter(self.values.outfile, self.packet_dtype, self.byteswap, self.hdr)
-            
+            if self.values.outfile:
+                w = FitsTableWriter(self.values.outfile, self.packet_dtype, self.byteswap, self.hdr)
+            else:
+                w = None
             log.info('Started OK. Now saving data to %s', values.outfile)
             self.save_data(w)
         except KeyboardInterrupt as e:
@@ -548,7 +562,8 @@ class CardCapturer:
         nblk = 0
         while True:
             for fpga in self.fpga_cap:
-                fpga.write_data(w)
+                if w is not None:
+                    fpga.write_data(w)
 
             nblk += 1
             if nblk >= self.values.num_msgs:
