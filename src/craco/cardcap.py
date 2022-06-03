@@ -467,7 +467,7 @@ class CardCapturer:
         hdr['SAMPINT'] = (values.samples_per_integration, 'Number of 18kHz samples per CRACO integration')
         hdr['PREFIX'] = (values.prefix, 'EPICS prefix. ma=MATES, ak=ASKAP')
         hdr['TESTDATA'] = (values.enable_test_data, 'T if packetiser test data mode enabled (counting pattern)')
-        hdr['DEBGHDR'] = (enable_debug_header, 'T if debug header in packetiser is enabled')
+        hdr['DEBUGHDR'] = (enable_debug_header, 'T if debug header in packetiser is enabled')
         hdr['DEVICE'] = (device, 'Which network card was used')
         hdr['RDMAPRT'] = (rdmaPort, 'Which RDMA port was used for RoCE')
         hdr['GIDINDX'] = (gidIndex, 'Which GID index was used for RoCE')
