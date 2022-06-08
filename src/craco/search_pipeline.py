@@ -540,8 +540,8 @@ class Pipeline:
 
         '''
         self.fast_baseline2uv(input_flat, self.uv_out)
-        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
-        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale*float(1<<NBINARY_POINT_FDMTIN)))
+        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale))
+        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale))
         self.inbuf.copy_to_device()
 
         return self
@@ -591,7 +591,7 @@ def cand2str_wcs(c, iblk, plan):
     dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
     lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
     coord = plan.wcs.pixel_to_world(lpix, mpix)
-    s2 = f'{total_sample}\t{obstime_sec.value:0.4f}\t{mjd:0.9f}\t{dm_pccm3.value:0.2f}\t{coord.ra.deg:0.8f}\t{coord.dec.deg:0.6f}'
+    s2 = f'\t{total_sample}\t{obstime_sec.value:0.4f}\t{mjd:0.9f}\t{dm_pccm3.value:0.2f}\t{coord.ra.deg:0.8f}\t{coord.dec.deg:0.6f}'
     return s1+s2
 
 def print_candidates_with_wcs(candidates, iblk, plan):
@@ -682,7 +682,7 @@ def get_parser():
     
     parser.set_defaults(device    = 0)
     parser.set_defaults(npix      = 256)
-    parser.set_defaults(ndm       = 2)
+    parser.set_defaults(ndm       = 512)
     parser.set_defaults(nt        = 256)
     parser.set_defaults(nbox      = 8)
     parser.set_defaults(nuvwide   = 8)
@@ -739,6 +739,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     log.info(f'Values={values}')
+    assert values.max_ndm == NDM_MAX
 
     mode   = get_mode()
     device = pyxrt.device(values.device)
@@ -772,7 +773,7 @@ def _main():
     p.clear_buffers(values)
     
     candout = open(values.cand_file, 'w')
-    candout.write(cand_str_header)
+    candout.write(cand_str_wcs_header)
     total_candidates = 0
     bestcand = None
 
@@ -794,7 +795,7 @@ def _main():
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str_wcs(c, plan, iblk)+'\n')
+            candout.write(cand2str_wcs(c, iblk, plan)+'\n')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
@@ -818,7 +819,7 @@ def _main():
 
     cmdstr =  ' '.join(sys.argv)
     now = datetime.datetime.now()
-    logstr = '# Run {cmdstr} on {now}\n'
+    logstr = f'# Run {cmdstr} finished on {now}\n'
     candout.write(logstr)
     candout.flush()    
     candout.close()

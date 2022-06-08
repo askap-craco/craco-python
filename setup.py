@@ -62,7 +62,8 @@ if __name__ == '__main__':
                                 'yaml2etcd=craco.yaml2etcd:_main',
                                 'pipeline=craco.pipeline:_main',
                                 'cardcap=craco.cardcap:_main',
-                                'search_pipeline=craco.search_pipeline:_main']
+                                'search_pipeline=craco.search_pipeline:_main',
+                                'ccapfits2np=craco.ccapfits2np:_main']
         },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',
