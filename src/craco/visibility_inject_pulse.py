@@ -52,7 +52,7 @@ def dircos_from_wcs(coords, wcs):
 
 ################################################################################
 
-def rime_propagator_term(blvec, lvec, fvec):
+def rime_propagator_term(blvec, lvec, fvec, phase_centering=True):
     
     """
     ----------------------------------------------------------------------------
@@ -72,6 +72,10 @@ def rime_propagator_term(blvec, lvec, fvec):
     fvec    [numpy array] Numpy array of frequencies (in units of Hz). 
             Shape=(nspw,nfreqs) or just (nfreqs,). 
             nspw = number of spectral windows (default=1)
+            
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center
              
     Outputs:
     
@@ -98,6 +102,8 @@ def rime_propagator_term(blvec, lvec, fvec):
         lvec = lvec[NP.newaxis,...] 
     if lvec.shape[-1] != 3:
         raise ValueError('Input lvec must have shape (...,3)')
+    if phase_centering:
+        lvec[...,-1] -= 1.0 # n -> n-1
  
     if not isinstance(fvec, (int,float,NP.ndarray)):
         raise TypeError('Input fvec must be a scalar or numpy array')
@@ -106,6 +112,7 @@ def rime_propagator_term(blvec, lvec, fvec):
         fvec = fvec.reshape(1,-1)
         
     propagator = NP.exp(-1j * 2 * NP.pi * NP.einsum('...ik,...jk->...ij', blvec, lvec)[...,NP.newaxis,NP.newaxis,:] * fvec[...,NP.newaxis] / FC.c.si.value) # shape=(...,nbl,nspw,nfreq,nsrc)
+
     return propagator
 
 ################################################################################
@@ -146,11 +153,12 @@ def get_bl_from_plan(plan):
     antpair = NP.array(antpair, dtype=[('A1', '<i8'), ('A2', '<i8')])
     blvec = NP.asarray(blvec)
     blid = NP.asarray(blid)
+
     return (blid, antpair, blvec)
 
 ################################################################################
 
-def genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=None, ignore_w=False):
+def genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=None, ignore_w=False, phase_centering=True):
     
     """
     ----------------------------------------------------------------------------
@@ -183,6 +191,10 @@ def genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=None, ignore_w
             be set to zero. If False (default), w-values will be used in the 
             computation of visibilities.
              
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center
+             
     Outputs:
     
     vis     [numpy array] (...,nbl,nspw,nfreq,nStokesPol) shaped array of 
@@ -213,10 +225,56 @@ def genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=None, ignore_w
     if ignore_w: # If set, ignore w-term
         blvec[:,2] = 0.0
     
-    propagator = rime_propagator_term(blvec, src_dircos, fvec)
+    propagator = rime_propagator_term(blvec, src_dircos, fvec, phase_centering=phase_centering)
     vis = apparent_stokes_intensity * propagator[...,0][...,NP.newaxis] # shape=(...,nbl,nspw,nfreq,nStokesPol)
     
     return vis
+
+################################################################################
+
+def genvis_1PS_at_phase_center(blvec, fvec, apparent_stokes_intensity=None, 
+                               ignore_w=False, phase_centering=True):
+    
+    """
+    ----------------------------------------------------------------------------
+    Generate visibility for a point source at phase center, baseline vector, 
+    frequencies, and the source intensity
+   
+    Inputs:
+    
+    blvec   [numpy array] Numpy array of baseline vectors (in units of m). 
+            Shape=(...,nbl,3)
+    
+    fvec    [numpy array] Numpy array of frequencies (in units of Hz). 
+            Shape=(nspw,nfreqs) or just (nfreqs,). 
+            nspw = number of spectral windows (default=1)
+            
+    apparent_stokes_intensity
+            [NoneType or numpy array] A numpy array of point source Stokes 
+            intensity. Shape=(nspw,nfreq,nStokesPol). If ndim=2, it will be
+            recast into shape (nspw=1,nfreq,nStokesPol). nStokesPol=1 (Stokes I) 
+            or 4 (I,Q,U,V). If ndim<2, an error will be raised. If set to None, 
+            it will be set to a value of 1 with shape=(1,1,1).
+            
+    ignore_w
+            [boolean] If set to True, the w-values in the baseline vector will
+            be set to zero. If False (default), w-values will be used in the 
+            computation of visibilities.
+             
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center
+             
+    Outputs:
+    
+    vis     [numpy array] (...,nbl,nspw,nfreq,nStokesPol) shaped array of 
+            visibilities
+    ----------------------------------------------------------------------------
+    """
+        
+    src_dircos_pc = NP.array([0.0, 0.0, 1.0])
+    
+    return genvis_1PS(blvec, src_dircos_pc, fvec, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering)
 
 ################################################################################
 
@@ -260,7 +318,168 @@ def genvis_1PS_at_phase_center(blvec, fvec, apparent_stokes_intensity=None, igno
 
 ################################################################################
 
-def genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensity=None, ignore_w=False):
+def genvis_1PS_from_uvfits(uvfits_infile, src_ra_deg, src_dec_deg, apparent_stokes_intensity=None, src_coord_epoch='J2000', method='plan', plan=None, ignore_w=False, phase_centering=True, use_plan_baselines=True):
+
+    """
+    ----------------------------------------------------------------------------
+    Generate visibility for a point source given its arbitrary location (in 
+    RA, Dec), its Stokes intensity, and a CRACO plan from which the baseline 
+    vector, and frequencies
+    
+    Inputs:
+    
+    uvfits_infile    
+            [string] full path to template uvfits file
+    
+    src_ra_deg    
+            [numpy array] Numpy array of source RA (in deg). 
+            Shape=(nsrc,3)
+             
+    src_dec_deg    
+            [numpy array] Numpy array of source Dec (in deg). 
+            Shape=(nsrc,3)
+             
+    apparent_stokes_intensity
+            [NoneType or numpy array] A numpy array of point source Stokes 
+            intensity. Shape=(nspw,nfreq,nStokesPol). If ndim=2, it will be
+            recast into shape (nspw=1,nfreq,nStokesPol). nStokesPol=1 (Stokes I) 
+            or 4 (I,Q,U,V). If ndim<2, an error will be raised. If set to None, 
+            it will be set to a value of 1 with shape=(1,1,1).
+        
+    src_coord_epoch
+            [string] Epoch in which input RA and Dec are defined. Default='J2000'
+            
+    method  [string] Method to compute visibilities. Accepted values are 
+            'pyuvdata' (uses methods internal to pyuvdata package) and
+            'plan' (default, uses CRACO plan info)
+            
+    plan    [instance of CRACO plan] CRACO plan. If set to None (default), it 
+            will be inititated from the input uvfits_infile
+            
+    use_plan_baselines
+            [boolean] Use baselines from the plan instead of uvfits file. 
+            Default=True
+            
+    ignore_w
+            [boolean] If set to True, the w-values in the baseline vector will
+            be set to zero. If False (default), w-values will be used in the 
+            computation of visibilities. 
+             
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center. 
+             
+    Outputs:
+    
+    uvd     [instance of class pyuvdata.UVData] UVData object (only first time
+            record)
+    ----------------------------------------------------------------------------
+    """        
+
+    if not isinstance(uvfits_infile, str):
+        raise TypeError('Input uvfits_infile must be a string')
+    uvd = UVData()
+    uvd.read(uvfits_infile, file_type='uvfits')
+    nbl = uvd.Nbls
+
+    uvd.select(blt_inds=NP.arange(nbl)) # Select the baselines only for the first time record
+
+    nblt = uvd.Nblts
+    nspw = uvd.Nspws
+    nfreq = uvd.Nfreqs
+    nStokesPol = uvd.Npols
+    nt = nblt // nbl
+
+    blvec = uvd.uvw_array.reshape(nbl,3) # shape=(nbl,3)
+    fvec = uvd.freq_array
+    
+    if method.lower() == 'pyuvdata':  
+        vis_1ps_phase_center = genvis_1PS_at_phase_center(blvec, fvec, apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering) # shape=(nbl,nspw,nfreq,nStokesPol)
+        uvdcopy = copy.deepcopy(uvd)
+        uvdcopy.data_array = vis_1ps_phase_center
+        
+        # Change phase center to src_coord
+        uvdcopy.phase(NP.radians(src_ra_deg), NP.radians(src_dec_deg), epoch=src_coord_epoch)
+        vis = uvdcopy.data_array.conj() # Done to get visibilities of src_coord w.r.t. phase center        
+    elif method.lower() == 'plan':
+        if plan is None:
+            fobj = uvfits.open(uvfits_infile)
+            plan = PipelinePlan(fobj, "--ndm 2")
+        if use_plan_baselines:
+            vis = genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering)
+        else:           
+            src_coord = SkyCoord(ra=NP.asarray(src_ra_deg).reshape(-1)*U.deg, dec=NP.asarray(src_dec_deg).reshape(-1)*U.deg, frame='icrs')
+            src_dircos = dircos_from_wcs(src_coord, plan.wcs)
+            vis = genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering)
+    uvd.data_array = vis
+    
+    return uvd
+
+################################################################################
+
+def writevis_1PS_from_uvfits(uvfits_infile, uvfits_outfile, src_ra_deg, src_dec_deg, apparent_stokes_intensity=None, src_coord_epoch='J2000', method='pyuvdata', plan=None, ignore_w=False, phase_centering=True, use_plan_baselines=True):
+
+    """
+    ----------------------------------------------------------------------------
+    Generate visibility for a point source given its arbitrary location (in 
+    RA, Dec), its Stokes intensity, and a CRACO plan from which the baseline 
+    vector, and frequencies
+    
+    Inputs:
+    
+    uvfits_infile    
+            [string] full path to template uvfits file
+            
+    uvfits_outfile
+            [string] full path to output uvfits file
+    
+    src_ra_deg    
+            [numpy array] Numpy array of source RA (in deg). 
+            Shape=(nsrc,3)
+             
+    src_dec_deg    
+            [numpy array] Numpy array of source Dec (in deg). 
+            Shape=(nsrc,3)
+             
+    apparent_stokes_intensity
+            [NoneType or numpy array] A numpy array of point source Stokes 
+            intensity. Shape=(nspw,nfreq,nStokesPol). If ndim=2, it will be
+            recast into shape (nspw=1,nfreq,nStokesPol). nStokesPol=1 (Stokes I) 
+            or 4 (I,Q,U,V). If ndim<2, an error will be raised. If set to None, 
+            it will be set to a value of 1 with shape=(1,1,1).
+        
+    src_coord_epoch
+            [string] Epoch in which input RA and Dec are defined. Default='J2000'
+            
+    method  [string] Method to compute visibilities. Accepted values are 
+            'pyuvdata' (default, uses methods internal to pyuvdata package) and
+            'plan' (uses CRACO plan info)
+
+    plan    [instance of CRACO plan] CRACO plan. If set to None (default), it 
+            will be inititated from the input uvfits_infile
+            
+    use_plan_baselines
+            [boolean] Use baselines from the plan instead of uvfits file. 
+            Default=True
+            
+    ignore_w
+            [boolean] If set to True, the w-values in the baseline vector will
+            be set to zero. If False (default), w-values will be used in the 
+            computation of visibilities. 
+             
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center. 
+    ----------------------------------------------------------------------------
+    """        
+
+    uvd = genvis_1PS_from_uvfits(uvfits_infile, src_ra_deg, src_dec_deg, apparent_stokes_intensity=apparent_stokes_intensity, src_coord_epoch=src_coord_epoch, method=method, plan=plan, ignore_w=ignore_w, phase_centering=phase_centering, use_plan_baselines=use_plan_baselines)
+    uvd.write_uvfits(uvfits_outfile)
+
+################################################################################
+
+def genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensity=None, 
+                         ignore_w=False, phase_centering=True):
     
     """
     ----------------------------------------------------------------------------
@@ -292,6 +511,10 @@ def genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensit
             be set to zero. If False (default), w-values will be used in the 
             computation of visibilities.
              
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center
+             
     Outputs:
     
     vis     [numpy array] (...,nbl,nspw,nfreq,nStokesPol) shaped array of 
@@ -303,7 +526,8 @@ def genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensit
     src_coord = SkyCoord(ra=NP.asarray(src_ra_deg).reshape(-1)*U.deg, dec=NP.asarray(src_dec_deg).reshape(-1)*U.deg, frame='icrs')
     src_dircos = dircos_from_wcs(src_coord, plan.wcs)
     fvec = plan.freqs
-    vis = genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w)
+    vis = genvis_1PS(blvec, src_dircos, fvec, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering)
+
     return vis
 
 ################################################################################
@@ -369,7 +593,7 @@ def genvis_1PS_from_dynamic_spectrum(vis_1ps_static, dynamic_spectrum, spwind=0,
 
 ################################################################################
 
-def gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spectrum, apparent_stokes_intensity=None, ignore_w=False, spwind=0, polind=0, outfmt='craco'):
+def gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spectrum, apparent_stokes_intensity=None, ignore_w=False, phase_centering=True, spwind=0, polind=0, outfmt='craco'):
 
     """
     ----------------------------------------------------------------------------
@@ -389,11 +613,10 @@ def gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spect
             [numpy array] Numpy array of source Dec (in deg). 
             Shape=(nsrc,3)
              
-    ignore_w
-            [boolean] If set to True, the w-values in the baseline vector will
-            be set to zero. If False (default), w-values will be used in the 
-            computation of visibilities.
-             
+    dynamic_spectrum
+            [numpy array] Dynamic spectrum of a FRB candidate intensity of shape
+            (ntimes,nfreq)
+            
     apparent_stokes_intensity
             [NoneType or numpy array] A numpy array of point source Stokes 
             intensity. Shape=(nspw,nfreq,nStokesPol). If ndim=2, it will be
@@ -401,10 +624,15 @@ def gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spect
             or 4 (I,Q,U,V). If ndim<2, an error will be raised. If set to None, 
             it will be set to a value of 1 with shape=(1,1,1).
             
-    dynamic_spectrum
-            [numpy array] Dynamic spectrum of a FRB candidate intensity of shape
-            (ntimes,nfreq)
-            
+    ignore_w
+            [boolean] If set to True, the w-values in the baseline vector will
+            be set to zero. If False (default), w-values will be used in the 
+            computation of visibilities.
+             
+    phase_centering
+            [boolean] If set to True (default), phases will be rotated with 
+            respect to the phase center
+             
     spwind  [integer] Index of spectral window (default=0)
     
     polind  [integer] Index of polarization (default=0 => Stokes I)
@@ -422,8 +650,9 @@ def gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spect
     ----------------------------------------------------------------------------
     """            
     
-    vis_1ps_static = genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w)
+    vis_1ps_static = genvis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, apparent_stokes_intensity=apparent_stokes_intensity, ignore_w=ignore_w, phase_centering=phase_centering)
     vis_dynamic = genvis_1PS_from_dynamic_spectrum(vis_1ps_static, dynamic_spectrum, spwind=spwind, polind=polind, outfmt=outfmt)
+
     return vis_dynamic
 
 ################################################################################
@@ -433,5 +662,16 @@ Example:
 
 from craco import visibility_inject_pulse as VIP
 
-vis_1ps_disp = VIP.gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spectrum, apparent_stokes_intensity=None, ignore_w=True, spwind=0, polind=0, outfmt='craco')
+# To generate dispersed visibilities using plan
+
+vis_1ps_disp = VIP.gen_dispersed_vis_1PS_from_plan(plan, src_ra_deg, src_dec_deg, dynamic_spectrum, apparent_stokes_intensity=None, ignore_w=True, phase_centering=True, spwind=0, polind=0, outfmt='craco')
+
+# To write one time record onto an uvfits file using an input uvfits template but baselines from CRACO plan and WCS in CRACO plan
+
+VIP.writevis_1PS_from_uvfits(uvfits_infile, uvfits_outfile_on_pc, plan.phase_center.ra.deg, plan.phase_center.dec.deg, method='plan', plan=plan, ignore_w=False, phase_centering=True, use_plan_baselines=True)
+
+# To write one time record onto an uvfits file using an input uvfits template and baselines from input uvfits file but WCS from CRACO plan
+
+VIP.writevis_1PS_from_uvfits(uvfits_infile, uvfits_outfile_off_pc, candidate_ra_deg, candidate_dec_deg, method='plan', plan=plan, ignore_w=False, phase_centering=True, use_plan_baselines=False)
+
 """
