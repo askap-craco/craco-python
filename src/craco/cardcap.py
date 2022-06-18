@@ -238,7 +238,11 @@ class FpgaCapturer:
 
         self.rx = rx
         rx.checkImmediate = False
+        # override packet sequence number
+        rx.packetSequenceNumber = 0
         psn = rx.getPacketSequenceNumber()
+        assert psn == 0
+        
         qpn = rx.getQueuePairNumber()
         gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
         gids = '-'.join([f'{x:d}' for x in gid])
