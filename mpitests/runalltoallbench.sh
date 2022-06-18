@@ -12,5 +12,8 @@ which osu_alltoall
 # WHich, if you look at the ethtoo  -S counters, it  clearly is. This is a good thing
 
 echo UCX_TLS=$UCX_TLS
-mpirun -v -map-by ppr:1:node  -mca pml ucx   -x UCX_TLS=$UCX_TLS  -x UCX_IB_GID_INDEX=0  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:262144 -f
+export UCX_IB_GID_INDEX=0
+echo UCX_IB_GID_INDEX=$UCX_IB_GID_INDEX
+
+mpirun -v -map-by ppr:1:node  -mca pml ucx   -x UCX_TLS  -x UCX_IB_GID_INDEX  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:4000000 -f
 
