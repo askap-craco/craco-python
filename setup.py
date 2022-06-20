@@ -63,7 +63,9 @@ if __name__ == '__main__':
                                 'pipeline=craco.pipeline:_main',
                                 'cardcap=craco.cardcap:_main',
                                 'search_pipeline=craco.search_pipeline:_main',
-                                'ccapfits2np=craco.ccapfits2np:_main']
+                                'ccapfits2np=craco.ccapfits2np:_main',
+                                'ifstats=craco.ifstats:_main',
+            ]
         },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',
