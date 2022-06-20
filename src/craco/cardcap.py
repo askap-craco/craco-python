@@ -507,9 +507,10 @@ class CardCapturer:
         hdr['IOCVER'] = (iocversion, "IOC version for block")
         hdr['HOST'] = (socket.gethostname(), 'Capture host name')
         self.hdr = hdr
-        self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
-        self.pvhdr('md2:scanId_O', 'SCANID','Scan ID from metadata')
-        self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID rom metadata')
+        if values.prefix != 'ma':
+            self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
+            self.pvhdr('md2:scanId_O', 'SCANID','Scan ID from metadata')
+            self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID rom metadata')
 
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
@@ -564,6 +565,7 @@ class CardCapturer:
     def stop(self):
         if self.primary:
             self.ctrl.stop()
+            time.sleep(1) # wait for it to stop - takes 110ms
 
     def configure(self):
         if self.primary:
@@ -672,7 +674,6 @@ def _main():
         if rank == 0:
             ctrl = CracoEpics(values.prefix+':')
             ctrl.stop()
-            time.sleep(1)
             
         comm.Barrier()
 
@@ -734,6 +735,7 @@ def _main():
         my_values.card = values.card[0]
         my_values.block = values.block[0]
         ccap = CardCapturer(my_values, primary)
+        ccap.stop()
         ccap.configure()
         ccap.start()
         ccap.do_writing()
