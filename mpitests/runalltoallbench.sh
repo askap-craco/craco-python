@@ -15,5 +15,5 @@ echo UCX_TLS=$UCX_TLS
 export UCX_IB_GID_INDEX=0
 echo UCX_IB_GID_INDEX=$UCX_IB_GID_INDEX
 
-mpirun -v -map-by ppr:1:node  -mca pml ucx   -x UCX_TLS  -x UCX_IB_GID_INDEX  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:4000000 -f
+mpirun -v -map-by ppr:1:node  -mca pml ucx   -x UCX_TLS  -x UCX_IB_GID_INDEX  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:8000000 -f
 

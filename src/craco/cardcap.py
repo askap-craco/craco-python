@@ -63,7 +63,7 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
 ]
 
 class CardcapFile:
-    def __init__(self, fname):
+    def __init__(self, fname, workaround_craco63=False):
         self.fname = fname
         hdr1  = fits.getheader(fname)
         mainhdr = fits.getheader(fname, 1)
@@ -76,6 +76,7 @@ class CardcapFile:
         self.hdr1 = hdr1
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
+        self.workaround_craco63 = workaround_craco63
 
     @property
     def frequencies(self):
@@ -99,6 +100,9 @@ class CardcapFile:
         with open(self.fname) as f:
             f.seek(self.hdr_nbytes)
             packets = np.fromfile(f, dtype=self.dtype, count=count)
+            if self.workaround_craco63:
+                shift = -1
+                packets['data'] = np.roll(packets['data'], shift, axis=0)
         
         return packets
 
@@ -257,17 +261,15 @@ class FpgaCapturer:
         hdr.setup(src_mac, dst_mac, qpn, psn)
         hbytes = bytes(hdr.to_array(True))
         hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-        with open(f'header_fpga{fpga}.txt', 'w') as fout:
-            fout.write(hstring)
+        #with open(f'header_fpga{fpga}.txt', 'w') as fout:
+        #    fout.write(hstring)
         
-        with open(f'header_{fpga}.bin','wb') as fout:
-            fout.write(hbytes)
+        #with open(f'header_{fpga}.bin','wb') as fout:
+        #    fout.write(hbytes)
 
         hint = np.zeros(hdr_size, dtype=np.uint32)
         beam0_header = list(np.frombuffer(hbytes, dtype=np.uint32))
         hint[:len(beam0_header)] = beam0_header
-        print(list(map(hex,beam0_header)))
-
                 
         rdma_buffers = []
         self.rdma_buffers = rdma_buffers
@@ -275,7 +277,7 @@ class FpgaCapturer:
             m = rx.get_memoryview(iblock)
             mnp = np.frombuffer(m, dtype=ccap.packet_dtype)
             mnp[:] = 0
-            mnp.shape = (num_cmsgs, npacket_per_msg)
+            mnp.shape = ccap.msg_shape
             log.debug('iblock %d shape=%s size=%d', iblock, mnp.shape, mnp.itemsize)
             rdma_buffers.append(mnp)
 
@@ -298,6 +300,7 @@ class FpgaCapturer:
         self.total_completions = 0
         self.total_missing = 0
         self.total_bytes = 0
+        self.craco63_last = 0
 
     def issue_requests(self):
         rx = self.rx
@@ -343,26 +346,36 @@ class FpgaCapturer:
             # now it is data for each message
             message_index = index%num_cmsgs
             d = self.rdma_buffers[block_index][message_index]
-
-            fid = d['frame_id'][-1]
+            fid = d['frame_id'][0, 0]
             if self.curr_fid is None:
                 fid_diff = 0
             else:
                 fid_diff = fid - self.curr_fid
                 
-            
             if immediate != expected_immediate:
                 self.total_missing += diff
-                print(f'{self.values.block}/{self.values.card}/{self.fpga} imm={immediate}={hex(immediate)} fid={fid}={hex(fid)} fid_diff={fid_diff}expected={expected_immediate} Diff={diff}  nmiss={self.total_missing} nbytes={nbytes}')
+                log.critical(f'MISSED PACKET: {self.values.block}/{self.values.card}/{self.fpga} imm={immediate}={hex(immediate)} fid={fid}={hex(fid)} fid_diff={fid_diff}expected={expected_immediate} Diff={diff}  nmiss={self.total_missing} nbytes={nbytes}')
             
 
             self.curr_imm = immediate
             self.curr_fid = fid
-            
-            #w.write(d[:nbytes]) # write to fitsfile
+
+            if self.ccap.values.workaround_craco63:
+                d['data'] = np.roll(d['data'], shift=-1, axis=0)
+
+            if self.ccap.values.tscrunch != 1:
+                # OK this is slow, but it works
+                dout = np.empty(d.shape[0], dtype=d.dtype)
+                for field in ('frame_id','bat','beam_number','sample_number','channel_number','fpga_id','nprod','flags','zero1','version','zero3'):
+                    dout[field] = d[field][:,0]
+
+                dout['data'] = d['data'].mean(axis=1, dtype=np.float32).astype(np.int16)
+                d = dout
+
             if beam is not None:
                 mask = d['beam_number'] == beam 
                 d = d[mask]
+
 
             if w is not None:
                 w.write(d) # write to fitsfield
@@ -399,19 +412,31 @@ class CardCapturer:
         if include_autos:
             nbl += nant
 
-        npacket_per_msg= nbeam*nchan*nint_per_frame
+        if values.pol_sum: # if polsum is enabled, we get 2 integrations per set of debug headers
+            nint_per_packet = 2
+        else:
+            nint_per_packet = 1
 
-        if values.pol_sum:
-            npacket_per_msg //= 2
+        nintpacket_per_frame = nint_per_frame // nint_per_packet # number of integrations per frame
+        npacket_per_msg= nbeam*nchan*nintpacket_per_frame
             
         enable_debug_header = values.debug_header
         packet_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum)
         self.packet_dtype = packet_dtype
         msg_size = packet_dtype.itemsize*npacket_per_msg
-        self.msg_size = msg_size
-        self.npacket_per_msg = npacket_per_msg
         num_blks = values.num_blks
         num_cmsgs = values.num_cmsgs
+
+        self.msg_size = msg_size
+        self.npacket_per_msg = npacket_per_msg
+        self.nbeam = nbeam
+        self.nchan = nchan
+        self.nint_per_frame = nint_per_frame
+        self.nint_per_packet = nint_per_packet
+        self.nintpacket_per_frame = nintpacket_per_frame
+        self.nintout_per_frame = nintpacket_per_frame // self.values.tscrunch
+        self.msg_shape = (num_cmsgs, self.nbeam*self.nchan, self.nintpacket_per_frame)
+        self.out_shape = (self.nbeam*self.nchan, self.nintout_per_frame)
         nmsg = 1000000
         shelf = values.block
         card = values.card
@@ -506,6 +531,17 @@ class CardCapturer:
         hdr['DSPVER'] = (dspversion, 'Block DSP version')
         hdr['IOCVER'] = (iocversion, "IOC version for block")
         hdr['HOST'] = (socket.gethostname(), 'Capture host name')
+        hdr['MSG_SIZE'] = (msg_size, 'Number of bytes in a message')
+        hdr['NPCKMSG'] =  (self.npacket_per_msg, 'Number of debug header packets per message')
+        hdr['NBEAM'] = (self.nbeam, 'Number of beams being downlaoded (always 36)')
+        hdr['NCHAN'] = (self.nchan, 'Number of channels per FPGA (4)')
+        hdr['NTPFM'] = (self.nint_per_frame, 'Total number of integrations per frame')
+        hdr['NTPKFM'] = (self.nintpacket_per_frame, 'Total number of packet integrations per frame')
+        hdr['MSGSHAPE'] = (str(self.msg_shape), 'Shape of a message buffer')
+        hdr['TSCRUNCH'] = (self.values.tscrunch, 'Tscrunch factor')
+        hdr['OUTSHAPE'] = (str(self.out_shape), 'Shape of file output')
+        hdr['NTOUTPFM'] = (self.nintout_per_frame, 'Number of output integraitons per frame, after tscrunch')
+        
         self.hdr = hdr
         if values.prefix != 'ma':
             self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
@@ -523,6 +559,7 @@ class CardCapturer:
             thedir = os.path.dirname(values.outfile)
             if len(thedir.strip()) > 0:
                 os.makedirs(thedir, exist_ok=True)
+
             self.fitsout = FitsTableWriter(self.values.outfile, self.packet_dtype, self.byteswap, self.hdr)
         else:
             self.fitsout = None
@@ -546,6 +583,7 @@ class CardCapturer:
         except KeyboardInterrupt as e:
             print(f'Closing due to ctrl-C')
         finally:
+            self.stop(wait=False)
             self.finish_time = time.process_time()
 
             self.report_stats()
@@ -562,10 +600,11 @@ class CardCapturer:
             #ctrl.start_shelf(shelf, [card])
             self.ctrl.start()
 
-    def stop(self):
+    def stop(self, wait=True):
         if self.primary:
             self.ctrl.stop()
-            time.sleep(1) # wait for it to stop - takes 110ms
+            if wait:
+                time.sleep(1) # wait for it to stop - takes 110ms
 
     def configure(self):
         if self.primary:
@@ -636,7 +675,9 @@ def _main():
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
     parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser (0-11)', type=int, default=11)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
+    parser.add_argument('--tscrunch', help='Tscrunch by this factor before saving', type=int, default=1, choices=(1,2,4,8,16,32,64))
     parser.add_argument('--mpi', action='store_true', help='RunMPI version', default=False)
+    parser.add_argument('--workaround-craco63', action='store_true', help='CRACO63 workaround', default=False)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -687,7 +728,6 @@ def _main():
 
             devices = ['mlx5_0', 'mlx5_1']
             devidx = my_fpga % 2
-            devidx = 0
             my_values.device = devices[devidx]
 
 
