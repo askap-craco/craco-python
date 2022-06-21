@@ -117,7 +117,7 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     Whether sum_pols is true or false, a single packet always contiains 2xnbl entries. This is how
     John's firmware works.
 
-    if sum_pols is True, npol=1, nint=2
+    if su m_pols is True, npol=1, nint=2
     if sum_pols is False, npol=2, nint=1
     
     '''
