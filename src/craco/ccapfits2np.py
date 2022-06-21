@@ -21,6 +21,7 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-c','--count', help='Number of packets to save (-1 is all)', default=-1, type=int)
+    parser.add_argument('-w','--workaround-craco63', action='store_true', default=False, help='Do craco63 workarond roll back by -1')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -30,7 +31,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     for f in values.files:
-        ccap = CardcapFile(f)
+        ccap = CardcapFile(f, values.workaround_craco63)
         packets = ccap.load_packets(count=values.count)
         fout = f.replace('.fits','.npy')
         print(f'saving {f} to {fout}')
