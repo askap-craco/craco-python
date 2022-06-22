@@ -30,6 +30,7 @@ from craco.epics.craco import Craco as CracoEpics
 from astropy.time import Time
 from astropy.io import fits
 from craco import leapseconds
+import ast
 
 log = logging.getLogger(__name__)
 
@@ -77,11 +78,12 @@ class CardcapFile:
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
+        self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
 
     @property
-    def frequencies(self):
+    def card_frequencies(self):
         '''
-        Returns a numpy array of channel frequencies for all FPGAs and channels in a card
+        Returns a numpy array of channel frequencies for all FPGAs and channels in this card
         
         :returns: np array with shape (NFPGA, NCHAN) with values in MHz
         '''
@@ -94,11 +96,83 @@ class CardcapFile:
                 f[fpga, chan] = fch1 + foff_chan*chan + foff_fpga*fpga
 
         return f
-        
 
-    def load_packets(self, count=-1):
+    @property
+    def frequencies(self):
+        '''
+        Returns a numpy array of channel frequencies for only the FPGAs and channels in this file
+        :returns: numpy array of shape [len(self.fpgas), NCHAN]
+        '''
+        this_file_fpgas = self.fpgas
+        this_file_freqs = self.card_frequencies[this_file_fpgas - 1, :]
+        return this_file_freqs
+
+    @property
+    def nbeam(self):
+        '''
+        Number of beams in this file
+        '''
+        hnbeam = self.mainhdr['BEAM']
+        if hnbeam == -1:
+            nbeam = 36
+        else:
+            nbeam = 1
+        return nbeam
+
+    @property
+    def npol(self):
+        npol = 1 if self.polsum else 2
+        return npol
+
+    @property
+    def fpgas(self):
+        '''Returns a list of fpgas in this file (1 based)'''
+        fstr = self.mainhdr['FPGA']
+        fpga = ast.literal_eval(fstr)
+        print(fstr, fpga)
+        
+        return np.array(fpga, dtype=np.int)
+
+
+    @property
+    def bat0(self):
+        '''
+        Returns first BAT in the file
+        '''
+        return self.pkt0['bat'][0]
+
+    @property
+    def frame_id0(self):
+        '''
+        Returns first frameid in teh file
+        '''
+        return self.pkt0['frame_id'][0]
+
+    def packet_iter(self, npackets=1):
+        '''
+        Returns an interator that interates through the packets in blocks of npackest
+        :npackets: number of packets per block
+        '''
+
         with open(self.fname) as f:
             f.seek(self.hdr_nbytes)
+
+            while True:
+                packets = np.fromfile(f, dtype=self.dtype, count=npackets)
+                if len(packets) != npackets:
+                    break
+                
+                if self.workaround_craco63:
+                    shift = -1
+                    packets['data'] = np.roll(packets['data'], shift, axis=0)
+
+                yield packets
+
+            
+    
+    def load_packets(self, count=-1, pktoffset=0):
+        with open(self.fname) as f:
+            f.seek(self.hdr_nbytes + self.dtype.itemsize*pktoffset)
             packets = np.fromfile(f, dtype=self.dtype, count=count)
             if self.workaround_craco63:
                 shift = -1
