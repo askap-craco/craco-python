@@ -65,6 +65,7 @@ if __name__ == '__main__':
                                 'search_pipeline=craco.search_pipeline:_main',
                                 'ccapfits2np=craco.ccapfits2np:_main',
                                 'ifstats=craco.ifstats:_main',
+                                'ccapmerger=craco.cardcapmerger:_main',
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
