@@ -98,6 +98,13 @@ class CardcapFile:
         return f
 
     @property
+    def syncbat(self):
+        '''
+        Returns sync bat as an int
+        '''
+        return int(self.mainhdr['SYNCBAT'], 16)
+
+    @property
     def frequencies(self):
         '''
         Returns a numpy array of channel frequencies for only the FPGAs and channels in this file
@@ -147,6 +154,26 @@ class CardcapFile:
         Returns first frameid in teh file
         '''
         return self.pkt0['frame_id'][0]
+
+    @property
+    def mjd0(self):
+        '''
+        Returns astropy time of the first frame in the file
+
+        :returns: Astropy Time Formatted as an mjd with scale=tai
+        '''
+        return self.time_of_frame_id(self.frame_id0)
+
+    def time_of_frame_id(self, frame_id):
+        '''
+        Returns an astropy time of the given frame ID
+
+        :returns: Astropy Time Formatted as an mjd with scale=tai
+        '''
+        bat_of_frame_id = self.syncbat + int(frame_id)*27*2 # actually its frame_id * 27/32 * 64
+        frame_id_t = Time(bat_of_frame_id / 1e6 / 3600 / 24, format='mjd', scale='tai')
+        return frame_id_t
+        
 
     def packet_iter(self, npackets=1):
         '''
@@ -420,7 +447,7 @@ class FpgaCapturer:
             # now it is data for each message
             message_index = index%num_cmsgs
             d = self.rdma_buffers[block_index][message_index]
-            fid = d['frame_id'][0, 0]
+            fid = d['frame_id'][0, 0] # Frame ID is the frame ID of the first sample of the intgration, according ot John Tuthill
             if self.curr_fid is None:
                 fid_diff = 0
             else:

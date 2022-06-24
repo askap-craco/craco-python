@@ -35,26 +35,21 @@ def frame_id_iter(i, fid0, fidoff):
     assert isinstance(fid0, np.uint64)
     currblock = None
     while True:
-        try:
-            if currblock is None or currblock['frame_id'][0] < frame_id:
-                currblock = next(i)
+        if currblock is None or currblock['frame_id'][0] < frame_id:
+            currblock = next(i)
 
-            curr_bat = currblock['bat'][0]
-            curr_frameid = currblock['frame_id'][0]
+        curr_bat = currblock['bat'][0]
+        curr_frameid = currblock['frame_id'][0]
 
-            if curr_frameid == frame_id:
-                b = currblock
-                log.debug(f'HIT frame_id={frame_id} hit {curr_bat}')
-            else:
-                log.debug(f'MISS frame_id={frame_id} {curr_frameid} {curr_bat}')
-                b = None
+        if curr_frameid == frame_id:
+            b = currblock
+            log.debug(f'HIT frame_id={frame_id} hit {curr_bat}')
+        else:
+            log.debug(f'MISS frame_id={frame_id} {curr_frameid} {curr_bat}')
+            b = None
 
-            frame_id += fidoff
-            
-        except StopIteration:
-            b = False
-
-        yield b
+        frame_id += fidoff
+        yield curr_frameid, b
 
 class CcapMerger:
     def __init__(self, fnames):
@@ -74,37 +69,92 @@ class CcapMerger:
             all_freqs[ic, :, :] = c.frequencies
             
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
-        print(fidxs)
         self.fidxs = fidxs
         self.frame_id0 = min(frame_ids)
         self.tscrunch = self.ccap[0].mainhdr['TSCRUNCH']
         self.nbeam = self.ccap[0].nbeam
-        self.nchan = all_freqs.size
         self.nbl = self.ccap[0].mainhdr['NBL']
-        self.npol = self.ccap[0].npol
+        self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nint = 1 # TODO: Fix
 
+    @property
+    def fcent(self):
+        '''
+        Returns center frequency - units of MHz
+        '''
+        return self.all_freqs.mean()
+
+    @property
+    def foff(self):
+        '''
+        Returns channel interval - MHz
+        '''
+        fsort = np.array(sorted(self.all_freqs.flat))
+        fdiff = fsort[1:] - fsort[:-1]
+        foff = fdiff.mean()
+        return foff
+
+    @property
+    def nchan(self):
+        return self.all_freqs.size
+
+    @property
+    def npol(self):
+        return self.__npol
+
+    @property
+    def mjd0(self):
+        t = self.ccap[0].time_of_frame_id(self.frame_id0)
+        log.debug(f'MJD0 for {self.ccap[0].fname} is {t}')
+        return t
+
+    @property
+    def nant(self):
+        n = self.ccap[0].mainhdr['NANT']
+        return n
+
+    @property
+    def inttime(self):
+        t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].mainhdr['TSCRUNCH']
+        return t
+    
+    def fid_to_mjd(self, fid):
+        return self.ccap[0].time_of_frame_id(fid)
 
     def block_iter(self):
         '''
         Returns an iterator that returns blocks of data
-        Blocks have shape (nbeam, nchan, nint, nbaseline, npol, 2), dtype=np.int16 and are masked arrays
+        Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
         packets_per_block = 36*4 # TODO: work out how to work this out
         fidoff = 2048
+
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
+        
         while True:
-            packets = [next(i) for i in iters]
-            finished = all([p == False for p in packets])
+            packets = []
+            finished_array = []
+            for i in iters:
+                try:
+                    packets.append(next(i))
+                    finished_array.append(False)
+                except StopIteration:
+                    finished_array.append(True)
+                    
+            flagged_array = [p[1] is None for p in packets]
+            fids = [p[0] for p in packets]
+            finished = all(finished_array)
+            log.debug('Finished %s %s - flagged %s FIDS=%s', finished, finished_array, flagged_array, fids)
+            
             if finished:
                 break
 
             shape = (self.nchan, self.nbeam, self.nint, self.nbl, self.npol, 2)
             dout = np.zeros(shape, dtype=np.int16)
             mask = np.zeros(shape, dtype=np.bool)
-            for ip, p in enumerate(packets):
+            for ip, (fid, p) in enumerate(packets):
                 assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
                 freqidx = self.fidxs[ip,0,:]
                 if p is None:
@@ -116,11 +166,12 @@ class CcapMerger:
                     blk1.shape = (4,32)
                     blk2 = p[32*4:]
                     blk2.shape = (4,4)
-                    print(dout.shape, blk1['data'].shape, blk2['data'].shape)
                     dout[freqidx, :32, ...] = blk1['data']
                     dout[freqidx, 32:, ...] = blk2['data']
+
+            dout = np.ma.masked_array(dout,mask)
                 
-            yield dout
+            yield (fid, dout)
             
             
 
@@ -137,7 +188,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     merger = CcapMerger(values.files)
-    for blk in merger.block_iter():
+    for fid, blk in merger.block_iter():
         print(blk.shape)
     
     
