@@ -65,9 +65,13 @@ class MetadataFile:
         # Keys for eeach etnry are:
         #dict_keys(['antenna_targets', 'antennas', 'beams_direction', 'beams_offsets', 'cycle_period', 'flagged', 'phase_direction', 'polangle', 'polmode', 'sbid', 'scan_id', 'schedulingblock_id', 'sky_frequency', 'target_direction', 'target_name', 'timestamp'])
 
-
-    def flags_at_time(self, time):
-        return self.flag_interp(time)
+    def flags_at_time(self, time : float):
+        '''
+        Returns the flags applicable at the time
+        :returns: np array of length nant with True if flagged
+        '''
+        flags = self.flag_interp(time) == 1.0
+        return flags
 
     def uvw_at_time(self, time : float):
         '''

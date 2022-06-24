@@ -136,8 +136,6 @@ class CardcapFile:
         '''Returns a list of fpgas in this file (1 based)'''
         fstr = self.mainhdr['FPGA']
         fpga = ast.literal_eval(fstr)
-        print(fstr, fpga)
-        
         return np.array(fpga, dtype=np.int)
 
 

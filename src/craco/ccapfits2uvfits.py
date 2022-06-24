@@ -55,7 +55,6 @@ def _main():
     nant = merge.nant
     inttime = merge.inttime
     source = 1 # TODO
-    print(md.sources(beam))
 
     try:
         for iblk, (fid, blk) in enumerate(merge.block_iter()):
@@ -67,13 +66,16 @@ def _main():
             blidx = 0
             mjd = merge.fid_to_mjd(fid)
             uvw = md.uvw_at_time(mjd.value)/scipy.constants.c
+            antflags = md.flags_at_time(mjd.value)
+
             for ia1 in range(nant):
                 for ia2 in range(ia1, nant):
-
                     uvwdiff = uvw[ia1,beam,:] - uvw[ia2,beam,:] 
-                    
                     dblk = blk[:, beam,0,blidx,:,:]
                     wblk = weights[:, beam, 0, blidx, :, 0] # real and imaginary part should have same flag
+                    if antflags[ia1] or antflags[ia2]:
+                        wblk[:] = 0
+                        
                     uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source)
                     blidx += 1
     finally:
