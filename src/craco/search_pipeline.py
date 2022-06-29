@@ -63,16 +63,32 @@ def make_fft_config(nplanes:int,
                     bypass_stage2:bool = False) -> int:
     '''
     Generates the FFT config word to execute the FFT.
+
     The layout of this word I got from unzipping fft2d_v2020.2_rtl_d09062021.xo
-    And lookint at TEST_SystyolicFFT2D.vhd and fft2d.v, and the result is
+    And lookin at TEST_SystyolicFFT2D.vhd and fft2d.v, and the result is
     bit 0 - if 1, bypass stage 1 FFT
     bit 1 - if 1, bypass tranpsose stage
     bit 2 - if 1, bypass stage 2 FFT
-    bit 3-5 - shifting to apply at input of the first stage FFT
-    bit 6-8 - shifting to apply at input of the 2nd stage FFT
+    bit 3-5 - shifting RIGHT apply at input of the first stage FFT
+    bit 6-8 - shifting LEFT to apply at input of the 2nd stage FFT
     bits 16-31 - number of planes to process
 
-    @returns FFT config word
+    Note: the shift values operate in OPPOSITE SENSES for the 1st and 2nd stage. 
+    In the first stage, it shifts RIGHT (i.e. divides by 2^N). In the 2nd stage
+    it shifts LEFT (I.e. multiplies by 2^N). 
+    With both scale factors equal to zero (i.e. no scaling) the output equals 
+    the sum of the inputs times 2^{-10} which implies there's 5 bits of round/truncation happening
+    in each FFT stage.
+
+
+    :nplanes: Number of FFTs to do in this invocation
+    :stage1_scale: Shift input LEFT by stage1_scale bits before 1st stage
+    :stage2_scale: Shift intermediate data RIGHT by stage2_scale bits before 2nd stage
+    :bypass_stage1: Set to True to bypass stage 1 FFT
+    :bypass_stage2: Set to True to bypass stage 2 FFT
+    :bypass_transpose: Set to Try to bypass transpose
+
+    :returns: FFT config word
     '''
     assert 0 < nplanes < 1<<16
     assert 0 <= stage1_scale < 1<<3
@@ -422,7 +438,7 @@ class Pipeline:
 
         log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x}\n')
 
-        assert ndm < 1024 # It hangs for ndm=1024 - not sure why.
+        assert ndm < 1024,' It hangs for ndm=1024 - not sure why.'
 
         starts = []
 
@@ -663,7 +679,7 @@ def get_parser():
     parser.add_argument('--input-scale', type=float, help='Multiply input by this scale factor before rounding to int16', default=1.0)
     parser.add_argument('-F', '--fft_scale',     type=float, help='Scale FFT output by this amount. If both scales are 1, the output equals the value of frb_amp for crauvfrbsim.py')
     parser.add_argument('--fft-shift1', type=int, help='Shift value for FFT1', default=0)
-    parser.add_argument('--fft-shift2', type=int, help='Shift value for FFT2', default=7)
+    parser.add_argument('--fft-shift2', type=int, help='Shift value for FFT2', default=0)
     parser.add_argument('-C','--cand-file', help='Candidate output file txt', default='candidates.txt')
     parser.add_argument('--dump-mainbufs', type=int, help='Dump main buffer every N blocks', metavar='N')
     parser.add_argument('--dump-fdmt-hist-buf', type=int, help='Dump FDMT history buffer every N blocks', metavar='N')
