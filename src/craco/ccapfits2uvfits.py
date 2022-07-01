@@ -14,18 +14,34 @@ import logging
 from craco.cardcapmerger import CcapMerger
 from craft.corruvfits import CorrUvFitsFile
 from craco.metadatafile import MetadataFile
+from craft.parset import Parset
 import scipy
+from collections import namedtuple
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+def get_antennas(pset):
+    Antenna = namedtuple('Antenna',('antname','antpos'))
+    ants = []
+    for antno in range(1,36+1):
+        poskey = f'common.antenna.ant{antno}.location.itrf'
+        pos = tuple(map(float, pset[poskey]))
+        namekey = f'common.antenna.ant{antno}.name'
+        name = pset[namekey]
+        ant = Antenna(antname=name, antpos=pos)
+        ants.append(ant)
+
+    return ants
+        
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Converts cardcap to UVFITS', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
-    parser.add_argument('-o','--output', help='Output fits file')
+    parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file', required=True)
+    parser.add_argument('-f', '--fcm', help='Path to FCM file for antenna positions', required=True)
+    parser.add_argument('-o','--output', help='Output fits file', default='output.uvfits')
     parser.add_argument('-N','--nblocks', help='Maximum number of blocks to write', default=-1, type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
@@ -37,11 +53,15 @@ def _main():
 
     md = MetadataFile(values.metadata)
     merge = CcapMerger(values.files)
-    antennas = [] # TODO
+    nbeam = merge.nbeam
 
+    antnos = merge.antnos
     beam = 0 # TODO
     source_list = list(md.sources(beam).values())
-
+    fcm = Parset.from_file(values.fcm)
+    antennas = get_antennas(fcm)
+    log.debug('FCM %s contained %d antennas %s', values.fcm, len(antennas), antennas)
+    
     uvout = CorrUvFitsFile(values.output,
                            merge.fcent,
                            merge.foff,

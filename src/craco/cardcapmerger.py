@@ -60,8 +60,8 @@ class CcapMerger:
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
         frame_ids = [c.frame_id0 for c in self.ccap]
         bats = [c.bat0 for c in self.ccap]
-        log.debug('Frame IDs', frame_ids)
-        log.debug('bats', bats)
+        log.debug('Frame IDs %s', frame_ids)
+        log.debug('bats %s', bats)
         
 
         for ic, c in enumerate(self.ccap):
@@ -108,6 +108,17 @@ class CcapMerger:
         t = self.ccap[0].time_of_frame_id(self.frame_id0)
         log.debug(f'MJD0 for {self.ccap[0].fname} is {t}')
         return t
+
+    @property
+    def antnos(self):
+        '''
+        Returns a list 1-based of antenna numbers that are used in this file
+
+        By default (and currently) it returns 1-nant
+        '''
+        antnos = [a+1 for a in range(self.nant)]
+        return antnos
+        
 
     @property
     def nant(self):
