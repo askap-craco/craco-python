@@ -37,7 +37,7 @@ class NetInterface:
 
     def poll_stats(self, values):
         d = self.get_statistics()
-        counts = ('rx_discards_phy','tx_pause_ctrl_phy','tx_global_pause','rx_global_pause')
+        counts = ('rx_discards_phy','tx_pause_ctrl_phy','tx_global_pause','rx_global_pause', 'rx_prio3_pause','rx_prio3_pause_duration','tx_prio3_pause','tx_prio3_pause_duration')
         print(self.ifname, values.field, '(Gbps) ', ' '.join(counts))
 
         while True:
@@ -47,9 +47,7 @@ class NetInterface:
             diffpersec = diff / values.sleep
             scale = 8/1e9
             dout = diffpersec * scale
-
-            countvalues = [ddiff(d,dnext, cf) for cf in counts]
-
+            countvalues = [ddiff(d, dnext, cf) for cf in counts]
             print(f'{dout:0.1f}', ' '.join(map(str,countvalues)))
             d = dnext
 
@@ -58,7 +56,12 @@ class NetInterface:
     
 
 def ddiff(d1, d2, f):
-    return d2[f] - d1[f]
+    try:
+        d = d2[f] - d1[f]
+    except KeyError:
+        d = 'X'
+
+    return d
             
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
