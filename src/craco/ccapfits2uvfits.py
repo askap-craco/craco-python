@@ -17,6 +17,7 @@ from craco.metadatafile import MetadataFile
 from craft.parset import Parset
 import scipy
 from collections import namedtuple
+from astropy import units as u
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ def _main():
     parser.add_argument('-f', '--fcm', help='Path to FCM file for antenna positions', required=True)
     parser.add_argument('-o','--output', help='Output fits file', default='output.uvfits')
     parser.add_argument('-N','--nblocks', help='Maximum number of blocks to write', default=-1, type=int)
+    parser.add_argument('-D','--dtype', help='Data type of output', type=np.dtype, default=np.float32)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -50,6 +52,8 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+    print(f'Dtype {values.dtype} {type(values.dtype)}')
 
     md = MetadataFile(values.metadata)
     merge = CcapMerger(values.files)
@@ -61,6 +65,16 @@ def _main():
     fcm = Parset.from_file(values.fcm)
     antennas = get_antennas(fcm)
     log.debug('FCM %s contained %d antennas %s', values.fcm, len(antennas), antennas)
+
+    # fits format is for UVW in seconds
+    # we set the scale parameter in the firts format to max out the integers for
+    # the longest baseline
+
+    bmax = 6e3*u.meter
+    nant = merge.nant
+    inttime = merge.inttime
+    source = 1 # TODO
+
     
     uvout = CorrUvFitsFile(values.output,
                            merge.fcent,
@@ -70,11 +84,12 @@ def _main():
                            merge.mjd0.value,
                            source_list,
                            antennas,
-                           instrume='CRACO')
+                           instrume='CRACO',
+                           output_dtype=values.dtype,
+                           bmax=bmax,
+                           time_scale=inttime*u.second
+    )
 
-    nant = merge.nant
-    inttime = merge.inttime
-    source = 1 # TODO
 
     try:
         for iblk, (fid, blk) in enumerate(merge.block_iter()):
@@ -85,7 +100,7 @@ def _main():
             weights = 1-blk.mask.astype(np.float32) # 0 if flagged. 1 if OK.
             blidx = 0
             mjd = merge.fid_to_mjd(fid)
-            uvw = md.uvw_at_time(mjd.value)/scipy.constants.c
+            uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
 
             for ia1 in range(nant):
@@ -96,7 +111,7 @@ def _main():
                     if antflags[ia1] or antflags[ia2]:
                         wblk[:] = 0
                         
-                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source)
+                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source, t=iblk)
                     blidx += 1
     finally:
         uvout.close()
