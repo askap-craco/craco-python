@@ -66,6 +66,8 @@ if __name__ == '__main__':
                                 'ccapfits2np=craco.ccapfits2np:_main',
                                 'ifstats=craco.ifstats:_main',
                                 'ccapmerger=craco.cardcapmerger:_main',
+                                'metadatafile=craco.metadatafile:_main',
+                                'ccapfits2uvfits=craco.ccapfits2uvfits:_main'
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
