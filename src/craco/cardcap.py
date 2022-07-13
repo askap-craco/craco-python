@@ -621,7 +621,7 @@ class CardCapturer:
             self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
             self.pvhdr('md2:scanId_O', 'SCANID','Scan ID from metadata')
             self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID rom metadata')
-
+            self.pvhdr('ak:F_options:altFirmwareDir_O', 'FWDIR', 'Alternate firmware directory')
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
         self.configure_args  = (fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
