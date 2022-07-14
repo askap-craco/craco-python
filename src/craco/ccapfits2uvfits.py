@@ -72,8 +72,10 @@ def _main():
 
     bmax = 6e3*u.meter
     nant = merge.nant
-    inttime = merge.inttime
+    inttime = merge.inttime # seconds
     source = 1 # TODO
+
+    tstart = merge.mjd0.value + inttime/3600/24 / 2
 
     
     uvout = CorrUvFitsFile(values.output,
@@ -81,7 +83,7 @@ def _main():
                            merge.foff,
                            merge.nchan,
                            merge.npol,
-                           merge.mjd0.value,
+                           tstart,
                            source_list,
                            antennas,
                            instrume='CRACO',
