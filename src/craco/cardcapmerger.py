@@ -36,7 +36,10 @@ def frame_id_iter(i, fid0, fidoff):
     currblock = None
     while True:
         if currblock is None or currblock['frame_id'][0] < frame_id:
-            currblock = next(i)
+            try:
+                currblock = next(i)
+            except StopIteration:
+                break
 
         curr_bat = currblock['bat'][0]
         curr_frameid = currblock['frame_id'][0]
@@ -140,6 +143,7 @@ class CcapMerger:
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
         packets_per_block = 36*4 # TODO: work out how to work this out
+        packets_per_block = 4
         fidoff = 2048
 
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
@@ -173,18 +177,21 @@ class CcapMerger:
                     # data is already 0, but now it's masked anyway
                 else:
                     # mask is already false = valid data
-                    blk1 = p[:32*4]
-                    blk1.shape = (4,32)
-                    blk2 = p[32*4:]
-                    blk2.shape = (4,4)
-                    dout[freqidx, :32, ...] = blk1['data']
-                    dout[freqidx, 32:, ...] = blk2['data']
+                    if self.nbeam == 1:
+                        dout[freqidx, 0, ...] = p['data']
+                    else:
+                        # This reshapes for teh beams 0-31 first, then beams 32-35 next
+                        assert self.nbeam == 36
+                        blk1 = p[:32*4] 
+                        blk1.shape = (4,32)
+                        blk2 = p[32*4:]
+                        blk2.shape = (4,4)
+                        dout[freqidx, :32, ...] = blk1['data']
+                        dout[freqidx, 32:, ...] = blk2['data']
 
             dout = np.ma.masked_array(dout,mask)
                 
             yield (fid, dout)
-            
-            
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

@@ -192,8 +192,6 @@ class CardcapFile:
                     packets['data'] = np.roll(packets['data'], shift, axis=0)
 
                 yield packets
-
-            
     
     def load_packets(self, count=-1, pktoffset=0):
         with open(self.fname) as f:
@@ -261,9 +259,12 @@ def ipv6_to_mac(ipv6):
 
     return mac
 
-def mac_to_ipv6(mac):
+def mac_to_ipv6(mac, vid=0xffff):
     '''
     Converts link-local IPV6 address to mac address
+    :mac: Mac address bytes
+    :vid: uint16 vland ID 
+    See https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=af7bd463761c6abd8ca8d831f9cc0ac19f3b7d4b for vlan calc
     '''
     ipv6 = bytearray(16)
 
@@ -280,9 +281,14 @@ def mac_to_ipv6(mac):
     ipv6[8] = mac[0] ^ 0b10; #// Invert bit 6
     ipv6[9] = mac[1];
     ipv6[10] = mac[2];
-    ipv6[11] = 0xff;
+
+    if vid != 0xffff: # add vlan tag
+        ipv6[11] = vid >> 8
+        ipv6[12] = vid & 0xff
+    else:
+        ipv6[11] = 0xff;
+        ipv6[12] = 0xfe;
     
-    ipv6[12] = 0xfe;
     ipv6[13] = mac[3];
     ipv6[14] = mac[4];
     ipv6[15] = mac[5];
@@ -306,6 +312,26 @@ def src_mac_of(shelf, card, fpga):
     mac[5] = fpga % 2 
     
     return mac
+
+def set_vlan(gid, vlan=883):
+    '''
+    No documentaiton anywhere, but apprently vlan is in bytes 12 and 13 of the GID
+    See: https://en.wikipedia.org/wiki/RDMA_over_Converged_Ethernet#Criticism
+    And: https://en.wikipedia.org/wiki/RDMA_over_Converged_Ethernet#Criticism
+    '''
+    assert vlan == 883
+
+    # Vlan 883 is 0x0373
+    # And the array is backwards
+    # And I don't know if it's backwards
+    # idx=0 is "byte 16"
+    # idx=1 is byte 15
+    # idx=2 is byte 14
+    # idx=3 is byte 13
+    # idx=4 is byte 12
+    gid[3] = 0x73
+    gid[4] = 0x03
+    return gid
 
 hdr_size = 36*17 # words
 
@@ -346,22 +372,26 @@ class FpgaCapturer:
         assert psn == 0
         
         qpn = rx.getQueuePairNumber()
-        gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
-        gids = '-'.join([f'{x:d}' for x in gid])
+        dst_gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
+        gids = '-'.join([f'{x:d}' for x in dst_gid])
     
-        log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(gid), gids)
-        dst_mac = bytes(ipv6_to_mac(gid))
+        log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(dst_gid), gids)
+        #dst_mac = bytes(ipv6_to_mac(dst_gid))
+        dst_mac = bytes([0x0c, 0x42, 0xa1, 0x55, 0xc1,0xee]) # enp176s0 on seren-01
         src_mac = bytes(src_mac_of(shelf, card, fpga))
-        src_gid = np.frombuffer(mac_to_ipv6(src_mac), dtype=np.uint8)
+        vid = 0x4373 # probably waht it should be
+        #vid = 0xffff # thsi works if no trunks enabled and no vlans
+        src_gid = np.frombuffer(mac_to_ipv6(src_mac, vid), dtype=np.uint8)
+        
         log.info('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
-        log.info('Src GID %s Dst GID %s', mac_str(src_gid), mac_str(gid))
+        log.info('Src GID %s Dst GID %s', mac_str(src_gid), mac_str(dst_gid))
        
         hdr = roce_packetizer.roce_header()
-        hdr.setup(src_mac, dst_mac, qpn, psn)
+        hdr.setup2(src_mac, dst_mac, src_gid.tobytes(), dst_gid.tobytes(), qpn, psn)
         hbytes = bytes(hdr.to_array(True))
         hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-        #with open(f'header_fpga{fpga}.txt', 'w') as fout:
-        #    fout.write(hstring)
+        with open(f'header_fpga{fpga}.txt', 'w') as fout:
+            fout.write(hstring)
         
         #with open(f'header_{fpga}.bin','wb') as fout:
         #    fout.write(hbytes)

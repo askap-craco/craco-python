@@ -44,7 +44,7 @@ def _main():
     parser.add_argument('-f', '--fcm', help='Path to FCM file for antenna positions', required=True)
     parser.add_argument('-o','--output', help='Output fits file', default='output.uvfits')
     parser.add_argument('-N','--nblocks', help='Maximum number of blocks to write', default=-1, type=int)
-    parser.add_argument('-D','--dtype', help='Data type of output', type=np.dtype, default=np.float32)
+    parser.add_argument('-D','--dtype', help='Data type of output f4 is 32 bit float. i2 is 16 bit integer', default='f4', choices=('f4','i2', 'i4'))
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -53,7 +53,9 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    print(f'Dtype {values.dtype} {type(values.dtype)}')
+    dt = np.dtype('>'+values.dtype)
+    log.info(f'Dtype {values.dtype} {type(values.dtype)} dt={dt}')
+
 
     md = MetadataFile(values.metadata)
     merge = CcapMerger(values.files)
@@ -74,9 +76,9 @@ def _main():
     nant = merge.nant
     inttime = merge.inttime # seconds
     source = 1 # TODO
-
     tstart = merge.mjd0.value + inttime/3600/24 / 2
-
+    time_scale = 1*u.day # I can't use inttime here, asthere's a bug in the scaling and I don't understadn the AIPS convention of 2 DATE random parameters and whether i should encode JD0
+    # as midning on the first day of hte observation, or not.
     
     uvout = CorrUvFitsFile(values.output,
                            merge.fcent,
@@ -87,11 +89,9 @@ def _main():
                            source_list,
                            antennas,
                            instrume='CRACO',
-                           output_dtype=values.dtype,
+                           output_dtype=dt,
                            bmax=bmax,
-                           time_scale=inttime*u.second
-    )
-
+                           time_scale=time_scale)
 
     try:
         for iblk, (fid, blk) in enumerate(merge.block_iter()):
@@ -112,8 +112,10 @@ def _main():
                     wblk = weights[:, beam, 0, blidx, :, 0] # real and imaginary part should have same flag
                     if antflags[ia1] or antflags[ia2]:
                         wblk[:] = 0
-                        
-                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source, t=iblk)
+
+                    t = iblk
+                    t = None # Don't use the integration time for encoding timestamp - it doesn't work yet
+                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source)
                     blidx += 1
     finally:
         uvout.close()
