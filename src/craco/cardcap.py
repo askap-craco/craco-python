@@ -333,6 +333,30 @@ def set_vlan(gid, vlan=883):
     gid[4] = 0x03
     return gid
 
+def get_net_dev_of_gid(device, port, gididx):
+    # Look up this stuff
+    # Documented here: https://docs.nvidia.com/networking/pages/viewpage.action?pageId=12013422
+    #/sys/class/infiniband/mlx5_0/ports/1/gid_attrs/types/
+    # in particular
+    # $ cat /sys/class/infiniband/mlx5_0/ports/1/gid_attrs/ndevs/0
+    # enp175s0
+    # and
+    # $ cat /sys/class/net/enp175s0/address
+    # 0c:42:a1:55:c1:ee
+    ndev = f'/sys/class/infiniband/{device}/ports/{port}/gid_attrs/ndevs/{gididx}'
+    with open(ndev, 'rt') as f:
+        nd = f.read().strip()
+
+    return nd
+
+def get_mac_of_net_dev(netdev):
+    macpath = f'/sys/class/net/{netdev}/address'
+    with open(macpath, 'rt') as f:
+        mac_string = f.read().strip()
+        mac_bytes = bytes(map(lambda x: int(x, 16), mac_string.split(':')))
+
+    return mac_bytes
+
 hdr_size = 36*17 # words
 
 class FpgaCapturer:
@@ -377,13 +401,14 @@ class FpgaCapturer:
     
         log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(dst_gid), gids)
         #dst_mac = bytes(ipv6_to_mac(dst_gid))
-        dst_mac = bytes([0x0c, 0x42, 0xa1, 0x55, 0xc1,0xee]) # enp176s0 on seren-01
         src_mac = bytes(src_mac_of(shelf, card, fpga))
         vid = 0x4373 # probably waht it should be
         #vid = 0xffff # thsi works if no trunks enabled and no vlans
+        netdev = get_net_dev_of_gid(device, rdmaPort, gidIndex)
+        dst_mac = get_mac_of_net_dev(netdev)
         src_gid = np.frombuffer(mac_to_ipv6(src_mac, vid), dtype=np.uint8)
-        
-        log.info('Src MAC %s Dst MAC %s', mac_str(src_mac), mac_str(dst_mac))
+
+        log.info('Src MAC %s Dst MAC %s netdev %s', mac_str(src_mac), mac_str(dst_mac), netdev)
         log.info('Src GID %s Dst GID %s', mac_str(src_gid), mac_str(dst_gid))
        
         hdr = roce_packetizer.roce_header()
