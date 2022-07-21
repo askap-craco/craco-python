@@ -70,6 +70,8 @@ class CcapMerger:
         for ic, c in enumerate(self.ccap):
             assert len(c.fpgas) == nfpga, 'Differing numbers of fpgas in the files'
             all_freqs[ic, :, :] = c.frequencies
+
+        self.all_freqs = all_freqs
             
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
         self.fidxs = fidxs
@@ -79,6 +81,7 @@ class CcapMerger:
         self.nbl = self.ccap[0].mainhdr['NBL']
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
+        self.nchan_per_file = nfpga*NCHAN
         self.nint = 1 # TODO: Fix
 
     @property
@@ -156,29 +159,35 @@ class CcapMerger:
                     packets.append(next(i))
                     finished_array.append(False)
                 except StopIteration:
+                    packets.append((None,None))
                     finished_array.append(True)
-                    
-            flagged_array = [p[1] is None for p in packets]
-            fids = [p[0] for p in packets]
+
+            assert len(packets) == len(iters)
+            flagged_array = [p is None or p[1] is None for p in packets]
+            fids = [None if p is None else p[0] for p in packets]
             finished = all(finished_array)
             log.debug('Finished %s %s - flagged %s FIDS=%s', finished, finished_array, flagged_array, fids)
             
             if finished:
                 break
 
-            shape = (self.nchan, self.nbeam, self.nint, self.nbl, self.npol, 2)
+            nfile = len(self.ccap)
+            assert self.nchan == len(self.ccap)*self.nchan_per_file
+
+            shape = (nfile, self.nchan_per_file, self.nbeam, self.nint, self.nbl, self.npol, 2)
             dout = np.zeros(shape, dtype=np.int16)
-            mask = np.zeros(shape, dtype=np.bool)
+            mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
+
             for ip, (fid, p) in enumerate(packets):
                 assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
-                freqidx = self.fidxs[ip,0,:]
                 if p is None:
-                    mask[freqidx, ...] = True
+                    log.debug(f'Flagged {self.ccap[ip].fname} {fid}')
+                    mask[ip,...] = True
                     # data is already 0, but now it's masked anyway
                 else:
                     # mask is already false = valid data
                     if self.nbeam == 1:
-                        dout[freqidx, 0, ...] = p['data']
+                        dout[ip,:, 0, ...] = p['data']
                     else:
                         # This reshapes for teh beams 0-31 first, then beams 32-35 next
                         assert self.nbeam == 36
@@ -186,9 +195,16 @@ class CcapMerger:
                         blk1.shape = (4,32)
                         blk2 = p[32*4:]
                         blk2.shape = (4,4)
-                        dout[freqidx, :32, ...] = blk1['data']
-                        dout[freqidx, 32:, ...] = blk2['data']
+                        dout[ip,:, :32, ...] = blk1['data']
+                        dout[ip,:, 32:, ...] = blk2['data']
 
+            newshape = (self.nchan, self.nbeam, self.nint, self.nbl, self.npol, 2)
+            dout.shape = newshape
+            mask.shape = newshape
+            
+            # permute frequency channels
+            dout = dout[self.fidxs.flatten(),...]
+            mask = mask[self.fidxs.flatten(),...]
             dout = np.ma.masked_array(dout,mask)
                 
             yield (fid, dout)
