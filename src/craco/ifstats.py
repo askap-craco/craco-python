@@ -37,7 +37,11 @@ class NetInterface:
 
     def poll_stats(self, values):
         d = self.get_statistics()
-        counts = ('rx_discards_phy','tx_pause_ctrl_phy','tx_global_pause','rx_global_pause', 'rx_prio3_pause','rx_prio3_pause_duration','tx_prio3_pause','tx_prio3_pause_duration')
+        counts = ('rx_discards_phy',
+                  'tx_global_pause','tx_global_pause_duration',
+                  'rx_global_pause','rx_global_pause_duration',
+                  'rx_prio3_pause','rx_prio3_pause_duration',
+                  'tx_prio3_pause','tx_prio3_pause_duration')
         print(self.ifname, values.field, '(Gbps) ', ' '.join(counts))
 
         while True:

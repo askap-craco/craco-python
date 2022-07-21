@@ -33,6 +33,7 @@ from craco import leapseconds
 import ast
 
 log = logging.getLogger(__name__)
+hostname = socket.gethostname()
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
@@ -455,6 +456,7 @@ class FpgaCapturer:
         self.total_missing = 0
         self.total_bytes = 0
         self.craco63_last = 0
+        self.max_ncompletions = 0
 
     def issue_requests(self):
         rx = self.rx
@@ -478,6 +480,10 @@ class FpgaCapturer:
         num_cmsgs = self.ccap.num_cmsgs
         #print(f'\rCompletions={ncompletions} {len(completions)}')
         beam = self.ccap.values.beam
+        if ncompletions > self.max_ncompletions:
+            log.critical(f'{self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
+            self.max_ncompletions = ncompletions
+        
         for c in completions:
             #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
             index = c.wr_id
@@ -508,7 +514,7 @@ class FpgaCapturer:
                 
             if immediate != expected_immediate:
                 self.total_missing += diff
-                log.critical(f'MISSED PACKET: {self.values.block}/{self.values.card}/{self.fpga} imm={immediate}={hex(immediate)} fid={fid}={hex(fid)} fid_diff={fid_diff}expected={expected_immediate} Diff={diff}  nmiss={self.total_missing} nbytes={nbytes}')
+                log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} MISSED PACKET imm={immediate}={hex(immediate)} fid={fid}={hex(fid)} fid_diff={fid_diff}expected={expected_immediate} Diff={diff}  nmiss={self.total_missing} nbytes={nbytes} qloading={rx.currentQueueLoading}')
             
 
             self.curr_imm = immediate
@@ -684,7 +690,7 @@ class CardCapturer:
         hdr['SYNCBAT'] = (syncbat, 'Hexadecimal BAT when frame ID was set to 0')
         hdr['DSPVER'] = (dspversion, 'Block DSP version')
         hdr['IOCVER'] = (iocversion, "IOC version for block")
-        hdr['HOST'] = (socket.gethostname(), 'Capture host name')
+        hdr['HOST'] = (hostname, 'Capture host name')
         hdr['MSG_SIZE'] = (msg_size, 'Number of bytes in a message')
         hdr['NPCKMSG'] =  (self.npacket_per_msg, 'Number of debug header packets per message')
         hdr['NBEAM'] = (self.nbeam, 'Number of beams being downlaoded (always 36)')
@@ -814,7 +820,7 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-d','--device', help='RDMA device', default='mlx5_0')
     parser.add_argument('-p','--port', help='RDMA port', type=int, default=1)
-    parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=0)
+    parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=2)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
     parser.add_argument('--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
@@ -881,6 +887,7 @@ def _main():
             my_values.fpga = [my_fpga]
 
             devices = ['mlx5_0', 'mlx5_1']
+            devices =['mlx5_0','mlx5_0']
             devidx = my_fpga % 2
             my_values.device = devices[devidx]
 

@@ -61,9 +61,31 @@ class MetadataFile:
         self.flag_interp = interp1d(self.times.value, self.antflags, kind='previous', axis=0, bounds_error=True, copy=False)
         self.index_interp = interp1d(self.times.value, np.arange(len(self.data)), kind='previous', bounds_error=True, copy=False)
         self.antnames = antnames
+        self._sources_b0 = self.sources(0) # just used for sourcenames
 
         # Keys for eeach etnry are:
         #dict_keys(['antenna_targets', 'antennas', 'beams_direction', 'beams_offsets', 'cycle_period', 'flagged', 'phase_direction', 'polangle', 'polmode', 'sbid', 'scan_id', 'schedulingblock_id', 'sky_frequency', 'target_direction', 'target_name', 'timestamp'])
+
+    def source_name_at_time(self, time : float):
+        srcname = self.data_at_time(time)['target_name']
+        return srcname
+
+    def source_index_at_time(self, time : float):
+        srcname = self.source_name_at_time(time)
+        # Looup index by stupid loop:
+        for i, k in enumerate(self._sources_b0.keys()):
+            if k == srcname:
+                break
+        
+        sourceidx = i
+        return sourceidx
+
+    def data_index_at_time(self, time : float):
+        idx = int(self.index_interp(time))
+        return idx
+
+    def data_at_time(self, time : float):
+        return self.data[self.data_index_at_time(time)]
 
     def flags_at_time(self, time : float):
         '''

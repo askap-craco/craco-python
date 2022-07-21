@@ -75,7 +75,6 @@ def _main():
     bmax = 6e3*u.meter
     nant = merge.nant
     inttime = merge.inttime # seconds
-    source = 1 # TODO
     tstart = merge.mjd0.value + inttime/3600/24 / 2
     time_scale = 1*u.day # I can't use inttime here, asthere's a bug in the scaling and I don't understadn the AIPS convention of 2 DATE random parameters and whether i should encode JD0
     # as midning on the first day of hte observation, or not.
@@ -104,6 +103,9 @@ def _main():
             mjd = merge.fid_to_mjd(fid)
             uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
+            sourceidx = md.source_index_at_time(mjd.value)+ 1 # FITS standard starts at 1
+            sourcename = md.source_name_at_time(mjd.value)
+            log.debug('ibld=%s mjd=%s source=%s id=%d', iblk, mjd.value, sourcename, sourceidx)
 
             for ia1 in range(nant):
                 for ia2 in range(ia1, nant):
@@ -115,9 +117,10 @@ def _main():
 
                     t = iblk
                     t = None # Don't use the integration time for encoding timestamp - it doesn't work yet
-                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, source)
+                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, sourceidx)
                     blidx += 1
     finally:
+        print('Closing output file')
         uvout.close()
             
 
