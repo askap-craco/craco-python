@@ -595,6 +595,8 @@ class CardCapturer:
         self.nint_per_packet = nint_per_packet
         self.nintpacket_per_frame = nintpacket_per_frame
         self.nintout_per_frame = nintpacket_per_frame // self.values.tscrunch
+
+        assert self.values.tscrunch == 1 or self.values.tscrunch * self.values.samples_per_integration == 2048, 'Invalid tscrunch - it must be 1 or multiply SPI to 2048'
         self.msg_shape = (num_cmsgs, self.nbeam*self.nchan, self.nintpacket_per_frame)
         self.out_shape = (self.nbeam*self.nchan, self.nintout_per_frame)
         nmsg = 1000000
@@ -802,7 +804,6 @@ class CardCapturer:
         for c in range(1,12):
             for f in range(1,6):
                 self.ctrl.set_roce_header(self.values.block, c, f, zerohdr)
-                
 
     def save_data(self):
         nblk = 0
@@ -878,7 +879,6 @@ def _main():
             
         comm.Barrier()
 
-
         if rank < len(block_cards):
             my_block, my_card, my_fpga =  block_cards[rank]
             my_values = copy.deepcopy(values)
@@ -887,7 +887,7 @@ def _main():
             my_values.fpga = [my_fpga]
 
             devices = ['mlx5_0', 'mlx5_1']
-            devices =['mlx5_0','mlx5_0']
+            #devices =['mlx5_0','mlx5_0']
             devidx = my_fpga % 2
             my_values.device = devices[devidx]
 
@@ -908,6 +908,15 @@ def _main():
         
         if rank == 0:
             ccap.configure()
+            # disable all cards, and enable only the ones we want
+            blk = values.block[0]
+            assert len(values.block) == 1, 'Cant start like that currently'
+
+            # Enable only the cards we want.
+            ctrl.enable_card_events(blk, values.card)
+            # Normally do start() here but it would re-enable everything,
+            # so just start this block
+            #ctrl.start_block(blk)
             ccap.start()
 
         comm.Barrier()

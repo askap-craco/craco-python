@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ccap="./mpicardcap.sh -e --block 7 --prefix ak"
+ccap="./mpicardcap.sh host12_fpga6_rankfile.txt  -e --block 7 --prefix ak"
 
 CARDCAP_DIR=$1
 
@@ -8,15 +8,15 @@ if [[ ! -e $CARDCAP_DIR ]] ; then
     mkdir -p $CARDCAP_DIR
 fi
 
-nmsg=10
+nmsg=100
 target=target
 cards=1-12
 
 for spi in 16 32 64 ; do
     for pol in ps dp ; do
-	for beam in -1 ; do
-	    for fpga in 1 1-6 ; do
-		for cards in 1 $cards ; do
+	for beam in 0 ; do
+	    for fpga in 1-6 ; do
+		for cards in $cards ; do
 		    if [[ $pol == "ps" ]] ; then
 			polcmd="--pol-sum"
 		    else
