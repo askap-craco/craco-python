@@ -128,6 +128,20 @@ class CardcapFile:
         return nbeam
 
     @property
+    def beams(self):
+        '''
+        Returns a numpy array containing the list of beams in this file
+        Zero indexed
+        '''
+        if self.nbeam == 36:
+            b = np.arange(36, dtype=np.int)
+        else:
+            thebeam = self.mainhdr['BEAM']
+            b = np.array([thebeam], dtype=np.int)
+
+        return b
+
+    @property
     def npol(self):
         npol = 1 if self.polsum else 2
         return npol

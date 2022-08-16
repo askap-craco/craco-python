@@ -51,13 +51,22 @@ def frame_id_iter(i, fid0, fidoff):
             log.debug(f'MISS frame_id={frame_id} {curr_frameid} {curr_bat}')
             b = None
 
+        yield frame_id, b
         frame_id += fidoff
-        yield curr_frameid, b
+
 
 class CcapMerger:
     def __init__(self, fnames):
         self.fnames = fnames
-        self.ccap = [CardcapFile(f) for f in self.fnames]
+        self.ccap = []
+        for f in self.fnames:
+            try:
+                cc = CardcapFile(f)
+                self.ccap.append(cc)
+            except:
+                log.exception('Error opening file %s', f)
+                raise
+
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
@@ -80,6 +89,13 @@ class CcapMerger:
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nint = 1 # TODO: Fix
+
+    @property
+    def beams(self):
+        '''
+        Returns array of beams available in thei file
+        '''
+        return self.ccap[0].beams
 
     @property
     def fcent(self):
@@ -122,7 +138,6 @@ class CcapMerger:
         antnos = [a+1 for a in range(self.nant)]
         return antnos
         
-
     @property
     def nant(self):
         n = self.ccap[0].mainhdr['NANT']
@@ -142,8 +157,7 @@ class CcapMerger:
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
-        packets_per_block = 36*4 # TODO: work out how to work this out
-        packets_per_block = 4
+        packets_per_block = 4*self.nbeam
         fidoff = 2048
 
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
@@ -182,7 +196,7 @@ class CcapMerger:
                     else:
                         # This reshapes for teh beams 0-31 first, then beams 32-35 next
                         assert self.nbeam == 36
-                        blk1 = p[:32*4] 
+                        blk1 = p[:32*4]
                         blk1.shape = (4,32)
                         blk2 = p[32*4:]
                         blk2.shape = (4,4)
