@@ -473,10 +473,14 @@ class Pipeline:
         return self
 
     def wait(self):
-        for retry in range(10):
+        '''
+        I'm not sure why I did it this way, rather than waiting on the starts
+        Maybe the starts hang for some reason
+        '''
+        log.debug('Sleeping 0.4')
+        time.sleep(0.4) # short enough that any reasonable execution will still be running by the time we poll
+        for retry in range(1000):
             all_ok = True
-            log.debug('Sleeping 0.4')
-            time.sleep(0.4) # short enough that any reasomable execution will still be running by the time we poll
             for k in self.all_kernels:
                 reg0 = k.krnl.read_register(0x00)
                 all_ok &= (reg0 == 0x04)
@@ -484,6 +488,8 @@ class Pipeline:
 
             if all_ok:
                 break
+
+            time.sleep(0.01)
 
         self.total_retries += retry
 

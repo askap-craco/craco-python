@@ -64,6 +64,42 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
             ('zero3','<u4') # word 8
 ]
 
+
+def get_indexes(nant):
+    '''
+    Returns a set of array indexs that can be used to index into baseline arrays
+    assumign the way the correlator orders everythign (baseically, sensibly)
+    One day if you have a more complex configuration than just antennas, this might
+    need to be made more sophisticated.
+
+    Returns 4-typple containing (products, revproducts, auto_products, cross_products
+    where
+    products: Array length=nbl, contains (a1, a2) where a1 is antenna1 and a2 is antenna2 (1 based)
+    revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
+    auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
+    cross_products: length=nbl array of which indices contain cross correlations
+    '''
+    
+    products = []
+    revproducts = {}
+    auto_products = []
+    cross_products = []
+    idx = 0
+    for a1 in range(1, nant+1):
+        for a2 in range(a1, nant+1):
+            products.append((a1,a2))
+            revproducts[(a1,a2)] = idx
+            if a1 == a2:
+                auto_products.append(idx)
+            else:
+                cross_products.append(idx)
+            
+            idx += 1
+              
+    products = np.array(products, dtype=[('a1',np.int16), ('a2', np.int16)])
+
+    return (products, revproducts, auto_products, cross_products)
+
 class CardcapFile:
     def __init__(self, fname, workaround_craco63=False):
         self.fname = fname
@@ -80,6 +116,23 @@ class CardcapFile:
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
         self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
+
+    @property
+    def indexes(self):
+        '''
+        Returns all indexes as a 4-typle
+        return (products, revproducts, auto_products, cross_products)
+        '''
+        return get_indexes(self.nant)
+
+
+    @property
+    def nant(self):
+        '''
+        Returns number of antennas in this file
+        '''
+        return self.mainhdr['NANT']
+
 
     @property
     def card_frequencies(self):
@@ -133,6 +186,17 @@ class CardcapFile:
         return npol
 
     @property
+    def nint_per_packet(self):
+        '''
+        if polsum is enabled, we get 2 integrations per set of debug headers
+        '''
+        
+        if self.npol == 2:
+            return 1
+        else:
+            return 2
+
+    @property
     def fpgas(self):
         '''Returns a list of fpgas in this file (1 based)'''
         fstr = self.mainhdr['FPGA']
@@ -163,6 +227,23 @@ class CardcapFile:
         '''
         return self.time_of_frame_id(self.frame_id0)
 
+    @property
+    def isempty(self):
+        '''
+        Returns true if this file is empty
+        As a bug, NAXIS2=1 is also empty
+        '''
+        return len(self) <= 1
+
+    def __len__(self):
+        '''
+        Returns the value of NAXIS2 in the header - which should (hopefully) 
+        align with the number of packets captured in this file
+        Although - if its' empty, NAXIS2 will be 1
+        Even though it's empty. That is a bug.
+        '''
+        return self.mainhdr['NAXIS2']
+
     def time_of_frame_id(self, frame_id):
         '''
         Returns an astropy time of the given frame ID
@@ -180,21 +261,29 @@ class CardcapFile:
         :npackets: number of packets per block
         '''
 
-        with open(self.fname) as f:
-            f.seek(self.hdr_nbytes)
+        # workaroudn a bug - if it's empty the NAXIS2=1 and there's a single data value in there
+        # just detect this condition and skip
+        if len(self) > 1:
+            with open(self.fname) as f:
+                f.seek(self.hdr_nbytes)
 
-            while True:
-                packets = np.fromfile(f, dtype=self.dtype, count=npackets)
-                if len(packets) != npackets:
-                    break
+                while True:
+                    packets = np.fromfile(f, dtype=self.dtype, count=npackets)
+                    if len(packets) != npackets:
+                        break
                 
-                if self.workaround_craco63:
-                    shift = -1
-                    packets['data'] = np.roll(packets['data'], shift, axis=0)
+                    if self.workaround_craco63:
+                        shift = -1
+                        packets['data'] = np.roll(packets['data'], shift, axis=0)
 
-                yield packets
+                    log.debug('yielding packets %s %s', packets.shape, packets['data'].shape)
+
+                    yield packets
     
     def load_packets(self, count=-1, pktoffset=0):
+        if len(self) == 1:# Work around bug 
+            return np.array([], dtype=self.dtype)
+        
         with open(self.fname) as f:
             f.seek(self.hdr_nbytes + self.dtype.itemsize*pktoffset)
             packets = np.fromfile(f, dtype=self.dtype, count=count)

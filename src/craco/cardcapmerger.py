@@ -34,8 +34,10 @@ def frame_id_iter(i, fid0, fidoff):
     fidoff = np.uint64(fidoff)
     assert isinstance(fid0, np.uint64)
     currblock = None
+    last_frameid = frame_id
+    last_bat = 0
     while True:
-        if currblock is None or currblock['frame_id'][0] < frame_id:
+        if currblock is None or currblock['frame_id'].flat[0] < frame_id:
             try:
                 currblock = next(i)
             except StopIteration:
@@ -48,10 +50,12 @@ def frame_id_iter(i, fid0, fidoff):
             b = currblock
             log.debug(f'HIT frame_id={frame_id} hit {curr_bat}')
         else:
-            log.debug(f'MISS frame_id={frame_id} {curr_frameid} {curr_bat}')
+            log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
         frame_id += fidoff
+        last_frameid = curr_frameid
+        last_bat = curr_bat
         yield curr_frameid, b
 
 class CcapMerger:
@@ -61,11 +65,10 @@ class CcapMerger:
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
-        frame_ids = [c.frame_id0 for c in self.ccap]
-        bats = [c.bat0 for c in self.ccap]
+        frame_ids = [c.frame_id0  if not c.isempty else None for c in self.ccap]
+        bats = [c.bat0 if not c.isempty else None for c in self.ccap]
         log.debug('Frame IDs %s', frame_ids)
         log.debug('bats %s', bats)
-        
 
         for ic, c in enumerate(self.ccap):
             assert len(c.fpgas) == nfpga, 'Differing numbers of fpgas in the files'
@@ -75,14 +78,13 @@ class CcapMerger:
             
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
         self.fidxs = fidxs
-        self.frame_id0 = min(frame_ids)
+        self.frame_id0 = min([fid for fid in frame_ids if fid is not None])
         self.tscrunch = self.ccap[0].mainhdr['TSCRUNCH']
         self.nbeam = self.ccap[0].nbeam
         self.nbl = self.ccap[0].mainhdr['NBL']
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
-        self.nint = 1 # TODO: Fix
 
     @property
     def fcent(self):
@@ -90,6 +92,13 @@ class CcapMerger:
         Returns center frequency - units of MHz
         '''
         return self.all_freqs.mean()
+
+    @property
+    def fch1(self):
+        '''
+        Returns first channel frequency
+        '''
+        return self.all_freqs.flat[0]
 
     @property
     def foff(self):
@@ -132,9 +141,28 @@ class CcapMerger:
         return n
 
     @property
+    def npol(self):
+        return self.ccap[0].npol
+
+    @property
+    def indexes(self):
+        return self.ccap[0].indexes
+
+    @property
     def inttime(self):
         t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].mainhdr['TSCRUNCH']
         return t
+
+    @property
+    def nint_per_frame(self):
+        return self.gethdr('NTPFM')
+
+    @property
+    def nint_per_packet(self):
+        return self.ccap[0].nint_per_packet
+
+    def gethdr(self, key):
+        return self.ccap[0].mainhdr[key]
     
     def fid_to_mjd(self, fid):
         return self.ccap[0].time_of_frame_id(fid)
@@ -145,8 +173,7 @@ class CcapMerger:
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
-        packets_per_block = 36*4 # TODO: work out how to work this out
-        packets_per_block = 4
+        packets_per_block = NCHAN*self.nbeam*self.nint_per_frame
         fidoff = 2048
 
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
@@ -173,21 +200,29 @@ class CcapMerger:
 
             nfile = len(self.ccap)
             assert self.nchan == len(self.ccap)*self.nchan_per_file
+            nint_total = self.nint_per_frame*self.nint_per_packet
 
-            shape = (nfile, self.nchan_per_file, self.nbeam, self.nint, self.nbl, self.npol, 2)
+            shape = (nfile, self.nchan_per_file, self.nbeam, nint_total, self.nbl, self.npol, 2)
             dout = np.zeros(shape, dtype=np.int16)
             mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
 
             for ip, (fid, p) in enumerate(packets):
                 assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
+                #log.debug('ip=%s fid=%s p.shape=%s dout.shape=%s', ip, fid, p.shape, dout.shape)
+                
                 if p is None:
-                    log.debug(f'Flagged {self.ccap[ip].fname} {fid}')
+                    log.debug(f'Flagged {self.ccap[ip].fname} fid={fid}')
                     mask[ip,...] = True
                     # data is already 0, but now it's masked anyway
                 else:
                     # mask is already false = valid data
                     if self.nbeam == 1:
-                        dout[ip,:, 0, ...] = p['data']
+                        #print('shape before', p.shape, p['data'].shape)
+                        p.shape = (NCHAN, 1, self.nint_per_frame) # (NCHAN, 1 beam, Nint)
+                        # now p['data'].shape is (NCHAN, nbeam, npkt_per_frame, nint_per_pkt, nbl, npol, 2)
+                        d = p['data'].reshape((NCHAN,1,nint_total,self.nbl,self.npol,2))
+                        #print(dout.shape, p.shape, p['data'].shape, d.shape)
+                        dout[ip,:] = d
                     else:
                         # This reshapes for teh beams 0-31 first, then beams 32-35 next
                         assert self.nbeam == 36
@@ -198,7 +233,7 @@ class CcapMerger:
                         dout[ip,:, :32, ...] = blk1['data']
                         dout[ip,:, 32:, ...] = blk2['data']
 
-            newshape = (self.nchan, self.nbeam, self.nint, self.nbl, self.npol, 2)
+            newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
             dout.shape = newshape
             mask.shape = newshape
             
