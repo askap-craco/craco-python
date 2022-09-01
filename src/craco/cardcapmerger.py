@@ -67,7 +67,7 @@ class CcapMerger:
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
         frame_ids = [c.frame_id0  if not c.isempty else None for c in self.ccap]
         bats = [c.bat0 if not c.isempty else None for c in self.ccap]
-        log.debug('Frame IDs %s', frame_ids)
+        log.debug('Frame IDs: %s of %s= %s', len(frame_ids), nfiles, frame_ids)
         log.debug('bats %s', bats)
 
         for ic, c in enumerate(self.ccap):
@@ -158,6 +158,10 @@ class CcapMerger:
         return self.gethdr('NTPFM')
 
     @property
+    def ntpkt_per_frame(self):
+        return self.gethdr('NTPKFM') // self.gethdr('TSCRUNCH')
+
+    @property
     def nint_per_packet(self):
         return self.ccap[0].nint_per_packet
 
@@ -173,8 +177,8 @@ class CcapMerger:
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
-        packets_per_block = NCHAN*self.nbeam*self.nint_per_frame
-        fidoff = 2048
+        packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
+        fidoff = 2048 # Every frame always increments the number of samples by 2048
 
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
         
@@ -200,11 +204,13 @@ class CcapMerger:
 
             nfile = len(self.ccap)
             assert self.nchan == len(self.ccap)*self.nchan_per_file
-            nint_total = self.nint_per_frame*self.nint_per_packet
+            nint_total = self.ntpkt_per_frame*self.nint_per_packet
 
-            shape = (nfile, self.nchan_per_file, self.nbeam, nint_total, self.nbl, self.npol, 2)
+            shape = (nfile, self.nchan_per_file, self.nbeam, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
             dout = np.zeros(shape, dtype=np.int16)
             mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
+            newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
+            log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
 
             for ip, (fid, p) in enumerate(packets):
                 assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
@@ -214,26 +220,24 @@ class CcapMerger:
                     log.debug(f'Flagged {self.ccap[ip].fname} fid={fid}')
                     mask[ip,...] = True
                     # data is already 0, but now it's masked anyway
-                else:
-                    # mask is already false = valid data
-                    if self.nbeam == 1:
-                        #print('shape before', p.shape, p['data'].shape)
-                        p.shape = (NCHAN, 1, self.nint_per_frame) # (NCHAN, 1 beam, Nint)
-                        # now p['data'].shape is (NCHAN, nbeam, npkt_per_frame, nint_per_pkt, nbl, npol, 2)
-                        d = p['data'].reshape((NCHAN,1,nint_total,self.nbl,self.npol,2))
-                        #print(dout.shape, p.shape, p['data'].shape, d.shape)
-                        dout[ip,:] = d
+                else: # mask is already false = valid data
+                    if self.nbeam == 1: # Data order is just (4, 1, nint_per_frame)
+                        blk = p['data']
+                        #print('initial shape', p.shape, blk.shape)
+                        #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
+                        p.shape = (NCHAN, 1, self.ntpkt_per_frame)
+                        dout[ip,:] = p['data']
                     else:
                         # This reshapes for teh beams 0-31 first, then beams 32-35 next
                         assert self.nbeam == 36
                         blk1 = p[:32*4] 
-                        blk1.shape = (4,32)
+                        blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
                         blk2 = p[32*4:]
-                        blk2.shape = (4,4)
+                        blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams
                         dout[ip,:, :32, ...] = blk1['data']
                         dout[ip,:, 32:, ...] = blk2['data']
 
-            newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
+
             dout.shape = newshape
             mask.shape = newshape
             
