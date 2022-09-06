@@ -33,9 +33,15 @@ def pltcomplex(d):
     
 
 def gains2solarray(plan, soln):
-
+    '''
+    Retuns a complex array that can multiply with an input data cube to calbrate it
+    shape: (nbl, nchan, npol, 1) - assumes the final axis (1) is time, so 
+    np broadcasting rules will apply the same calibration to all times
+    @param :plan: plane with baseline order
+    @param :soln: gain solution from load_gains()
+    '''
     npol = 2
-    solnarray = np.zeros((plan.nbl, plan.nf, 2), np.complex64)
+    solnarray = np.zeros((plan.nbl, plan.nf, npol), np.complex64)
     for ibl, blid in enumerate(plan.baseline_order):
         a1,a2 = bl2ant(blid)
         s1 = soln[a1-1,:,:]
@@ -44,7 +50,11 @@ def gains2solarray(plan, soln):
         solnarray[ibl,:,0] = p[...,0]
         solnarray[ibl,:,1] = p[...,1]
 
-    solnarray = 1/solnarray
+    solnarray[solnarray != 0] = 1/solnarray[solnarray != 0]
+
+    # update shape
+    solnarray.shape = (plan.nbl, plan.nf, npol, 1)
+    solnarray = np.ma.masked_equal(solnarray, 0)
 
     return solnarray
 
@@ -60,6 +70,13 @@ def load_gains(fname):
     if os.path.isfile(fname):
         bp = plotbp.Bandpass.load(fname)
         g = bp.bandpass[0]
+        npol = g.shape[-1]
+        if npol == 4: # Npol is [XX, XY, YX, YY] just pick out [XX,YY]
+            log.info('Removing cross pols from solution %s', fname)
+            g = g[...,[0,3]]
+
+        log.info("loaded CALIBRATION bandpass solutions from %s", fname)
+
     else:
         miriadsol = MiriadGainSolutions(fname)
         miriad_bp = miriadsol.bp_real + 1j*miriadsol.bp_imag
@@ -72,6 +89,13 @@ def load_gains(fname):
         miriad_gbp = np.transpose(miriad_gbp, [1,0,2])
         g = miriad_gbp
 
+        log.info("loaded MIRIAD bandpass solutions from %s", fname)
+
+
+    # Mask everything that is zero
+    
+    #g = np.ma.masked_where(g, np.abs(g) != 0)
+    g = np.ma.masked_equal(g,0) # This seems to work, even though I can't get the abs to work
     return g
 
 

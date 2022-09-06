@@ -8,6 +8,7 @@ import time
 import pickle
 import copy
 
+from craft.cmdline import strrange
 from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
@@ -15,6 +16,7 @@ from craft.craco_plan import load_plan
 
 from craft import uvfits
 from craft import craco
+from craco import calibration
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -106,6 +108,25 @@ def make_fft_config(nplanes:int,
             by_s1
 
     return word
+
+def calc_fft_scale(fft_shift1, fft_shift2):
+    '''
+    Returns the scaling in accross the FFT2D kernel
+    fft_shift1 divides by 2**fft_shift1
+    fft_shift2 multiplies by 2**fft_shift2
+    
+    The whole FFT also divides by 2**10
+
+    So the output is scale = 2**(fft_shift2 - fft_shift1 - 10)
+
+    e.g. for the DC-bin:
+    i.e. fft_output[0] = sum(fft_input)*calc_fft_scaling(fft_shift1, fft_shift2)
+    '''
+    assert 0 <= fft_shift1 <= 7
+    assert 0 <= fft_shift2 <= 7
+    scale = 2**(fft_shift2 - fft_shift1 - 10)
+    
+    return scale
 
 def merge_candidates_width_time(cands):
     '''
@@ -307,6 +328,7 @@ class Pipeline:
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
         inbuf_shape = (self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2)
         self.inbuf = Buffer(inbuf_shape, np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
+
         log.info(f'FDMT input buffer size {np.prod(inbuf_shape)*2/1024/1024} MB')
         
         # FDMT histin, histhout should be same buffer
@@ -359,7 +381,7 @@ class Pipeline:
         log.info('Allocating boxcar_history')    
 
         npix = self.plan.npix
-        # Require 1024 MB, we have 4 HBMs in linke file, which gives us 1024 MB
+        # Require 1024 MB, we have 4 HBMs in link file, which gives us 1024 MB
         NBOX = 7 # Xinping only saves 7 boxcars for NBOX = 8. TODO: change to 8
         self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         log.info(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
@@ -374,7 +396,32 @@ class Pipeline:
         self.uv_out  = np.zeros(uv_shape, dtype=np.complex64)
         self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
 
+        if hasattr(plan.values, 'calibration') and plan.values.calibration:
+            self.set_calibration(plan.values.calibration)
+        else:
+            self.set_calibration(None)
 
+    def set_calibration(self, calfile):
+        '''
+        Set the calibration to the given calfile
+        Sets internal calibration arrays and counts valid (noflagged) data for subsequent scaling calculations
+        if calfile is None sets the gains asn solution array to None and assumes the number of input cells is plan.nf*plan.nbl
+        '''
+        if calfile is None:
+            self.gains = None
+            self.solarray = None
+            self.__ninput_cells = self.plan.nf*self.plan.nbl
+        else:
+            self.gains = calibration.load_gains(calfile)
+            self.solarray = calibration.gains2solarray(self.plan, self.gains)
+            self.__ninput_cells = self.num_input_cells
+            ntotal = self.plan.nf * self.plan.nbl
+            pcflag = (ntotal - self.__ninput_cells) / ntotal*100.
+            snincrease = np.sqrt(self.__ninput_cells)
+            log.info('Loaded calibration from %s with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
+                     calfile, self.__ninput_cells, ntotal, pcflag, snincrease)
+        return self
+    
     def copy_mainbuf(p):
         '''
         Make a copy of the main buffer (hwhich had to be split into pieces due to an XRT limitation)
@@ -405,10 +452,6 @@ class Pipeline:
 
         assert self.starts is None
         
-        # Should we get the threhsold from values or the plan?
-        # Changes dynamically - values
-        threshold = values.threshold
-        threshold = np.uint16(threshold*(1<<NBINARY_POINT_THRESHOLD))
         ndm       = self.plan.nd
 
         nchunk_time = self.plan.nt//NTIME_PARALLEL
@@ -433,10 +476,19 @@ class Pipeline:
         fft_cfg2 = make_fft_config(nplane,
                                    fft_shift1,
                                    fft_shift2)
-
         assert fft_cfg == fft_cfg2, f'Bad fft_cfg calculation. {fft_cfg:x}!={fft_cfg2:x}'
 
-        log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} threshold={threshold} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x}\n')
+        # scale threshold by target RMS and signal/noise scale
+        signal_scale, noise_scale = self.calculate_processing_gain(fft_shift1, fft_shift2)
+        threshold = values.threshold
+        img_noiselevel = self.plan.values.target_input_rms*noise_scale
+        bc_noiselevel = img_noiselevel / 4 # for some reason BOXCAR values are 4x smaller than image values - check with Xinping
+        bc_threshold = threshold*bc_noiselevel
+        threshold_boxcarval = np.uint16(bc_threshold)
+        self.last_bc_noise_level = bc_noiselevel # save for future reference
+        assert threshold_boxcarval > 0, f'Invalid threshold boxcar value {threshold_boxcarval}'
+
+        log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x} threshold={threshold} imgnoise={img_noiselevel} bcnoise={bc_noiselevel} bcthresh={bc_threshold}={threshold_boxcarval}\n')
 
         assert ndm < 1024,' It hangs for ndm=1024 - not sure why.'
 
@@ -457,7 +509,7 @@ class Pipeline:
             self.clear_candidates()
             log.info('Candidates cleared')
             # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
-            starts.append(self.boxcarcu(ndm, nchunk_time, threshold, self.boxcar_history, self.boxcar_history, self.candidates))
+            starts.append(self.boxcarcu(ndm, nchunk_time, threshold_boxcarval, self.boxcar_history, self.boxcar_history, self.candidates))
 
             for cu in self.ffts:
                 starts.append(cu(fft_cfg, fft_cfg))
@@ -554,13 +606,85 @@ class Pipeline:
 
             log.info('Finished clearing pipeline')
 
+    def calibrate_input(self, input_flat):
+        # Apply calibration solutions -  Multiply by solution aray
+        if self.solarray is not None:
+            input_flat *= self.solarray
+
+        # subtract average over time
+        if hasattr(self.plan.values, 'subtract') and self.plan.values.subtract:
+            input_flat -= input_flat.mean(axis=-1, keepdims=True)
+
+        # average polarisations, if necessary
+        if input_flat.ndim == 4:
+            npol = input_flat.shape[2]
+            assert npol == 1 or npol == 2, f'Invalid number of polarisations {npol} {input_flat.shape}'
+            if npol == 1:
+                input_flat = input_flat[:,:,0,:]
+            else:
+                input_flat = input_flat.mean(axis=2)
+
+        # scale to give target RMS
+        targrms = self.plan.values.target_input_rms
+        if  targrms > 0:
+            # calculate RMS
+            real_std = input_flat.real.std()
+            imag_std = input_flat.imag.std()
+            input_std = np.sqrt(real_std**2+ imag_std**2)/np.sqrt(2) # I think this is right do do quadrature noise over all calibrated data
+            # noise over everything
+            stdgain = targrms / input_std
+            log.debug('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s', real_std, imag_std, input_std, stdgain)
+            input_flat *= stdgain
+
+        return input_flat
+
+    @property
+    def num_input_cells(self):
+        '''
+        Returns the total number of cells added together in the grid
+        if we have a calibration array, it's the number of good values in the mask
+        Otheerwise, it's the product of nbl, and nf from the plan
+        Note: solution array may be dual polarisation, in which case this returns the single polarisation size
+
+        '''
+        if self.solarray is None:
+            nsum = self.plan.nbl * self.plan.nf 
+        else:
+            assert 1 <= self.solarray.shape[2] <= 2
+            single_sol_array = self.solarray[:,:,0,:] # single pol solution array
+
+            nsum = single_sol_array.size - sum(single_sol_array.mask) # number of unmasked values
+
+        return nsum
+
+    def calculate_processing_gain(self, fft_shift1, fft_shift2):
+        '''
+        Calculates the expected signal and noise levels at the images
+        returns (signal_gain, noise_gain) as a tuple
+
+        Where signal_gain is the gain applied to a source with a given amplitude per cell/channel in the visibility input
+        noise_gain is the RMS in the image to multiply the input noise RMS in the visibilities
+        :returns: (signal_gain, noise_gain)
+        '''
+
+        nsum = self.__ninput_cells # 
+        fft_scale = calc_fft_scale(fft_shift1, fft_shift2)
+        signal_gain = nsum*fft_scale
+        noise_gain = np.sqrt(nsum)*fft_scale
+        return (signal_gain, noise_gain)
+
     def copy_input(self, input_flat, values):
         '''
-        Converts complex input data in [NBL, NC, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
+        Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
+        Input data can be 3 dimensionsal (assumign NPOL=1) or 4 dimensionsal (assumign NPOL=1 or 2)
+        If 4 dimensional, the polarisations are averaged before continuing
         the copies to the device
 
         '''
+        #input flat is (nbl, nf, nt) or (nbl, nf, npol nt)
+
+        input_flat = self.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
         self.fast_baseline2uv(input_flat, self.uv_out)
         self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale))
         self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale))
@@ -585,11 +709,11 @@ def location2pix(location, npix=256):
 
 location2pix = np.vectorize(location2pix)
 
-def cand2str(candidate, npix, iblk):
+def cand2str(candidate, npix, iblk, raw_noise_level):
     location = candidate['loc_2dfft']
     lpix, mpix = location2pix(location, npix)
     rawsn = candidate['snr']
-    snr = float(candidate['snr'])/float(1<<NBINARY_POINT_THRESHOLD) 
+    snr = float(candidate['snr']/raw_noise_level)
     s = f"{snr:.1f}\t{lpix}\t{mpix}\t{candidate['boxc_width']}\t\t{candidate['time']}\t{candidate['dm']}\t{iblk}\t{rawsn}"
     return s
 
@@ -602,23 +726,22 @@ def print_candidates(candidates, npix, iblk, plan=None):
     for candidate in candidates:
         print(cand2str(candidate, npix, iblk))
 
-def cand2str_wcs(c, iblk, plan):
-    s1 = cand2str(c, plan.npix, iblk)
+def cand2str_wcs(c, iblk, plan, raw_noise_level):
+    s1 = cand2str(c, plan.npix, iblk, raw_noise_level)
     total_sample = iblk*plan.nt + c['time']
     tsamp_s = plan.tsamp_s
     obstime_sec = total_sample*plan.tsamp_s
     mjd = plan.tstart.mjd + obstime_sec.value/3600/24
     dmdelay_ms = c['dm']*tsamp_s.to(units.millisecond)
-    
     dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
     lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
     coord = plan.wcs.pixel_to_world(lpix, mpix)
     s2 = f'\t{total_sample}\t{obstime_sec.value:0.4f}\t{mjd:0.9f}\t{dm_pccm3.value:0.2f}\t{coord.ra.deg:0.8f}\t{coord.dec.deg:0.6f}'
     return s1+s2
 
-def print_candidates_with_wcs(candidates, iblk, plan):
+def print_candidates_with_wcs(candidates, iblk, plan, raw_noise_level):
     for c in candidates:
-        print(cand2str_wcs(c, iblk, plan))
+        print(cand2str_wcs(c, iblk, plan, raw_noise_level))
 
 def grid_candidates(cands, field='snr', npix=256):
     g = np.zeros((npix, npix))
@@ -694,7 +817,11 @@ def get_parser():
     parser.add_argument('--dump-uvdata', type=int, help='Dump input UV data every N blocks', metavar='N')
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
-    
+    parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
+    parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract')
+    parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
+    parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna number')
+    parser.set_defaults(subtract  = True)
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
     parser.set_defaults(show      = False)
@@ -718,7 +845,7 @@ def get_parser():
     
     parser.set_defaults(os        = "2.1,2.1")
     parser.set_defaults(xclbin    = "binary_container_1.xclbin.golden")
-    parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
+    #parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
     #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
 
     return parser
@@ -741,7 +868,7 @@ class VisSource:
 
     def __fits_file_iter(self):
         for input_data in self.fitsfile.time_blocks(self.plan.nt):
-            input_flat = craco.bl2array(input_data) # convert to dictionary - ordered by baseline
+            input_flat = craco.bl2array(input_data) # convert to array - ordered by baseline
             yield input_flat
 
     def __iter__(self):
@@ -817,7 +944,7 @@ def _main():
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan)+'\n')
+            candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
