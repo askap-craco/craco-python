@@ -57,6 +57,7 @@ if __name__ == '__main__':
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
+        scripts=['scripts/export_miriad.sh'],
         entry_points = {
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
@@ -70,7 +71,10 @@ if __name__ == '__main__':
                                 'ccapfits2uvfits=craco.ccapfits2uvfits:_main',
                                 'ccapfits2fil=craco.ccap2fil:_main',
                                 'ccaphdr=craco.ccaphdr:_main',
-                                'plot_cardcap=craco.plot_cardcap:_main'
+                                'plot_cardcap=craco.plot_cardcap:_main',
+                                'plot_calibration=craco.calibration:_main',
+                                'plot_cand=craco.plot_cand:_main'
+                                
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
