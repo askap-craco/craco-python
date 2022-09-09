@@ -397,30 +397,44 @@ class Pipeline:
         self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
 
         if hasattr(plan.values, 'calibration') and plan.values.calibration:
-            self.set_calibration(plan.values.calibration)
+            calfile = plan.values.calibration
+            gains = calibration.load_gains(calfile)
+            log.info('Loaded calibration gains %s from calfile %s', gains.shape, plan.values.calibration)
+            self.set_calibration_gains(gains)
         else:
-            self.set_calibration(None)
+            self.set_calibration_gains(None)
 
-    def set_calibration(self, calfile):
+    def set_calibration_gains(self, gains):
         '''
-        Set the calibration to the given calfile
+        Set the calibration to the given set of gains
         Sets internal calibration arrays and counts valid (noflagged) data for subsequent scaling calculations
         if calfile is None sets the gains asn solution array to None and assumes the number of input cells is plan.nf*plan.nbl
         '''
-        if calfile is None:
+        if gains is None:
             self.gains = None
             self.solarray = None
             self.__ninput_cells = self.plan.nf*self.plan.nbl
         else:
-            self.gains = calibration.load_gains(calfile)
+            #self.gains = calibration.load_gains(calfile)
+            self.gains = gains
             self.solarray = calibration.gains2solarray(self.plan, self.gains)
             self.__ninput_cells = self.num_input_cells
             ntotal = self.plan.nf * self.plan.nbl
             pcflag = (ntotal - self.__ninput_cells) / ntotal*100.
             snincrease = np.sqrt(self.__ninput_cells)
-            log.info('Loaded calibration from %s with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
-                     calfile, self.__ninput_cells, ntotal, pcflag, snincrease)
+            log.info('Loaded calibration with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
+                      self.__ninput_cells, ntotal, pcflag, snincrease)
         return self
+
+    def set_channel_flags(self, channels, flagval: bool):
+        '''
+        Set the channel flags to the given flagval.
+        chanrange: list of channel numbers that can be used in numpy index
+        flagval: boolean. True = flagged
+        '''
+        g = self.gains.copy() # todo: is this necessary?
+        g[:,chanrange,:].mask = flagval
+        return self.set_calibration_gains(g)
     
     def copy_mainbuf(p):
         '''
@@ -606,10 +620,13 @@ class Pipeline:
 
             log.info('Finished clearing pipeline')
 
-    def calibrate_input(self, input_flat):
+    def calibrate_input(self, input_flat_raw):
         # Apply calibration solutions -  Multiply by solution aray
+        # Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
         if self.solarray is not None:
-            input_flat *= self.solarray
+            input_flat = self.solarray*input_flat_raw
+        else:
+            input_flat = input_flat_raw.copy()
 
         # subtract average over time
         if hasattr(self.plan.values, 'subtract') and self.plan.values.subtract:
