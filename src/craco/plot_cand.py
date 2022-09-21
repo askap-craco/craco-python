@@ -23,6 +23,7 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-o','--output', help='Output file name')
     parser.add_argument('-t','--threshold', help='Cut candidates below this threshold',  type=float)
+    parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -48,7 +49,7 @@ def _main():
                       
                       
     for f in values.files:
-        c = np.loadtxt(f, dtype=dtype)
+        c = np.loadtxt(f, dtype=dtype, max_rows=values.maxcount)
         if values.threshold is not None:
             c = c[c['SNR'] >= values.threshold]
             
