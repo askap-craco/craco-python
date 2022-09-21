@@ -42,6 +42,7 @@ def gains2solarray(plan, soln):
     '''
     npol = 2
     solnarray = np.zeros((plan.nbl, plan.nf, npol), np.complex64)
+    mask = np.zeros((plan.nbl, plan.nf, npol), dtype=bool)
     for ibl, blid in enumerate(plan.baseline_order):
         a1,a2 = bl2ant(blid)
         s1 = soln[a1-1,:,:]
@@ -49,12 +50,15 @@ def gains2solarray(plan, soln):
         p = s1*np.conj(s2)
         solnarray[ibl,:,0] = p[...,0]
         solnarray[ibl,:,1] = p[...,1]
+        mask[ibl,:,0] = p.mask[...,0]
+        mask[ibl,:,1] = p.mask[...,1]
 
     solnarray[solnarray != 0] = 1/solnarray[solnarray != 0]
 
     # update shape
     solnarray.shape = (plan.nbl, plan.nf, npol, 1)
-    solnarray = np.ma.masked_equal(solnarray, 0)
+    mask.shape = solnarray.shape
+    solnarray = np.ma.masked_array(solnarray, mask)
 
     return solnarray
 
