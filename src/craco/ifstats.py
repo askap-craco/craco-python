@@ -14,6 +14,15 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+fields = {'default': ('rx_discards_phy',
+           'tx_global_pause','tx_global_pause_duration',
+           'rx_global_pause','rx_global_pause_duration',
+           'rx_prio3_pause','rx_prio3_pause_duration',
+           'tx_prio3_pause','tx_prio3_pause_duration')}
+
+rxqueues = [f'rx{i:d}_bytes' for i in range(40)]
+fields['rxqueues'] = rxqueues
+
 class NetInterface:
     def __init__(self, ifname):
         self.ifname = ifname
@@ -37,12 +46,9 @@ class NetInterface:
 
     def poll_stats(self, values):
         d = self.get_statistics()
-        counts = ('rx_discards_phy',
-                  'tx_global_pause','tx_global_pause_duration',
-                  'rx_global_pause','rx_global_pause_duration',
-                  'rx_prio3_pause','rx_prio3_pause_duration',
-                  'tx_prio3_pause','tx_prio3_pause_duration')
-        print(self.ifname, values.field, '(Gbps) ', ' '.join(counts))
+        field_list = fields[values.field_template]
+        print(self.ifname, values.field, '(Gbps) ', ' '.join(field_list))
+        
 
         while True:
             time.sleep(values.sleep)
@@ -51,13 +57,9 @@ class NetInterface:
             diffpersec = diff / values.sleep
             scale = 8/1e9
             dout = diffpersec * scale
-            countvalues = [ddiff(d, dnext, cf) for cf in counts]
+            countvalues = [ddiff(d, dnext, cf) for cf in field_list]
             print(f'{dout:0.1f}', ' '.join(map(str,countvalues)))
             d = dnext
-
-                            
-            
-    
 
 def ddiff(d1, d2, f):
     try:
@@ -73,6 +75,7 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-s','--sleep', type=float, help='sleep time', default=1.0)
     parser.add_argument('-f','--field', help='Field to print', default='rx_bytes_phy')
+    parser.add_argument('-t','--field-template', help='Extra fields to print', choices=fields.keys(), default='default')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

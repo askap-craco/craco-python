@@ -53,6 +53,7 @@ def frame_id_iter(i, fid0, fidoff):
             log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
+        yield frame_id, b
         frame_id += fidoff
         last_frameid = curr_frameid
         last_bat = curr_bat
@@ -61,7 +62,15 @@ def frame_id_iter(i, fid0, fidoff):
 class CcapMerger:
     def __init__(self, fnames):
         self.fnames = fnames
-        self.ccap = [CardcapFile(f) for f in self.fnames]
+        self.ccap = []
+        for f in self.fnames:
+            try:
+                cc = CardcapFile(f)
+                self.ccap.append(cc)
+            except:
+                log.exception('Error opening file %s', f)
+                raise
+
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
@@ -85,6 +94,13 @@ class CcapMerger:
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
+
+    @property
+    def beams(self):
+        '''
+        Returns array of beams available in thei file
+        '''
+        return self.ccap[0].beams
 
     @property
     def fcent(self):
@@ -134,7 +150,6 @@ class CcapMerger:
         antnos = [a+1 for a in range(self.nant)]
         return antnos
         
-
     @property
     def nant(self):
         n = self.ccap[0].mainhdr['NANT']
@@ -177,8 +192,13 @@ class CcapMerger:
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
+<<<<<<< HEAD
+        packets_per_block = 4*self.nbeam
+        fidoff = 2048
+=======
         packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
         fidoff = 2048 # Every frame always increments the number of samples by 2048
+>>>>>>> 0c346fbbd98ad6c746b25ebc2520421e687d3a98
 
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
         

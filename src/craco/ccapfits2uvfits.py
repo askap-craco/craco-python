@@ -62,11 +62,10 @@ def _main():
     nbeam = merge.nbeam
 
     antnos = merge.antnos
-    beam = 0 # TODO
-    source_list = list(md.sources(beam).values())
     fcm = Parset.from_file(values.fcm)
     antennas = get_antennas(fcm)
     log.debug('FCM %s contained %d antennas %s', values.fcm, len(antennas), antennas)
+    log.info('Merge containes %d beams: %s', merge.nbeam, merge.beams)
 
     # fits format is for UVW in seconds
     # we set the scale parameter in the firts format to max out the integers for
@@ -78,19 +77,27 @@ def _main():
     tstart = merge.mjd0.value + inttime/3600/24 / 2
     time_scale = 1*u.day # I can't use inttime here, asthere's a bug in the scaling and I don't understadn the AIPS convention of 2 DATE random parameters and whether i should encode JD0
     # as midning on the first day of hte observation, or not.
-    
-    uvout = CorrUvFitsFile(values.output,
-                           merge.fcent,
-                           merge.foff,
-                           merge.nchan,
-                           merge.npol,
-                           tstart,
-                           source_list,
-                           antennas,
-                           instrume='CRACO',
-                           output_dtype=dt,
-                           bmax=bmax,
-                           time_scale=time_scale)
+
+    uvout_beams = []
+
+    for ibeam, beam in enumerate(merge.beams):
+        source_list = list(md.sources(beam).values())
+        assert values.output.endswith('.uvfits')
+        fileout = values.output.replace('.uvfits',f'_beam{beam:02d}.uvfits')
+        log.info('Opening file %s', fileout)
+        uvout = CorrUvFitsFile(fileout,
+                               merge.fcent,
+                               merge.foff,
+                               merge.nchan,
+                               merge.npol,
+                               tstart,
+                               source_list,
+                               antennas,
+                               instrume='CRACO',
+                               output_dtype=dt,
+                               bmax=bmax,
+                               time_scale=time_scale)
+        uvout_beams.append((beam, uvout))
 
     try:
         for iblk, (fid, blk) in enumerate(merge.block_iter()):
@@ -99,29 +106,36 @@ def _main():
                 break
         
             weights = 1-blk.mask.astype(np.float32) # 0 if flagged. 1 if OK.
-            blidx = 0
             mjd = merge.fid_to_mjd(fid)
             uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
             sourceidx = md.source_index_at_time(mjd.value)+ 1 # FITS standard starts at 1
             sourcename = md.source_name_at_time(mjd.value)
-            log.debug('ibld=%s mjd=%s source=%s id=%d', iblk, mjd.value, sourcename, sourceidx)
+            log.debug('ibld=%s mjd=%s source=%s id=%d shape=%s fid=%s', iblk, mjd.value, sourcename, sourceidx, blk.shape, fid)
+            # blk shape is (nchan, nbeam, nint, nbl, npol, 2)
+            assert blk.shape[2] == 1, f'Cant handle nint != 1 yet {blk.shape} {blk.shape[2]}'
+            
+            for ibeam, (beam, uvout) in enumerate(uvout_beams):
+                blidx = 0
+                for ia1 in range(nant):
+                    for ia2 in range(ia1, nant):
+                        uvwdiff = uvw[ia1,ibeam,:] - uvw[ia2,ibeam,:] 
+                        dblk = blk[:, ibeam,0,blidx,:,:]
+                        wblk = weights[:, ibeam, 0, blidx, :, 0] # real and imaginary part should have same flag
+                        if antflags[ia1] or antflags[ia2]:
+                            wblk[:] = 0
 
-            for ia1 in range(nant):
-                for ia2 in range(ia1, nant):
-                    uvwdiff = uvw[ia1,beam,:] - uvw[ia2,beam,:] 
-                    dblk = blk[:, beam,0,blidx,:,:]
-                    wblk = weights[:, beam, 0, blidx, :, 0] # real and imaginary part should have same flag
-                    if antflags[ia1] or antflags[ia2]:
-                        wblk[:] = 0
+                        t = iblk
+                        t = None # Don't use the integration time for encoding timestamp - it doesn't work yet
+                        uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, sourceidx)
+                        blidx += 1
 
-                    t = iblk
-                    t = None # Don't use the integration time for encoding timestamp - it doesn't work yet
-                    uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, sourceidx)
-                    blidx += 1
+    except:
+        log.exception('Exception doing processing')
     finally:
-        print('Closing output file')
-        uvout.close()
+        log.info('Closing output files')
+        for (beam, uvout) in uvout_beams:
+            uvout.close()
             
 
 if __name__ == '__main__':

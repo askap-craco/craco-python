@@ -69,12 +69,12 @@ if __name__ == '__main__':
                                 'ccapmerger=craco.cardcapmerger:_main',
                                 'metadatafile=craco.metadatafile:_main',
                                 'ccapfits2uvfits=craco.ccapfits2uvfits:_main',
+                                'linkdirs=craco.linkdirs:_main',
                                 'ccapfits2fil=craco.ccap2fil:_main',
                                 'ccaphdr=craco.ccaphdr:_main',
                                 'plot_cardcap=craco.plot_cardcap:_main',
                                 'plot_calibration=craco.calibration:_main',
                                 'plot_cand=craco.plot_cand:_main'
-                                
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',

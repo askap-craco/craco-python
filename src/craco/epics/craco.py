@@ -11,6 +11,7 @@
 #
 # and
 from .pyepics import EpicsSubsystem
+import time
 
 class Craco(EpicsSubsystem):
     """
@@ -51,6 +52,36 @@ class Craco(EpicsSubsystem):
         del d['card']
         self.call_ioc_function(f"c:{card:02d}:F_cracoConfigure", locals())
 
+
+    def enable_card(self, block:int, card: int, enable: bool):
+        assert 1 <= block <= 7
+        assert 1 <= card <= 12
+        self.write_correlator_card(block, card, 'F_craco:enablePacketiser_O', enable)
+        self.write_correlator_card(block, card, 'F_craco:enableSubsystem_O', enable)
+
+    def enable_card_events(self, block:int, cardlist):
+        '''
+        Enable CRACO go event for cards in the card list
+        cards numbered 1-12 inclusive
+        call anytiem before cracoStart. It will persist but not accross IOC restarts
+        without a config change to theIOC
+
+        Can use this to disable particular cards from sending data
+        '''
+
+        mask = 0
+        for c in cardlist:
+            assert 1 <= c <= 12
+            mask |= 1 << (c - 1)
+
+        self.write(f'acx:s{block:02d}:evtf:WF2:enable_fo1.MSKV', hex(mask), wait=True)
+
+    def start_block(self, block:int):
+        self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
+        time.sleep(1)
+        self.write(f'acx:s{block:02d}:evtf:craco:enable', 1, wait=True)
+        time.sleep(1)
+        self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
 
     def start_shelf(self, block:int, cardlist):
         '''
