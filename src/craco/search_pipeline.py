@@ -426,7 +426,7 @@ class Pipeline:
                       self.__ninput_cells, ntotal, pcflag, snincrease)
         return self
 
-    def set_channel_flags(self, channels, flagval: bool):
+    def set_channel_flags(self, chanrange, flagval: bool):
         '''
         Set the channel flags to the given flagval.
         chanrange: list of channel numbers that can be used in numpy index
