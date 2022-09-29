@@ -945,9 +945,8 @@ def _main():
     p = Pipeline(device, xbin, plan, alloc_device_only)
     if values.flag_chans:
         log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
-        #p.set_channel_flags(values.flag_chans, True)
-        p.set_channel_flags(slice(70,130), True)
-        p.set_channel_flags(slice(210, None), True)
+        p.set_channel_flags(values.flag_chans, True)
+
 
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
     uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
