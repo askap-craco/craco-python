@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Template for making scripts to run from the command line
+Plot cRACO candidates roughly
 
 Copyright (C) CSIRO 2022
 """
@@ -16,6 +16,24 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+dtype = np.dtype([('SNR',np.float32),
+                  ('lpix', np.uint16),
+                  ('mpix', np.uint16),
+                  ('boxc_width', np.uint8),
+                  ('time', np.int),
+                  ('dm', np.int),
+                  ('iblk', np.int),
+                  ('rawsn', np.int),
+                  ('total_sample', np.int),
+                  ('obstime_sec', np.float32),
+                  ('mjd', np.float64),
+                  ('dm_pccm3', np.float32),
+                  ('ra_deg', np.float64),
+                  ('dec_deg', np.float64)])
+
+def load_cands(fname, maxcount=None):
+    c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
+    return c
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -24,6 +42,8 @@ def _main():
     parser.add_argument('-o','--output', help='Output file name')
     parser.add_argument('-t','--threshold', help='Cut candidates below this threshold',  type=float)
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
+    parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
+    parser.add_argument('-d','--dm', help='DM to filter for', type=float)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -32,26 +52,18 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    dtype = np.dtype([('SNR',np.float32),
-                      ('lpix', np.uint16),
-                      ('mpix', np.uint16),
-                      ('boxc_width', np.uint8),
-                      ('time', np.int),
-                      ('dm', np.int),
-                      ('iblk', np.int),
-                      ('rawsn', np.int),
-                      ('total_sample', np.int),
-                      ('obstime_sec', np.float32),
-                      ('mjd', np.float64),
-                      ('dm_pccm3', np.float32),
-                      ('ra_deg', np.float64),
-                      ('dec_deg', np.float64)])
-                      
-                      
     for f in values.files:
-        c = np.loadtxt(f, dtype=dtype, max_rows=values.maxcount)
+        c = load_cands(f)
         if values.threshold is not None:
             c = c[c['SNR'] >= values.threshold]
+
+        if values.pixel is not None:
+            lpix, mpix = map(int, values.pixel.split(','))
+            c = c[(c['lpix'] == lpix) & (c['mpix']==mpix)]
+
+        if values.dm is not None:
+            c = c[c['dm'] == values.dm]
+            
             
         fig, ax = pylab.subplots(2,2)
         dmhist = ax[0,0]

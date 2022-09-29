@@ -13,6 +13,7 @@ from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
+from craft.craco import printstats
 
 from craft import uvfits
 from craft import craco
@@ -411,18 +412,18 @@ class Pipeline:
         if calfile is None sets the gains asn solution array to None and assumes the number of input cells is plan.nf*plan.nbl
         '''
         if gains is None:
-            self.gains = None
-            self.solarray = None
-            self.__ninput_cells = self.plan.nf*self.plan.nbl
+            shape = (self.plan.maxant, self.plan.nf, 2)
+            mask = np.zeros(shape, dtype=bool)
+            self.gains = np.ma.masked_array(np.ones(shape, dtype=np.complex64), mask=mask)
         else:
-            #self.gains = calibration.load_gains(calfile)
             self.gains = gains
-            self.solarray = calibration.gains2solarray(self.plan, self.gains)
-            self.__ninput_cells = self.num_input_cells
-            ntotal = self.plan.nf * self.plan.nbl
-            pcflag = (ntotal - self.__ninput_cells) / ntotal*100.
-            snincrease = np.sqrt(self.__ninput_cells)
-            log.info('Loaded calibration with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
+
+        self.solarray = calibration.gains2solarray(self.plan, self.gains)
+        self.__ninput_cells = self.num_input_cells
+        ntotal = self.plan.nf * self.plan.nbl
+        pcflag = (ntotal - self.__ninput_cells) / ntotal*100.
+        snincrease = np.sqrt(self.__ninput_cells)
+        log.info('Loaded calibration with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
                       self.__ninput_cells, ntotal, pcflag, snincrease)
         return self
 
@@ -433,7 +434,10 @@ class Pipeline:
         flagval: boolean. True = flagged
         '''
         g = self.gains.copy() # todo: is this necessary?
-        g[:,chanrange,:].mask = flagval
+        
+        # OMFG - if you do g[:,chanrange,:].mask if chanrange if a list of inxeds, it doesn't work, but if it's a slice it does work. But if you do g.mask[:,chanrange,:] it works for both
+        g.mask[:,chanrange,:] = flagval 
+        
         return self.set_calibration_gains(g)
     
     def copy_mainbuf(p):
@@ -598,7 +602,7 @@ class Pipeline:
     def clear_buffers(self, values):
         '''
         Clear main buffer and boxcar and history
-        Works wehtehr we've decieded to map the buffers or not
+        Works whethr we've decieded to map the buffers or not
 
         For some reason you can't just set the values. But you can run the FDMT 11 times and it will work        '''
         log.info('Clearing mainbuf data NBLK=%s', NBLK)
@@ -624,7 +628,12 @@ class Pipeline:
         # Apply calibration solutions -  Multiply by solution aray
         # Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
         if self.solarray is not None:
-            input_flat = self.solarray*input_flat_raw
+            # If data is already polsummed, then average the solutions before multiplying
+            if self.solarray.ndim == 4 and input_flat_raw.ndim == 3:
+                sols = self.solarray.mean(axis=2)
+                input_flat = sols*input_flat_raw
+            else:
+                input_flat = self.solarray*input_flat_raw
         else:
             input_flat = input_flat_raw.copy()
 
@@ -650,7 +659,7 @@ class Pipeline:
             input_std = np.sqrt(real_std**2+ imag_std**2)/np.sqrt(2) # I think this is right do do quadrature noise over all calibrated data
             # noise over everything
             stdgain = targrms / input_std
-            log.debug('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s', real_std, imag_std, input_std, stdgain)
+            log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std, imag_std, input_std, stdgain, targrms)
             input_flat *= stdgain
 
         return input_flat
@@ -690,7 +699,7 @@ class Pipeline:
         noise_gain = np.sqrt(nsum)*fft_scale
         return (signal_gain, noise_gain)
 
-    def copy_input(self, input_flat, values):
+    def copy_input(self, input_flat, values, calibrate=True):
         '''
         Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
@@ -698,13 +707,16 @@ class Pipeline:
         If 4 dimensional, the polarisations are averaged before continuing
         the copies to the device
 
+        if calibrate is True, calibrates input
+
         '''
         #input flat is (nbl, nf, nt) or (nbl, nf, npol nt)
+        if calibrate:
+            input_flat = self.calibrate_input(input_flat, values)
 
-        input_flat = self.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
-        self.fast_baseline2uv(input_flat, self.uv_out)
-        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out[:,:,:,:].real*(values.input_scale))
-        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out[:,:,:,:].imag*(values.input_scale))
+        self.fast_baseline2uv(input_flat.data, self.uv_out)
+        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
+        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
         self.inbuf.copy_to_device()
 
         return self
@@ -831,13 +843,17 @@ def get_parser():
     parser.add_argument('--dump-fdmt-hist-buf', type=int, help='Dump FDMT history buffer every N blocks', metavar='N')
     parser.add_argument('--dump-boxcar-hist-buf', type=int, help='Dump Boxcar history buffer every N blocks', metavar='N')
     parser.add_argument('--dump-candidates', type=int, help='Dump candidates every N blocks', metavar='N')
-    parser.add_argument('--dump-uvdata', type=int, help='Dump input UV data every N blocks', metavar='N')
+    parser.add_argument('--dump-uvdata', type=int, help='Dump input UV data very N blocks', metavar='N')
+    parser.add_argument('--dump-input', type=int, help='Dump calibrated baseline data every N blocks', metavar='N')
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
     parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
     parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract')
     parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna number')
+    parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
+    parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
+
     parser.set_defaults(subtract  = True)
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
@@ -878,7 +894,7 @@ class VisSource:
         self.values = values
         if self.values.injection_file is None:
             self.fv = None
-            log.info('Injectiing data from fits %s', self.fitsfile)
+            log.info('Reading data from fits %s', self.fitsfile)
         else:
             log.info('Injecting data described by %s', values.injection_file)
             self.fv = FakeVisibility(plan, values.injection_file, int(1e6))
@@ -922,9 +938,16 @@ def _main():
     # Create a pipeline
     alloc_device_only = values.dump_mainbufs is not None or \
                         values.dump_fdmt_hist_buf is not None or \
-                        values.dump_boxcar_hist_buf is not None
+                        values.dump_boxcar_hist_buf is not None or \
+                        values.dump_input is not None or \
+                        values.print_dm0_stats
     
     p = Pipeline(device, xbin, plan, alloc_device_only)
+    if values.flag_chans:
+        log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
+        #p.set_channel_flags(values.flag_chans, True)
+        p.set_channel_flags(slice(70,130), True)
+        p.set_channel_flags(slice(210, None), True)
 
     uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
     uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
@@ -949,7 +972,12 @@ def _main():
             break
 
         log.debug("Running block %s", iblk)
-        p.copy_input(input_flat, values) # take the input into the device
+
+        input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
+        if do_dump(values.dump_input, iblk):
+            input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+
+        p.copy_input(input_flat_cal, values, calibrate=False) # take the input into the device
         
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
@@ -962,6 +990,10 @@ def _main():
         total_candidates += len(candidates)
         for c in candidates:
             candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
+
+        if values.print_dm0_stats:
+            bc = p.boxcar_history.copy_from_device().nparr
+            print('DM0 image stats', printstats(bc[0,...]), f'shape={bc.shape}')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
