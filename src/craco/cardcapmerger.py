@@ -192,14 +192,8 @@ class CcapMerger:
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
         '''
-<<<<<<< HEAD
-        packets_per_block = 4*self.nbeam
-        fidoff = 2048
-=======
         packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
         fidoff = 2048 # Every frame always increments the number of samples by 2048
->>>>>>> 0c346fbbd98ad6c746b25ebc2520421e687d3a98
-
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
         
         while True:
