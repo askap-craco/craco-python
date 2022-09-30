@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 
 from setuptools import find_packages, setup
 
@@ -38,6 +39,7 @@ def parse_requirements(filename):
 requirements = parse_requirements('requirements.txt')
 
 
+
 if __name__ == '__main__':
     setup(
         name='craco',
@@ -57,7 +59,7 @@ if __name__ == '__main__':
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
-        scripts=['scripts/export_miriad.sh'],
+        scripts=glob.glob('*/*.sh'),
         entry_points = {
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
