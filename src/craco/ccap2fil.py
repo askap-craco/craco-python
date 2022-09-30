@@ -11,7 +11,7 @@ import logging
 from craco.cardcap import CardcapFile
 from craco.cardcapmerger import CcapMerger
 from craft.sigproc import SigprocFile
-
+from craco.cmdline import strrange
 
 log = logging.getLogger(__name__)
 
@@ -72,14 +72,25 @@ class FileManager:
         for key, f in self.files:
             f.fin.close()
 
+def antidx2num(a1, a2):
+    if a1 < a2:
+        ma1, ma2 = a1, a2
+    else:
+        ma1, ma2 = a2, a1
+        
+
+    return (ma1,ma2)
+
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-a','--autos', default='autos', help='Write  antenna autos to separate files with this postfix')
     parser.add_argument('-s','--sum-autos',default='ics', help='Write sum of antenna autos with this postfix')
-    #parser.add_argument('-c','--crossamp', nargs='?', const='ca', help='Write baseline amps to separate files (lots of files')
+    parser.add_argument('-c','--crossamp', help='Write baseline amplitudes for baselines to these 1-based antenna numbers (strrange)', type=strrange)
     parser.add_argument('-b','--sum-crossamp', default='cas', help='Write sum of baseline cross amplitude with this postfix')
+
     parser.add_argument('-p','--prefix', default='', help='Add this prefix before the output filename')
     parser.add_argument(dest='files', nargs='+')
     parser.add_argument('--polsum', action='store_true', help='Sum polarisations')
@@ -106,6 +117,17 @@ def _main():
 
     if values.sum_crossamp:
         files.add_file(('crossum',0), values.sum_crossamp)
+
+    if values.crossamp:
+        for a1 in values.crossamp: # 1 based
+            for a2 in range(1,nant+1):
+                if a1 == a2: # autos aren't included
+                    continue
+
+                ma1, ma2 = antidx2num(a1,a2)
+                    
+                files.add_file(('crossamp',(ma1,ma2)), f'cross_ak{ma1:02d}_ak{ma2:02d}')
+        
 
     products, revproducts, auto_products, cross_products = merger.indexes
     beam = 0
@@ -144,6 +166,20 @@ def _main():
             dcsum = dabs.mean(axis=0)
             log.debug(f'CROSS shape {dout.shape} {d.shape} {dcsum.shape} {dabs.shape}')
             files.put(('crossum',0),dcsum)
+
+        if values.crossamp:
+            for a1 in values.crossamp:
+                for a2 in range(1, nant+1):
+                    # warning, this is a bit off the cuff
+                    if a1 == a2: # autos aren't included
+                        continue
+                    ma1,ma2 = antidx2num(a1,a2)
+                    blid = revproducts[(ma1,ma2)]
+                    d = dout[beam, blid, ...]
+                    dabs = np.sqrt(d[...,0]**2 + d[...,1]**2)
+                    files.put(('crossamp', (ma1, ma2)), dabs)
+                    
+
             
             
         
