@@ -53,7 +53,7 @@ def frame_id_iter(i, fid0, fidoff):
             log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
-        yield frame_id, b
+            # yield frame_id, b WTF!@
         frame_id += fidoff
         last_frameid = curr_frameid
         last_bat = curr_bat
@@ -211,7 +211,7 @@ class CcapMerger:
             flagged_array = [p is None or p[1] is None for p in packets]
             fids = [None if p is None else p[0] for p in packets]
             finished = all(finished_array)
-            log.debug('Finished %s %s - flagged %s FIDS=%s', finished, finished_array, flagged_array, fids)
+            log.debug('Got packets. Finished=%s %s - flagged %s FIDS=%s', finished, finished_array, flagged_array, fids)
             
             if finished:
                 break
