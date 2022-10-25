@@ -247,7 +247,7 @@ class CardcapFile:
         Returns true if this file is empty
         As a bug, NAXIS2=1 is also empty
         '''
-        return len(self) <= 1
+        return len(self) == 0
 
     def __len__(self):
         '''
@@ -256,7 +256,22 @@ class CardcapFile:
         Although - if its' empty, NAXIS2 will be 1
         Even though it's empty. That is a bug.
         '''
-        return self.mainhdr['NAXIS2']
+        nax2 = self.mainhdr['NAXIS2']
+        if nax2 == 1: # Bug - file not properly close and its empty
+            nbytes = os.path.getsize(self.fname)
+            datalen = nbytes - self.hdr_nbytes
+            groupsize = self.dtype.itemsize
+            ngroups = datalen // groupsize
+            if ngroups == 1: # bug - if it wasn't closed properly and no data arrived, it has size=1. Just set it to zer
+                mylen = 0
+            else:
+                mylen = ngroups
+                
+            warnings.warn(f'CCAP file {self.fname} was not closed correctly. Estimating ngroups from size={nbytes} datalen={datalen} len={ngroups}')
+        else:
+            mylen = nax2
+
+        return mylen
 
     def time_of_frame_id(self, frame_id):
         '''
@@ -651,7 +666,7 @@ class FpgaCapturer:
         del self.rdma_buffers
 
 class CardCapturer:
-    def __init__(self, values, primary=False):
+    def __init__(self, values, primary=False, pvcache=None):
         rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
         log.info('Starting card capture %s', values)
         self.values = values
@@ -708,9 +723,19 @@ class CardCapturer:
         send_delay = 0
         self.num_cmsgs = num_cmsgs
         
-        log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype}')
-        
-        fpgaMask = 0x3f
+
+        fpgaMask = values.fpga_mask
+#        for ifpga in range(6):
+#            if (ifpga + 1) in values.fpga:
+#                bit = 1
+#            else:
+#                bit = 0
+#
+#            fpgaMask <<= 1
+#            fpgaMask |= bit
+            
+        log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype} fpgaMask=0x{fpgaMask:x}')
+
         enMultiDest = False # fixed
         enPktzrDbugHdr = enable_debug_header
         enPktzrTestData = values.enable_test_data
@@ -730,7 +755,7 @@ class CardCapturer:
 
         # configure CRACO on all FPGAS
         logging.info('Starting CRACO via EPICS')
-        ctrl = CracoEpics(values.prefix+':')
+        ctrl = CracoEpics(values.prefix+':', pvcache)
         self.ctrl = ctrl
         card_freqs = ctrl.get_channel_frequencies(shelf, card).reshape(6,4,9) # (6 fpgas, 4 coarse channels, 9 fine channels)
         fdiffs = card_freqs[:, :, 1:] - card_freqs[:, :, :-1]
@@ -918,6 +943,10 @@ class CardCapturer:
             if nblk >= self.values.num_msgs:
                 break
 
+
+def hexstr(s):
+    return int(s, 16)
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Raw download and saving ROCE data from correlator cards', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -942,6 +971,7 @@ def _main():
     parser.add_argument('--tscrunch', help='Tscrunch by this factor before saving', type=int, default=1, choices=(1,2,4,8,16,32,64))
     parser.add_argument('--mpi', action='store_true', help='RunMPI version', default=False)
     parser.add_argument('--workaround-craco63', action='store_true', help='CRACO63 workaround', default=False)
+    parser.add_argument('--fpga-mask', type=hexstr, help='(hex) FPGA mask for configuration', default=0x3f)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -982,6 +1012,26 @@ def _main():
             
         comm.Barrier()
 
+        # only rank 0 gets EPICS data - otherwise lots of processes drown EPICS
+        if rank == 0:
+            # cache the values by reading
+            syncbat = ctrl.read('F_syncReset:startBat_O')
+            ctrl.read('md2:targetName_O')
+            ctrl.read('md2:scanId_O')
+            ctrl.read('md2:schedulingblockId_O')
+            ctrl.read('F_options:altFirmwareDir_O')
+
+            for shelf in values.block:
+                dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
+                iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+                for card in values.card:
+                    ctrl.get_channel_frequencies(shelf, card)
+
+            pvcache = ctrl.cache
+
+        # broadcast the cache to everyone
+        pvcache = comm.bcast(pvcache, root=0)
+
         if rank < len(block_cards):
             my_block, my_card, my_fpga =  block_cards[rank]
             my_values = copy.deepcopy(values)
@@ -994,7 +1044,6 @@ def _main():
             devidx = my_fpga % 2
             my_values.device = devices[devidx]
 
-
             if values.outfile is None:
                 my_values.outfile = None
             else:
@@ -1002,7 +1051,7 @@ def _main():
                 my_values.outfile += f'_b{my_block:02d}_c{my_card:02d}+f{my_fpga:d}.fits'
                 
             log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloaing card={my_values.card} block {my_values.block} fpga={my_values.fpga} to {my_values.outfile}')
-            ccap = CardCapturer(my_values, primary)
+            ccap = CardCapturer(my_values, primary, pvcache)
         else:
             log.info(f'Launched too may processes for me to do anything useful. Rank {rank} goin to sleep to get out of the way')
             my_values = None
@@ -1012,11 +1061,12 @@ def _main():
         if rank == 0:
             ccap.configure()
             # disable all cards, and enable only the ones we want
-            blk = values.block[0]
-            assert len(values.block) == 1, 'Cant start like that currently'
+            #blk = values.block[0]
+            #assert len(values.block) == 1, 'Cant start like that currently'
 
             # Enable only the cards we want.
-            ctrl.enable_card_events(blk, values.card)
+            for blk in values.block:
+                ctrl.enable_card_events(blk, values.card)
             # Normally do start() here but it would re-enable everything,
             # so just start this block
             #ctrl.start_block(blk)
