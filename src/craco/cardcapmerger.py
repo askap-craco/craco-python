@@ -46,6 +46,8 @@ def frame_id_iter(i, fid0, fidoff):
         curr_bat = currblock['bat'][0]
         curr_frameid = currblock['frame_id'][0]
 
+        assert curr_frameid >= frame_id, 'Block should have a timestamp now or in the future'
+
         if curr_frameid == frame_id:
             b = currblock
             log.debug(f'HIT frame_id={frame_id} hit {curr_bat}')
@@ -53,11 +55,12 @@ def frame_id_iter(i, fid0, fidoff):
             log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
-            # yield frame_id, b WTF!@
+        yield curr_frameid, b
+        
         frame_id += fidoff
         last_frameid = curr_frameid
         last_bat = curr_bat
-        yield curr_frameid, b
+
 
 class CcapMerger:
     def __init__(self, fnames):
@@ -186,11 +189,13 @@ class CcapMerger:
     def fid_to_mjd(self, fid):
         return self.ccap[0].time_of_frame_id(fid)
 
-    def block_iter(self):
+    def block_iter(self, frac_finished_threshold=0.9):
         '''
         Returns an iterator that returns blocks of data
         Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
         Mask is true (invalid) if frameID missing from file, or file has terminated
+
+        Iteration finishes when the fraction of files that have finished is greater than frac_finihsed_threshold
         '''
         packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
         fidoff = 2048 # Every frame always increments the number of samples by 2048
@@ -210,8 +215,11 @@ class CcapMerger:
             assert len(packets) == len(iters)
             flagged_array = [p is None or p[1] is None for p in packets]
             fids = [None if p is None else p[0] for p in packets]
-            finished = all(finished_array)
-            log.debug('Got packets. Finished=%s %s - flagged %s FIDS=%s', finished, finished_array, flagged_array, fids)
+            num_finished = sum(finished_array) # True is 1 and Flase is 0, so this is the number of finished things
+            frac_finished = num_finished/len(finished_array)
+            finished = frac_finished >= frac_finished_threshold
+
+            log.debug('Got packets. Finished=%s  %s %s - flagged %s FIDS=%s', finished, frac_finished, finished_array, flagged_array, fids)
             
             if finished:
                 break
@@ -225,6 +233,7 @@ class CcapMerger:
             mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
             newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
             log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
+            outfid = None
 
             for ip, (fid, p) in enumerate(packets):
                 assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
@@ -235,6 +244,7 @@ class CcapMerger:
                     mask[ip,...] = True
                     # data is already 0, but now it's masked anyway
                 else: # mask is already false = valid data
+                    outfid = fid
                     if self.nbeam == 1: # Data order is just (4, 1, nint_per_frame)
                         blk = p['data']
                         #print('initial shape', p.shape, blk.shape)
@@ -260,7 +270,7 @@ class CcapMerger:
             mask = mask[self.fidxs.flatten(),...]
             dout = np.ma.masked_array(dout,mask)
                 
-            yield (fid, dout)
+            yield (outfid, dout)
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

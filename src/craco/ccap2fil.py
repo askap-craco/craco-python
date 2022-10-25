@@ -90,7 +90,7 @@ def _main():
     parser.add_argument('-s','--sum-autos',default='ics', help='Write sum of antenna autos with this postfix')
     parser.add_argument('-c','--crossamp', help='Write baseline amplitudes for baselines to these 1-based antenna numbers (strrange)', type=strrange)
     parser.add_argument('-b','--sum-crossamp', default='cas', help='Write sum of baseline cross amplitude with this postfix')
-
+    parser.add_argument('--flagval', default='zero', choices=('zero','mean'), help='Set flagged/missing data to (zero|mean)')
     parser.add_argument('-p','--prefix', default='', help='Add this prefix before the output filename')
     parser.add_argument(dest='files', nargs='+')
     parser.add_argument('--polsum', action='store_true', help='Sum polarisations')
@@ -142,9 +142,17 @@ def _main():
         # (nbeam, nbl, ntime, npol, nchan, 2)
         dout = np.transpose(dout, [1,3,2,4,0,5]).astype(np.float32)
         assert dout.shape == (nbeam, nbl, ntime, npol, nchan, 2)
+
         
         if values.polsum:
             dout = dout.mean(axis=3, keepdims=True)
+
+        if values.flagval == 'mean': # take mean over time
+            meanv = dout.mean(axis=2, keepdims=True)
+            raise NotImplementedError('This is too hard')
+            #meanmask = np.any(dout.mask, axis=2)
+            #dout[dout.mask].data += meanv[meanmask] # slightly dodgey, assumes original value was zero
+
             
         assert nbeam == 1, 'Dont support more than one beam yet'
 

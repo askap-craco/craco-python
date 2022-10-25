@@ -8,6 +8,7 @@ import os
 import sys
 import logging
 import subprocess
+from subprocess import PIPE
 import time
 
 log = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ class NetInterface:
     def get_statistics(self):
         cmd = ['/sbin/ethtool','-S',self.ifname]
         cmd =  ' '.join(cmd)
-        p = subprocess.run(cmd, shell=True, capture_output=True, encoding='utf=8', check=True)
+        p = subprocess.run(cmd, shell=True, stdout=PIPE, stderr=PIPE, encoding='utf=8', check=True)
         d = {}
         for line in p.stdout.split('\n')[1:]:
             if line.strip() == '':
