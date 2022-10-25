@@ -34,39 +34,39 @@ class FileManager:
             npolout = 1
 
         self.npolout = npolout
-        hdr = {'nbits':32,
-               'nchans':self.merger.nchan,
-               'nifs':npolout,
-               'tsamp':self.merger.inttime,
-               'fch1':self.merger.fch1,
-               'foff':self.merger.foff,
-               'src_raj':0,
-               'src_dej':0,
-               'tstart':float(self.merger.mjd0.mjd)
-        }
 
-        
-        filename = f'{self.values.prefix}{suffix}.fil'
-        log.debug('Opening file %s with header %s', filename, hdr)
-        f = SigprocFile(filename, 'wb', hdr)
-        self.files[key] = f
+        for beam in self.merger.beams:
+            hdr = {'nbits':32,
+                   'nchans':self.merger.nchan,
+                   'nifs':npolout,
+                   'tsamp':self.merger.inttime,
+                   'fch1':self.merger.fch1,
+                   'foff':self.merger.foff,
+                   'src_raj':0,
+                   'src_dej':0,
+                   'tstart':float(self.merger.mjd0.mjd)
+            }
+            
+            
+            filename = f'{self.values.prefix}{suffix}_b{beam:02d}.fil'
+            log.debug('Opening file %s with header %s', filename, hdr)
+            f = SigprocFile(filename, 'wb', hdr)
+            self.files[(key, beam)] = f
 
-    def get_file(self, key):
-        return self.files[key]
+    def get_file(self, key, beam=0):
+        return self.files[(key, beam)]
 
     def put(self, key, data):
-        f = self.get_file(key)
-        log.debug(f'Writing {data.shape} {data.dtype} to {key} {f.filename} mean={data.mean()} rms={data.std()}')
+        log.debug(f'Writing {data.shape} {data.dtype} to {key} mean={data.mean()} rms={data.std()}')
 
         # Check last 2 dimensions of input are (NIF, NCHAN)
         assert data.shape[-2:] == (self.npolout, self.merger.nchan), f'Input shape needs to be in (T, IF, NCHAN) order. Shape was: {data.shape} expected (X, {self.npolout}, {self.merger.nchan})'
 
-        #assert data.dtype == np.float32, f'Can only handle 32 bit float outputs - otherwise need to change header {data.dtype}'
+        assert data.shape[0] == len(self.merger.beams), f'Expected first axis of shape={data.shape} to have nbeams={len(self.merger.beams)} size'
 
-        # need the second data to take out the masked array part and just get the data
-        # without the mask
-        
-        data.astype(np.float32).data.tofile(f.fin)
+        for ibeam, beam in enumerate(self.merger.beams):
+            f = self.get_file(key, beam)
+            data[ibeam, ...].astype(np.float32).data.tofile(f.fin)
 
     def close():
         for key, f in self.files:
@@ -86,7 +86,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-a','--autos', default='autos', help='Write  antenna autos to separate files with this postfix')
+    parser.add_argument('-a','--autos', help='Write  antenna autos to separate files with this postfix - if not specified it wont write autos')
     parser.add_argument('-s','--sum-autos',default='ics', help='Write sum of antenna autos with this postfix')
     parser.add_argument('-c','--crossamp', help='Write baseline amplitudes for baselines to these 1-based antenna numbers (strrange)', type=strrange)
     parser.add_argument('-b','--sum-crossamp', default='cas', help='Write sum of baseline cross amplitude with this postfix')
@@ -130,7 +130,6 @@ def _main():
         
 
     products, revproducts, auto_products, cross_products = merger.indexes
-    beam = 0
         
     for fid, dout in merger.block_iter():
         (nchan,nbeam,ntime,nbl,npol,_) = dout.shape
@@ -154,22 +153,23 @@ def _main():
             #dout[dout.mask].data += meanv[meanmask] # slightly dodgey, assumes original value was zero
 
             
-        assert nbeam == 1, 'Dont support more than one beam yet'
+        #assert nbeam == 1, 'Dont support more than one beam yet'
 
         if values.autos:
             for iant,idx in enumerate(auto_products):
-                d = dout[beam,idx,:,:,:,0]
+                d = dout[:,idx,:,:,:,0]
                 files.put(('auto',iant), d)
 
         if values.sum_autos:
-            d = dout[beam,auto_products,:,:,:,0]
+            d = dout[:,auto_products,:,:,:,0]
             log.debug(f'ICS dshape={d.shape}/{d.dtype} dout.shape={dout.shape}/{dout.dtype}')
-            assert d.shape[0] == len(auto_products)
+            assert d.shape[0] == len(auto_products), f'Unexpectged output shape {d.shape}'
+            # OMG - specifying index array makes it the first axis
             d = d.mean(axis=0)
             files.put(('ics',0), d)
 
         if values.sum_crossamp:
-            d = dout[beam,cross_products,...]
+            d = dout[:,cross_products,...]
             dabs = np.sqrt(d[...,0]**2 + d[...,1]**2)
             dcsum = dabs.mean(axis=0)
             log.debug(f'CROSS shape {dout.shape} {d.shape} {dcsum.shape} {dabs.shape}')

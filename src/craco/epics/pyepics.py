@@ -10,15 +10,23 @@ class EpicsSubsystem:
 
     """
 
-    def __init__(self, prefix: str):
+    def __init__(self, prefix: str, pvcache: dict = {}):
         self._prefix = prefix
+        self.cache = pvcache
         # self._ctx = Context()
 
-    def read(self, pvname: str):
+    def read(self, pvname: str, timeout:float = 5.0):
         """
         read from an EPICS PV
         """
-        return caget(f"{self._prefix}{pvname}")
+        key = f"{self._prefix}{pvname}"
+
+        value = self.cache.get(key, None)
+        if value is None:
+            value = caget(key, timeout=timeout)
+            self.cache[key] = value
+            
+        return value
 
     def write(self, pvname: str, value: Any, timeout: float = 5.0, wait=True):
         """
