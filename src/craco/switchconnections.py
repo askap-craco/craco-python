@@ -34,7 +34,7 @@ def _main():
             for fpga in ('135','246'):
                 port = startport + i // 4
                 lane = i % 4
-                print(f'Ethernet1/{port}/{lane+1} b{blk} c{card} f{fpga}')
+                print(f'Ethernet1/{port}/{lane+1} b{blk} c{card:02d} f{fpga}')
                 i += 1
                 
     
