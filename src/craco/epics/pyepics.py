@@ -13,6 +13,7 @@ class EpicsSubsystem:
     def __init__(self, prefix: str, pvcache: dict = {}):
         self._prefix = prefix
         self.cache = pvcache
+        assert self.cache is not None
         # self._ctx = Context()
 
     def read(self, pvname: str, timeout:float = 5.0):
@@ -22,7 +23,7 @@ class EpicsSubsystem:
         key = f"{self._prefix}{pvname}"
 
         value = self.cache.get(key, None)
-        if value is None:
+        if value is None or True:
             value = caget(key, timeout=timeout)
             self.cache[key] = value
             

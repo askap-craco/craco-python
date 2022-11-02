@@ -666,7 +666,7 @@ class FpgaCapturer:
         del self.rdma_buffers
 
 class CardCapturer:
-    def __init__(self, values, primary=False, pvcache=None):
+    def __init__(self, values, primary=False, pvcache={}):
         rdma_transport.setLogLevel(rdma_transport.logType.LOG_DEBUG)
         log.info('Starting card capture %s', values)
         self.values = values
