@@ -952,12 +952,8 @@ def hexstr(s):
     return int(s, 16)
 
 def dump_rankfile(values):
-    hosts = []
-    with open(values.hostfile, 'r') as hf:
-        for line in hf:
-            bits = line.split()
-            hosts.append(bits[0])
-
+    import mpiutil
+    hosts = mpiutil.parse_hostfile(values.hostfile)
     log.debug("Hosts %s", hosts)
     nranks = len(values.block)*len(values.card)*len(values.fpga)
     total_cards = len(values.block)*len(values.card)
@@ -983,9 +979,8 @@ def dump_rankfile(values):
                     fout.write(s)
                     rank += 1
 
-def _main():
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Raw download and saving ROCE data from correlator cards', formatter_class=ArgumentDefaultsHelpFormatter)
+
+def add_arguments(parser):
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-d','--device', help='RDMA device', default='mlx5_0')
     parser.add_argument('-p','--port', help='RDMA port', type=int, default=1)
@@ -1015,6 +1010,11 @@ def _main():
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
     pol_group.add_argument('--dual-pol', help='Dual pol mode', action='store_true')
+
+def _main():
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    parser = ArgumentParser(description='Raw download and saving ROCE data from correlator cards', formatter_class=ArgumentDefaultsHelpFormatter)
+    add_arguments(parser)
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -1026,9 +1026,7 @@ def _main():
 
     if values.dump_rankfile:
         dump_rankfile(values)
-
         sys.exit(0)
-
 
     if values.mpi:
         import mpi4py.rc
