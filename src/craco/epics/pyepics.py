@@ -23,8 +23,10 @@ class EpicsSubsystem:
         key = f"{self._prefix}{pvname}"
 
         value = self.cache.get(key, None)
-        if value is None or True:
+        if value is None:
             value = caget(key, timeout=timeout)
+            if value is None:
+                raise ValueError(f'Could not key {key}')
             self.cache[key] = value
             
         return value

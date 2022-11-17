@@ -922,10 +922,14 @@ class CardCapturer:
 
 
     def __del__(self):
-        for f in self.fpga_cap:
-            del f
-        del self.fpga_cap
-        del self.ctrl
+        if hasattr(self, 'fpag_cap'):
+            for f in self.fpga_cap:
+                del f
+            
+            del self.fpga_cap
+
+        if hasattr(self, 'ctrl'):
+            del self.ctrl
 
     def clear_headers(self):
         zerohdr = np.zeros(hdr_size, dtype=np.uint32)
@@ -946,6 +950,38 @@ class CardCapturer:
 
 def hexstr(s):
     return int(s, 16)
+
+def dump_rankfile(values):
+    hosts = []
+    with open(values.hostfile, 'r') as hf:
+        for line in hf:
+            bits = line.split()
+            hosts.append(bits[0])
+
+    log.debug("Hosts %s", hosts)
+    nranks = len(values.block)*len(values.card)*len(values.fpga)
+    total_cards = len(values.block)*len(values.card)
+    ncards_per_host = (total_cards + len(hosts))//len(hosts)
+    #nranks_per_host = (nranks + len(hosts)) // len(hosts)
+    nranks_per_host = ncards_per_host*6
+    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas')
+
+    rank = 0
+    with open(values.dump_rankfile, 'w') as fout:
+        for block in values.block:
+            for card in values.card:
+                for fpga in values.fpga:
+                    hostidx = rank // nranks_per_host
+                    hostrank = rank % nranks_per_host
+                    host = hosts[hostidx]
+                    slot = 1 # fixed because both cards are on NUMA=1
+                    # Put different FPGAs on differnt cores
+                    evenfpga = fpga % 2 == 0
+                    core = rank % 10
+                    slot = 1
+                    s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
+                    fout.write(s)
+                    rank += 1
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -968,11 +1004,13 @@ def _main():
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
     parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser (0-11)', type=int, default=11)
     parser.add_argument('--samples-per-integration', help='Number of samples per integration', type=int, choices=(16, 32, 64), default=32)
-    parser.add_argument('--tscrunch', help='Tscrunch by this factor before saving', type=int, default=1, choices=(1,2,4,8,16,32,64))
+    parser.add_argument('--tscrunch', help='Tscrunch by this factor before saving', type=int, default=1, choices=(1,2,4,8,16,32,64,128))
     parser.add_argument('--mpi', action='store_true', help='RunMPI version', default=False)
     parser.add_argument('--workaround-craco63', action='store_true', help='CRACO63 workaround', default=False)
     parser.add_argument('--fpga-mask', type=hexstr, help='(hex) FPGA mask for configuration', default=0x3f)
     parser.add_argument('--dump-per-beam', action='store_true', help='Dump per beam, rather than per beamformer frame', default=False)
+    parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
+    parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -984,6 +1022,12 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+
+    if values.dump_rankfile:
+        dump_rankfile(values)
+
+        sys.exit(0)
 
 
     if values.mpi:
@@ -1014,6 +1058,7 @@ def _main():
         comm.Barrier()
 
         # only rank 0 gets EPICS data - otherwise lots of processes drown EPICS
+        pvcache = None
         if rank == 0:
             # cache the values by reading
             syncbat = ctrl.read('F_syncReset:startBat_O')
@@ -1029,8 +1074,10 @@ def _main():
                     ctrl.get_channel_frequencies(shelf, card)
 
             pvcache = ctrl.cache
+            log.debug(f'Cache contains {len(pvcache)} entries {pvcache}')
 
         # broadcast the cache to everyone
+
         pvcache = comm.bcast(pvcache, root=0)
 
         if rank < len(block_cards):
@@ -1066,11 +1113,11 @@ def _main():
             #assert len(values.block) == 1, 'Cant start like that currently'
 
             # Enable only the cards we want.
-            for blk in values.block:
-                ctrl.enable_card_events(blk, values.card)
+            ctrl.enable_events_for_blocks_cards(values.block, values.card)
             # Normally do start() here but it would re-enable everything,
             # so just start this block
             #ctrl.start_block(blk)
+            #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
             ccap.start()
 
         comm.Barrier()

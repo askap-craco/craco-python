@@ -17,5 +17,5 @@ echo UCX_IB_GID_INDEX=$UCX_IB_GID_INDEX
 echo UCX_IB_SL=$UCX_IB_SL
 echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 
-mpirun -v -map-by ppr:1:node  -mca pml ucx -x UCX_NET_DEVICES -x UCX_IB_SL  -x UCX_TLS  -x UCX_IB_GID_INDEX  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:16000000 -f
+mpirun -v -map-by ppr:1:node  -mca pml ucx -x UCX_NET_DEVICES -x UCX_IB_SL  -x UCX_TLS  -x UCX_IB_GID_INDEX  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2:32000000 -f
 
