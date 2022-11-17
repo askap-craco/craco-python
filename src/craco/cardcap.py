@@ -736,7 +736,7 @@ class CardCapturer:
             
         log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype} fpgaMask=0x{fpgaMask:x}')
 
-        enMultiDest = False # fixed
+        enMultiDest = values.dump_per_beam
         enPktzrDbugHdr = enable_debug_header
         enPktzrTestData = values.enable_test_data
         lsbPosition = values.lsb_position
@@ -972,6 +972,7 @@ def _main():
     parser.add_argument('--mpi', action='store_true', help='RunMPI version', default=False)
     parser.add_argument('--workaround-craco63', action='store_true', help='CRACO63 workaround', default=False)
     parser.add_argument('--fpga-mask', type=hexstr, help='(hex) FPGA mask for configuration', default=0x3f)
+    parser.add_argument('--dump-per-beam', action='store_true', help='Dump per beam, rather than per beamformer frame', default=False)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
