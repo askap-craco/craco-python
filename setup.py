@@ -76,7 +76,8 @@ if __name__ == '__main__':
                                 'ccaphdr=craco.ccaphdr:_main',
                                 'plot_cardcap=craco.plot_cardcap:_main',
                                 'plot_calibration=craco.calibration:_main',
-                                'plot_cand=craco.plot_cand:_main'
+                                'plot_cand=craco.plot_cand:_main',
+                                'switchconnections=craco.switchconnections:_main'
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
