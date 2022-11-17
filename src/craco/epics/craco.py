@@ -76,6 +76,22 @@ class Craco(EpicsSubsystem):
 
         self.write(f'acx:s{block:02d}:evtf:WF2:enable_fo1.MSKV', hex(mask), wait=True)
 
+    def enable_events_for_blocks_cards(self, blocklist, cardlist):
+        ''''
+        Enable craco go events for given blocks
+        cards number 1-12 inclsive
+        If a card isn't in the list, it is disabled
+        If the block ins't in the list it is disabled
+        '''
+        for block in range(2,7+1):
+            mask = 0 # everyghing is disabled to start with
+            for card in range(1, 12+1):
+                if block in blocklist and card in cardlist:
+                    mask |= 1 << (card - 1)
+
+            self.write(f'acx:s{block:02d}:evtf:WF2:enable_fo1.MSKV', hex(mask), wait=True)
+
+
     def start_block(self, block:int):
         self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
         time.sleep(1)
@@ -83,7 +99,7 @@ class Craco(EpicsSubsystem):
         time.sleep(1)
         self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
 
-    def start_shelf(self, block:int, cardlist):
+    def start_async(self, blocklist, cardlist):
         '''
         Hacky way of starting a shelf
         cardlist is the list of cards to shart
@@ -93,15 +109,21 @@ class Craco(EpicsSubsystem):
 
         The correct way to run everything is to call start()
         '''
-        self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
+        for block in range(2,7):
+            self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=True)
+
         for card in range(1, 12+1):
             enable = 1 if card in cardlist else 0
             self.write_correlator_card(block, card, 'F_craco:enablePacketiser_O', enable)
             self.write_correlator_card(block, card, 'F_craco:enableSubsystem_O', enable)
 
-        self.write(f'acx:s{block:02d}:evtf:craco:enable', 1, wait=False)
+        for block in range(2,7):
+            enable = 1 if block in blocklist else 0
+            self.write(f'acx:s{block:02d}:evtf:craco:enable', enable, wait=False)
 
-
+        time.sleep(200)
+        for block in range(2,7):
+            self.write(f'acx:s{block:02d}:evtf:craco:enable', 0, wait=False)
 
     def enable_craco(self, block: int, card: int, fpga:int, enable: bool):
         '''
