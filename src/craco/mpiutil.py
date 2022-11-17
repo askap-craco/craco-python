@@ -11,6 +11,22 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 log = logging.getLogger(__name__)
 
+def parse_hostfile(hostfile):
+    '''
+    parse a host file
+    A list of host files.
+    The slots=X is ignored
+    '''
+    
+    hosts = []
+    with open(values.hostfile, 'r') as hf:
+        for line in hf:
+            bits = line.split()
+            hosts.append(bits[0])
+
+    return hosts
+
+
 class MpiPipeline:
     def __init__(self, nbeam:int):
         self.nbeam = nbeam
