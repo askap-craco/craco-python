@@ -26,7 +26,7 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    print('filename syncbat npkt frame_id bat')
+    print('filename len syncbat npkt frame_id bat')
     first_fid = None
     first_bat = None
     for f in values.files:

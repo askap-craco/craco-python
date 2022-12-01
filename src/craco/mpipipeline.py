@@ -43,6 +43,7 @@ def np2array(d):
     
     return a
 
+
 def myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements):
     s_msg = [dtx, (np2array(tx_counts), np2array(tx_displacements)), mpi_dtype]
     r_msg = [drx, (np2array(rx_counts), np2array(rx_displacements)), mpi_dtype]
@@ -58,6 +59,10 @@ def myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displa
     #comm.Alltoall([dtx, size, MPI.INT], [drx, size, MPI.INT])
 
 def proc_rx(chanid, values):
+    '''
+    Process 1 card per beam
+    1 card = 6 FGPAs
+    '''
 
     nrx = values.nrx
     nbeam = values.nbeam

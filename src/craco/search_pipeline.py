@@ -627,6 +627,7 @@ class Pipeline:
     def calibrate_input(self, input_flat_raw):
         # Apply calibration solutions -  Multiply by solution aray
         # Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
+
         if self.solarray is not None:
             # If data is already polsummed, then average the solutions before multiplying
             if self.solarray.ndim == 4 and input_flat_raw.ndim == 3:
@@ -638,7 +639,7 @@ class Pipeline:
             input_flat = input_flat_raw.copy()
 
         # subtract average over time
-        if hasattr(self.plan.values, 'subtract') and self.plan.values.subtract:
+        if self.plan.values.subtract:
             input_flat -= input_flat.mean(axis=-1, keepdims=True)
 
         # average polarisations, if necessary
@@ -848,7 +849,7 @@ def get_parser():
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
     parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
-    parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract')
+    parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract', default=True)
     parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna number')
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)

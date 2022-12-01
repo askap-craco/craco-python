@@ -101,12 +101,12 @@ def _main():
 
     try:
         for iblk, (fid, blk) in enumerate(merge.block_iter()):
-            log.debug('Starting block %s FID=%s shape=%s', iblk, fid, blk.shape)
+            mjd = merge.fid_to_mjd(fid)
+            log.debug('Starting block %s FID=%s mjd=%s shape=%s', iblk, fid, mjd, blk.shape)
             if values.nblocks == iblk:
                 break
         
             weights = 1-blk.mask.astype(np.float32) # 0 if flagged. 1 if OK.
-            mjd = merge.fid_to_mjd(fid)
             uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
             sourceidx = md.source_index_at_time(mjd.value)+ 1 # FITS standard starts at 1
