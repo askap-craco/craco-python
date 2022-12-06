@@ -19,7 +19,7 @@ def parse_hostfile(hostfile):
     '''
     
     hosts = []
-    with open(values.hostfile, 'r') as hf:
+    with open(hostfile, 'r') as hf:
         for line in hf:
             bits = line.split()
             hosts.append(bits[0])

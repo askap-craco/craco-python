@@ -952,7 +952,7 @@ def hexstr(s):
     return int(s, 16)
 
 def dump_rankfile(values):
-    import mpiutil
+    from craco import mpiutil
     hosts = mpiutil.parse_hostfile(values.hostfile)
     log.debug("Hosts %s", hosts)
     nranks = len(values.block)*len(values.card)*len(values.fpga)
