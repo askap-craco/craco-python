@@ -12,6 +12,7 @@ from craco.cardcap import CardcapFile
 from craco.cardcapmerger import CcapMerger
 from craft.sigproc import SigprocFile
 from craco.cmdline import strrange
+from IPython import embed
 
 log = logging.getLogger(__name__)
 
@@ -130,10 +131,12 @@ def _main():
         
 
     products, revproducts, auto_products, cross_products = merger.indexes
+    
         
-    for fid, dout in merger.block_iter():
+    for blkid, (fid, dout) in enumerate(merger.block_iter()):
         (nchan,nbeam,ntime,nbl,npol,_) = dout.shape
         log.debug('Got fid=%s shape=%s', fid, dout.shape)
+        sampno = blkid*ntime
 
         # order for sigproc filterbanks is [Time, IF, channel]
         # so we'll put the polarisation axis in a mostly correct order
@@ -152,26 +155,28 @@ def _main():
             #meanmask = np.any(dout.mask, axis=2)
             #dout[dout.mask].data += meanv[meanmask] # slightly dodgey, assumes original value was zero
 
-            
-        #assert nbeam == 1, 'Dont support more than one beam yet'
-
         if values.autos:
             for iant,idx in enumerate(auto_products):
                 d = dout[:,idx,:,:,:,0]
                 files.put(('auto',iant), d)
 
         if values.sum_autos:
-            d = dout[:,auto_products,:,:,:,0]
-            log.debug(f'ICS dshape={d.shape}/{d.dtype} dout.shape={dout.shape}/{dout.dtype}')
-            assert d.shape[0] == len(auto_products), f'Unexpectged output shape {d.shape}'
+            # OMG!!!! THIs is insane. If you do this you lose the first axis
+            # d = dout[:,auto_products,...,0]
+            # Bu if you slice out the final value afterwards like this, everything works sensibly.
+            # In ... sane.
+            d = dout[:,auto_products,...][...,0] 
+            assert d.shape[1] == len(auto_products), f'Unexpected output shape {d.shape}'
             # OMG - specifying index array makes it the first axis
-            d = d.mean(axis=0)
+            d = d.mean(axis=1)
+            log.debug(f'ICS dshape={d.shape}/{d.dtype} dout.shape={dout.shape}/{dout.dtype}')
+
             files.put(('ics',0), d)
 
         if values.sum_crossamp:
-            d = dout[:,cross_products,...]
-            dabs = np.sqrt(d[...,0]**2 + d[...,1]**2)
-            dcsum = dabs.mean(axis=0)
+            dc = dout[:,cross_products,...]
+            dabs = np.sqrt(dc[...,0]**2 + dc[...,1]**2)
+            dcsum = dabs.mean(axis=1)
             log.debug(f'CROSS shape {dout.shape} {d.shape} {dcsum.shape} {dabs.shape}')
             files.put(('crossum',0),dcsum)
 

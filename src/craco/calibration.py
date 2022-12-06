@@ -58,7 +58,7 @@ def gains2solarray(plan, soln):
     # update shape
     solnarray.shape = (plan.nbl, plan.nf, npol, 1)
     mask.shape = solnarray.shape
-    solnarray = np.ma.masked_array(solnarray, mask)
+    solnarray = np.ma.masked_array(solnarray, mask, fill_value=0+0j)
 
     return solnarray
 

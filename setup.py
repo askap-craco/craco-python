@@ -78,7 +78,8 @@ if __name__ == '__main__':
                                 'plot_calibration=craco.calibration:_main',
                                 'plot_cand=craco.plot_cand:_main',
                                 'switchconnections=craco.switchconnections:_main',
-                                'mpipipeline=craco.mpipipeline:_main'
+                                'mpipipeline=craco.mpipipeline:_main',
+                                'test_card_averager=craco.test_card_averager:_main'
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
