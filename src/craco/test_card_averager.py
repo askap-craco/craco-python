@@ -3,6 +3,7 @@ from craco.card_averager import Averager
 from craco.cardcap import CardcapFile
 from craco.cardcapmerger import CcapMerger
 import glob
+import time
 
 def test_averaging():
     cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
@@ -26,8 +27,16 @@ def test_averaging():
     fb0_block = fb0[:nt]
     from craco.card_averager import do_accumulate, accumulate_all
     avg = Averager(nbeam, nant, nc, nt, npol)
-    for i in range(10000):
+    niter = 10000
+    do_accumulate(avg.output, avg.rescale_scales, avg.rescale_stats, avg.nant, 0,0,fb0_block, 2,6 )
+
+    start = time.clock()
+    for i in range(niter):
         do_accumulate(avg.output, avg.rescale_scales, avg.rescale_stats, avg.nant, 0,0,fb0_block, 2,6 )
+
+    end = time.clock()
+    duration = (end - start)/niter
+    print(f'Do accumulate {niter} took {duration*1e6:0.1f} us')
 
 
 
