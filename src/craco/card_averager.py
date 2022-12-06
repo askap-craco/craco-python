@@ -16,7 +16,10 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-@njit(fastmath=True,parallel=False, locals={'v0':numba.float32, 'v1':numba.float32, 'vsqr':numba.float32,'va':numba.float32})
+real_dtype = numba.float32
+#real_dtype = numba.int32
+
+@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype, 'v1':real_dtype, 'vsqr':real_dtype,'va':real_dtype})
 def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, beam_data, vis_fscrunch=1, vis_tscrunch=1):
     '''
     Computes ICS, CAS and averaged visibilities given a block of nt integration packets from a single FPGA
@@ -51,11 +54,10 @@ def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, bea
             for ibl in range(nbl):
                 for pol in range(npol):
                     v = bd[samp2, ibl, pol, :]
-                    v0 = np.float32(v[0])
-                    v1 = np.float32(v[1])
+                    v0 = v[0]
+                    v1 = v[1]
                     vsqr = v0*v0 + v1*v1
                     va = np.sqrt(vsqr)
-                    va = vsqr
                     rescale_stats[ibeam, ibl, pol, 0] += va # Update amplitude
                     rescale_stats[ibeam, ibl, pol, 1] += vsqr # Add amplitude**2 for stdev
                     mean = rescale_scales[ibeam, ibl, pol, 0]
@@ -69,7 +71,10 @@ def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, bea
                     else:
                         cas[t,ichan] += va_scaled
                         
+
                     vis[ibl, ochan, otime] += complex(v0,v1)
+                    #vis[ibl, ochan, otime,0] += v0
+                    #vis[ibl, ochan, otime,1] += v1
 
                     
                 a2 += 1
@@ -119,9 +124,14 @@ class Averager:
         assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
         vis_nt = nt // vis_tscrunch
         vis_nc = nc // vis_fscrunch
+        if cdtype == np.complex64:
+            vishape = (nbl, vis_nc, vis_nt)
+        else: # assumed real type
+            vishape = (nbl, vis_nc, vis_nt, 2)
+            
         self.dtype = np.dtype([('ics', rdtype, (nt, nc)),
                                ('cas', rdtype, (nt, nc)),
-                               ('vis', cdtype, (nbl, vis_nc, vis_nt))])
+                               ('vis', cdtype, vishape)])
         self.output = np.zeros(nbeam, dtype=self.dtype)
         self.rescale_stats = np.zeros((nbeam, self.nbl, npol, 2), dtype=rdtype)
         self.rescale_scales = np.zeros((nbeam, self.nbl, npol,  2), dtype=rdtype)

@@ -8,13 +8,35 @@ def test_averaging():
     cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
     assert len(cardfiles) == 6
 
+    nt = 64
+    nbeam = 36
+    nbl = 465
+    nant = 30
+    nfpga = 6
+    nc = 4*nfpga
+    npol = 2
+
+
     cfiles = [CardcapFile(f) for f in cardfiles]
     merger = CcapMerger(cardfiles)
     fid, blk = next(merger.block_iter())
 
-    fileblocks = [next(f.packet_iter()) for f in cfiles]
-    from IPython import embed
-    embed()
+    fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    fb0 = fileblocks[0]
+    fb0_block = fb0[:nt]
+    from craco.card_averager import do_accumulate, accumulate_all
+    avg = Averager(nbeam, nant, nc, nt, npol)
+    for i in range(10000):
+        do_accumulate(avg.output, avg.rescale_scales, avg.rescale_stats, avg.nant, 0,0,fb0_block, 2,6 )
+
+
+
+def _main():
+    test_averaging()
+    
+if __name__ == '__main__':
+    _main()
+
     
     
 
