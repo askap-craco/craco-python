@@ -953,14 +953,18 @@ def hexstr(s):
 
 def dump_rankfile(values):
     from craco import mpiutil
-    hosts = mpiutil.parse_hostfile(values.hostfile)
+    hosts = sorted(set(mpiutil.parse_hostfile(values.hostfile)))
     log.debug("Hosts %s", hosts)
     nranks = len(values.block)*len(values.card)*len(values.fpga)
     total_cards = len(values.block)*len(values.card)
-    ncards_per_host = (total_cards + len(hosts))//len(hosts)
+    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts)
     #nranks_per_host = (nranks + len(hosts)) // len(hosts)
     nranks_per_host = ncards_per_host*6
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas')
+    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
+
+    assert nranks_per_host * len(hosts) >= nranks
+    from IPython import embed
+    #embed()
 
     rank = 0
     with open(values.dump_rankfile, 'w') as fout:

@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 from craco.card_averager import Averager
-from craco.cardcap import CardcapFile
+from craco.cardcap import CardcapFile, get_single_packet_dtype
 from craco.cardcapmerger import CcapMerger
+import numpy as np
 import glob
 import time
 
 def test_averaging():
     cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
-    assert len(cardfiles) == 6
+    #assert len(cardfiles) == 6
 
     nt = 64
     nbeam = 36
@@ -16,13 +17,16 @@ def test_averaging():
     nfpga = 6
     nc = 4*nfpga
     npol = 2
+    polsum = npol == 1
 
+    
+    #cfiles = [CardcapFile(f) for f in cardfiles]
+    #merger = CcapMerger(cardfiles)
+    #fid, blk = next(merger.block_iter())
 
-    cfiles = [CardcapFile(f) for f in cardfiles]
-    merger = CcapMerger(cardfiles)
-    fid, blk = next(merger.block_iter())
-
-    fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    #fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    dtype = get_single_packet_dtype(nbl, True, polsum)
+    fileblocks = [np.zeros((nbeam*nc*nt), dtype=dtype) for fpga in range(nfpga)]
     fb0 = fileblocks[0]
     fb0_block = fb0[:nt]
     from craco.card_averager import do_accumulate, accumulate_all
