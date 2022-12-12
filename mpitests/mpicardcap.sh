@@ -13,6 +13,7 @@ hostfile=mpi_seren.txt
 
 # save the rankfile
 cardcap --hostfile $hostfile --dump-rankfile $rankfile $@
+echo "Created rankfile $rankfile"
 ifaces=enp216s0,enp175s0
 
 enable_hcoll=0
