@@ -23,7 +23,8 @@ ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca p
 tcpargs="--mca pml ob1 --mca btl tcp,vader,self" # --mca btl_tcp_if_include $ifaces"
 
 # runwith the rankfile
-cmd="mpirun -rf $rankfile   --report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST $commonargs $ucxargs `which cardcap` --mpi $@"
+# add --report-bindings
+cmd="mpirun -rf $rankfile   -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST $commonargs $ucxargs `which cardcap` --mpi $@"
 echo $cmd
 $cmd
 
