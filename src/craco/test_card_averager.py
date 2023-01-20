@@ -10,7 +10,6 @@ from numba.typed import List
 from pylab import *
 from IPython import embed
 
-
 nt = 64
 nbeam = 36
 nant = 30
@@ -37,12 +36,9 @@ for a1 in range(nant):
 def test_timing():
     cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
     assert len(cardfiles) == 6
-
-    cfiles = [CardcapFile(f) for f in cardfiles]
-    merger = CcapMerger(cardfiles)
-    fid, blk = next(merger.block_iter())
-
-    fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    #fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    dtype = get_single_packet_dtype(nbl, True, polsum)
+    fileblocks = [np.zeros((nbeam*nc*nt), dtype=dtype) for fpga in range(nfpga)]
     fb0 = fileblocks[0]
     fb0_block = fb0[:nt]
     from craco.card_averager import do_accumulate, accumulate_all
@@ -145,23 +141,6 @@ def test_check_accumulate_all():
 
     from IPython import embed
     embed()
-
-    
-
-
-
-
-    
-            
-            
-    
-
-    
-    
-    
-
-
-
 
 def _main():
     test_averaging()
