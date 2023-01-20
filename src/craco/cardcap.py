@@ -290,6 +290,8 @@ class CardcapFile:
         :npackets: number of packets per block
         '''
 
+        assert npackets > 0, 'Invalid npackets'
+
         # workaroudn a bug - if it's empty the NAXIS2=1 and there's a single data value in there
         # just detect this condition and skip
         if len(self) > 1:
@@ -305,7 +307,7 @@ class CardcapFile:
                         shift = -1
                         packets['data'] = np.roll(packets['data'], shift, axis=0)
 
-                    log.debug('yielding packets %s %s', packets.shape, packets['data'].shape)
+                    log.debug('yielding packets shape=%s data shape=%s, npackets=%s len(packets)=%s', packets.shape, packets['data'].shape, npackets, len(packets))
 
                     yield packets
     
@@ -642,6 +644,8 @@ class FpgaCapturer:
                 d['data'] = np.roll(d['data'], shift=-1, axis=0)
 
             if self.ccap.values.tscrunch != 1:
+                # BUG: When tscrunch is 1, we average over the packest, but not inside the packet, by accident.
+                # THis will need to be fixed, but no time now. It's Xmas!
                 # OK this is slow, but it works
                 dout = np.empty(d.shape[0], dtype=d.dtype)
                 for field in ('frame_id','bat','beam_number','sample_number','channel_number','fpga_id','nprod','flags','zero1','version','zero3'):
@@ -692,6 +696,8 @@ class CardCapturer:
 
         if values.pol_sum: # if polsum is enabled, we get 2 integrations per set of debug headers
             nint_per_packet = 2
+            #assert values.tscrunch == 1, 'Dont support polsum and tscrunch - we make a mistake on the tscrunching'
+            warnings.warn('Dont support polsum and tscrunch - we make a mistake on the tscrunching')
         else:
             nint_per_packet = 1
 

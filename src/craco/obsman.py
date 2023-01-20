@@ -96,12 +96,13 @@ class Obsman:
        proc = self.process
        if self.process is not None:
             pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
-            log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}')
+            timeout = 20
+            log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
             os.killpg(pgid, signal.SIGINT)
             #proc.send_signal(signal.SIGINT)
             #proc.terminate()
             try:
-                proc.wait(5)
+                proc.wait(timeout)
             except TimeoutExpired:
                 log.warning('Process didnt complete after terminate. Doing kill')
                 os.killpg(pgid, signal.SIGKILL)

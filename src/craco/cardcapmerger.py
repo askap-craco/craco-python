@@ -198,6 +198,8 @@ class CcapMerger:
         Iteration finishes when the fraction of files that have finished is greater than frac_finihsed_threshold
         '''
         packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
+        from IPython import embed
+        embed()
         fidoff = 2048 # Every frame always increments the number of samples by 2048
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
         
