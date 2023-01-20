@@ -15,6 +15,23 @@ import warnings
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+def ibc2beamchan(ibc):
+    '''
+    Given a beam/chan index of 0 to 36beamx4chan returns the actual beam and channel
+    assumes channel beam order, with beam0-31 to start, then beams 32-35 at the end
+    i.e. the crazy beamformer ordering
+    '''
+    assert 0 <= ibc < 36*4
+
+    if ibc < 32*4:
+        beam = ibc % 32
+        chan = ibc // 32
+    else:
+        ibc2 = ibc - 32*4
+        beam = ibc2 % 4 + 32
+        chan = ibc2 // 4
+
+    return (beam, chan)
 
 def bl2ant(bl):
     '''

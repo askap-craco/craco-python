@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 from craco.cardcap import CardcapFile, NCHAN
+from numba.types import List
 
 log = logging.getLogger(__name__)
 
@@ -189,27 +190,25 @@ class CcapMerger:
     def fid_to_mjd(self, fid):
         return self.ccap[0].time_of_frame_id(fid)
 
-    def block_iter(self, frac_finished_threshold=0.9):
+    def packet_iter(self, frac_finished_threshold=0.9):
         '''
-        Returns an iterator that returns blocks of data
-        Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
-        Mask is true (invalid) if frameID missing from file, or file has terminated
-
-        Iteration finishes when the fraction of files that have finished is greater than frac_finihsed_threshold
+        Returns an iterator that returns arrays of blocks of data but without converting them 
+        into a masked array
         '''
         packets_per_block = NCHAN*self.nbeam*self.ntpkt_per_frame
         fidoff = 2048 # Every frame always increments the number of samples by 2048
         iters = [frame_id_iter(c.packet_iter(packets_per_block), self.frame_id0, fidoff) for c in self.ccap]
+        #packets = List() # TODO: Make NUMBA happy with List rather than  array
         
         while True:
             packets = []
             finished_array = []
-            for i in iters:
+            for iterno, i in enumerate(iters):
                 try:
                     packets.append(next(i))
                     finished_array.append(False)
                 except StopIteration:
-                    packets.append((None,None))
+                    packet.append((None,None))
                     finished_array.append(True)
 
             assert len(packets) == len(iters)
@@ -224,42 +223,57 @@ class CcapMerger:
             if finished:
                 break
 
-            nfile = len(self.ccap)
-            assert self.nchan == len(self.ccap)*self.nchan_per_file
-            nint_total = self.ntpkt_per_frame*self.nint_per_packet
+            yield packets, fids
 
-            shape = (nfile, self.nchan_per_file, self.nbeam, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
-            dout = np.zeros(shape, dtype=np.int16)
-            mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
-            newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
-            log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
-            outfid = None
+    def block_iter(self, frac_finished_threshold=0.9):
+        '''
+        Returns an iterator that returns blocks of data
+        Blocks have shape (nchan,nbeam,ntime,nbl,npol,2), dtype=np.int16 and are masked arrays
+        Mask is true (invalid) if frameID missing from file, or file has terminated
 
-            for ip, (fid, p) in enumerate(packets):
-                assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
-                #log.debug('ip=%s fid=%s p.shape=%s dout.shape=%s', ip, fid, p.shape, dout.shape)
-                
-                if p is None:
-                    log.debug(f'Flagged {self.ccap[ip].fname} fid={fid}')
-                    mask[ip,...] = True
-                    # data is already 0, but now it's masked anyway
-                else: # mask is already false = valid data
-                    outfid = fid
-                    if self.nbeam == 1: # Data order is just (4, 1, nint_per_frame)
-                        blk = p['data']
-                        #print('initial shape', p.shape, blk.shape)
-                        #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
-                        p.shape = (NCHAN, 1, self.ntpkt_per_frame)
-                        dout[ip,:] = p['data']
-                    else:
-                        # This reshapes for teh beams 0-31 first, then beams 32-35 next
-                        assert self.nbeam == 36
-                        blk1 = p[:32*4] 
-                        blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
-                        blk2 = p[32*4:]
-                        blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams
-                        dout[ip,:, :32, ...] = blk1['data']
-                        dout[ip,:, 32:, ...] = blk2['data']
+        Iteration finishes when the fraction of files that have finished is greater than frac_finihsed_threshold
+        '''
+        for packets, fids in self.packet_iter(frac_finished_threshold):
+            outfid, dout = self.merge_and_mask_packets(packets)
+            yield outfid, dout
+
+    def merge_and_mask_packets(self, packets):
+        nfile = len(self.ccap)
+        assert self.nchan == len(self.ccap)*self.nchan_per_file
+        nint_total = self.ntpkt_per_frame*self.nint_per_packet
+        
+        shape = (nfile, self.nchan_per_file, self.nbeam, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
+        dout = np.zeros(shape, dtype=np.int16)
+        mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
+        newshape = (self.nchan, self.nbeam, nint_total, self.nbl, self.npol, 2)
+        log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
+        outfid = None
+        
+        for ip, (fid, p) in enumerate(packets):
+            assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
+            #log.debug('ip=%s fid=%s p.shape=%s dout.shape=%s', ip, fid, p.shape, dout.shape)
+            
+            if p is None:
+                log.debug(f'Flagged {self.ccap[ip].fname} fid={fid}')
+                mask[ip,...] = True
+                # data is already 0, but now it's masked anyway
+            else: # mask is already false = valid data
+                outfid = fid
+                if self.nbeam == 1: # Data order is just (4, 1, nint_per_frame)
+                    blk = p['data']
+                    #print('initial shape', p.shape, blk.shape)
+                    #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
+                    p.shape = (NCHAN, 1, self.ntpkt_per_frame)
+                    dout[ip,:] = p['data']
+                else:
+                    # This reshapes for teh beams 0-31 first, then beams 32-35 next
+                    assert self.nbeam == 36
+                    blk1 = p[:32*4] 
+                    blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
+                    blk2 = p[32*4:]
+                    blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams
+                    dout[ip,:, :32, ...] = blk1['data']
+                    dout[ip,:, 32:, ...] = blk2['data']
 
 
             dout.shape = newshape
@@ -270,7 +284,7 @@ class CcapMerger:
             mask = mask[self.fidxs.flatten(),...]
             dout = np.ma.masked_array(dout,mask)
                 
-            yield (outfid, dout)
+        return (outfid, dout)
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

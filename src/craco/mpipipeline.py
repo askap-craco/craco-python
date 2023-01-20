@@ -10,8 +10,10 @@ import sys
 import logging
 from array import array
 from craco import cardcap
-
-
+from craco.card_averager import Averager
+from craco.cardcapmerger import CcapMerger
+import numba
+from numba.typed import List
 
 log = logging.getLogger(__name__)
 
@@ -34,16 +36,6 @@ mpi_dtype=MPI.INT32_T
 #dtype=np.uint8
 #mpi_dtype=MPI.BYTE
 
-def np2array(d):
-    '''
-    This is how :https://github.com/erdc/mpi4py/blob/master/demo/osu_alltoallv.py does it
-    '''
-    assert d.dtype == np.int32
-    a =  array('i', d)
-    
-    return a
-
-
 def myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements):
     s_msg = [dtx, (np2array(tx_counts), np2array(tx_displacements)), mpi_dtype]
     r_msg = [drx, (np2array(rx_counts), np2array(rx_displacements)), mpi_dtype]
@@ -52,13 +44,75 @@ def myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displa
     comm.Alltoallv(s_msg, r_msg)
     t_end = MPI.Wtime()
     latency = (t_end - t_start)*1e6
+
     if rank == 0:
         print(f'Latency = {latency}us')
         
     #size = dtx.size // numprocs
     #comm.Alltoall([dtx, size, MPI.INT], [drx, size, MPI.INT])
 
-def proc_rx(chanid, values):
+
+class CardFileSource:
+    def __init__(self, cardidx, context, values):
+        icard = cardidx % len(values.card)
+        iblk = cardidx  // len(values.card)
+        card = values.card[icard]
+        block = values.block[iblk]
+        fstr = f'b{block:02d}_c{card:02d}'
+        myfiles = sorted(filter(values.files, lambda f: fstr in f))
+        log.info(f'Cardidx {cardidx} icard={icard} iblk={iblk} card={card} blk={blk} has {len(myfiles)} files')
+        assert myfiles > 0, f'No files for cardidx={cardidx} {fstr}'
+        assert myfiles <= NFPGA, 'Too many files for cardidx={cardidx} {fstr}'
+        self.merger = CcapMerger(myfiles)
+
+    def packet_iter(self):
+        return self.merger.packet_iter()
+
+class Transposer:
+    def __init__(self, dtype):
+        self.tx_counts = np.zeros(numprocs, np.int32)
+        self.tx_displacements = np.zeros(numprocs, np.int32)
+        self.rx_counts = np.zeros(numprocs, np.int32)
+        self.rx_displacements = np.zeros(numprocs, np.int32)
+
+    def all2all(self, dtx):
+        mpi_dtype = self.dtype
+        s_msg = [dtx, (np2array(self.tx_counts), np2array(self.tx_displacements)), mpi_dtype]
+        r_msg = [self.drx, (np2array(self.rx_counts), np2array(self.rx_displacements)), mpi_dtype]
+        t_start = MPI.Wtime()
+        comm.Alltoallv(s_msg, r_msg)
+        t_end = MPI.Wtime()
+        latency = (t_end - t_start)*1e6
+        if rank == 0:
+            print(f'Latency = {latency}us')
+
+        return self.drx
+
+class TransposeSender(Transposer):
+    def __init__(self, cardidx, context, values):
+        super().__init__(cardidx, context, values)
+        nbeam = self.nbeam
+        self.tx_counts[:nbeam] = 1
+        self.tx_displacements[:nbeam] = np.arange(nbeam, dtype=np.int32))
+        self.drx = np.zeros((1), dtype=self.dtype) # Dummy for all toall make zero if possible
+
+    def send(self, dtx):
+        return self.all2all(dtx)
+
+class TransposeReceiver(Transposer):
+    def __init__(self, cardidx, context, values):
+        super().__init__(cardidx, context, values)
+        nbeam = self.nbeam
+        nrx = self.nrx
+        self.rx_counts[nbeam:] = 1 # receive same amount from every tx
+        self.rx_displacements[nbeam:] = np.arange(nrx, dtype=np.int32)
+        self.drx = np.zeros(nrx, dtype=self.dtype)
+        self.dtx = np.zeros((1), dtype=self.dtype) # dummy buffer for sending TODO: make zero if possible
+
+    def recv(self):
+        return self.all2all(self.dtx)
+
+def proc_rx(cardidx, context, values):
     '''
     Process 1 card per beam
     1 card = 6 FGPAs
@@ -67,41 +121,39 @@ def proc_rx(chanid, values):
     nrx = values.nrx
     nbeam = values.nbeam
     nt = values.nt
+    nant = 30
+    nc = NCHAN*NFPGA
+    npol = 1 if values.pol_sum else 2
 
     assert numprocs == nrx + nbeam
+    avg = Averager(nbeam, nant, nc, nt, npol)
+    #ccap = CardCapturer(values, pvcache=context)
+    ccap = CardFileSource(cardidx, context, values)
+    transposer = TransposeSender(cardidx, context, values)
+    # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
+    # Just need some types of the data so the list can be typed
+    # data = List()
+    #[data.append(fcap.rdma_buffers[0][0]) for fcap in ccap.fpga_cap]
 
-    # need beams on the outer
-    dtx = np.arange(nbeam*nt*ncperrx, dtype=dtype).reshape((nbeam, ncperrx,nt)) + chanid
-    drx = np.zeros_like(dtx) # should be zero at the end - ideally never allocated or written
+    for ibuf, packets in ccap.packet_iter():
+        averaged = averager.accumulate_all(packets)
+        transposer.send(averaged)
 
-    tx_counts = np.zeros(numprocs, np.int32)
-    tx_displacements = np.zeros(numprocs, np.int32)
-    rx_counts = np.zeros(numprocs, np.int32)
-    rx_displacements = np.zeros(numprocs, np.int32)
-    
-    tx_counts[:nbeam] = nt*ncperrx # send same amount to every rx
-    tx_displacements[:nbeam] = np.arange(nbeam)*nt*ncperrx
-    
-    myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements)
-
-def proc_beam(beamid, values):
+def proc_beam(beamid, context, values):
     nrx = values.nrx
     nbeam = values.nbeam
     nt = values.nt
 
     assert numprocs == nrx + nbeam
-
-    drx = np.zeros(nt*nrx*ncperrx, dtype=dtype).reshape(nrx*ncperrx, nt)
-    dtx = np.zeros_like(drx)
-    tx_counts = np.zeros(numprocs, np.int32)
-    tx_displacements = np.zeros(numprocs, np.int32)
-    rx_counts = np.zeros(numprocs, np.int32)
-    rx_displacements = np.zeros(numprocs, np.int32)
-    
-    rx_counts[nbeam:] = nt*ncperrx # receive same amount from every tx
-    rx_displacements[nbeam:] = np.arange(nrx)*nt*ncperrx
-
-    myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements)
+    transposer = TransposeReceiver(beamid, context, values)
+    cas_filterbank = None
+    ics_filterbank = None
+    vis = None
+    while True:
+        beam_data = tranposer.recv()
+        cas_filterbank.write(beam_data['cas'])
+        ics_filterbank.write(beam_data['cas'])
+        vis.write(beam_data['vis'])
 
 
     
