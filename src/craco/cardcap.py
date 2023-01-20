@@ -64,7 +64,6 @@ debughdr = [('frame_id', '<u8'), # Words 1,2
             ('zero3','<u4') # word 8
 ]
 
-
 def get_indexes(nant):
     '''
     Returns a set of array indexs that can be used to index into baseline arrays
@@ -115,6 +114,12 @@ class CardcapFile:
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
+        if self.mainhdr['NTOUTPFM'] == 0:
+            warnings.warn(f'File {fname} has tscrunch/polsum bug. Will tscrunch final integrations')
+            self.tscrunch_bug = True
+        else:
+            self.tscrunch_bug = False
+            
         self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
 
     @property
@@ -206,10 +211,14 @@ class CardcapFile:
         '''
         
         if self.npol == 2:
-            return 1
+            nint = 1
         else:
-            return 2
+            if self.tscrunch_bug: # We'll scrunch them together
+                nint = 1
+            else:
+                nint = 2
 
+        return nint
     @property
     def fpgas(self):
         '''Returns a list of fpgas in this file (1 based)'''
@@ -249,6 +258,16 @@ class CardcapFile:
         '''
         return len(self) == 0
 
+    @property
+    def ntpkt_per_frame(self):
+        if self.tscrunch_bug:
+            ntpkt = 1
+        else:
+            ntpkt = self.gethdr('NTPKFM') // self.gethdr('TSCRUNCH')
+
+        return ntpkt
+
+
     def __len__(self):
         '''
         Returns the value of NAXIS2 in the header - which should (hopefully) 
@@ -282,7 +301,16 @@ class CardcapFile:
         bat_of_frame_id = self.syncbat + int(frame_id)*27*2 # actually its frame_id * 27/32 * 64
         frame_id_t = Time(bat_of_frame_id / 1e6 / 3600 / 24, format='mjd', scale='tai')
         return frame_id_t
-        
+
+    def __fix__(self, packets):
+        if self.workaround_craco63:
+            shift = -1
+            packets['data'] = np.roll(packets['data'], shift, axis=0)
+
+        if self.tscrunch_bug:
+            packets['data'] = packets['data'].mean(axis=1, keepdims=True) 
+
+        return packets
 
     def packet_iter(self, npackets=1):
         '''
@@ -303,13 +331,9 @@ class CardcapFile:
                     if len(packets) != npackets:
                         break
                 
-                    if self.workaround_craco63:
-                        shift = -1
-                        packets['data'] = np.roll(packets['data'], shift, axis=0)
-
                     log.debug('yielding packets shape=%s data shape=%s, npackets=%s len(packets)=%s', packets.shape, packets['data'].shape, npackets, len(packets))
 
-                    yield packets
+                    yield self.__fix__(packets)
     
     def load_packets(self, count=-1, pktoffset=0):
         if len(self) == 1:# Work around bug 
@@ -318,13 +342,10 @@ class CardcapFile:
         with open(self.fname) as f:
             f.seek(self.hdr_nbytes + self.dtype.itemsize*pktoffset)
             packets = np.fromfile(f, dtype=self.dtype, count=count)
-            if self.workaround_craco63:
-                shift = -1
-                packets['data'] = np.roll(packets['data'], shift, axis=0)
         
-        return packets
+        return self.__fix__(packets)
 
-def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=False):
+def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=False, override_nint: int=None):
     '''
     Gets the numpy dtype of a single ROCE packet sent from the correlator.
 
@@ -355,6 +376,9 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     else: # dual-pol mode
         npol = 2
         nint = 1
+
+    if override_nint is not None:
+        nint = override_nint
                      
     dtype.append(('data', '<i2', (nint, nbl, npol, 2)))
     return np.dtype(dtype)
@@ -723,7 +747,7 @@ class CardCapturer:
         self.nintpacket_per_frame = nintpacket_per_frame
         self.nintout_per_frame = nintpacket_per_frame // self.values.tscrunch
 
-        assert self.values.tscrunch == 1 or self.values.tscrunch * self.values.samples_per_integration == 2048, 'Invalid tscrunch - it must be 1 or multiply SPI to 2048'
+        assert self.values.tscrunch == 1 or self.values.tscrunch * self.values.samples_per_integration == nsamp_per_frame, 'Invalid tscrunch - it must be 1 or multiply SPI to 2048'
         self.msg_shape = (num_cmsgs, self.nbeam*self.nchan, self.nintpacket_per_frame)
         self.out_shape = (self.nbeam*self.nchan, self.nintout_per_frame)
         nmsg = 1000000
