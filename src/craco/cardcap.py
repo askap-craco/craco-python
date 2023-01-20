@@ -583,7 +583,7 @@ class FpgaCapturer:
         rx.issueRequests()
         log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
 
-    def write_data(self, w):
+    def get_data(self):
         rx = self.rx
         msg_size = self.ccap.msg_size
         rx.waitRequestsCompletion()
@@ -658,11 +658,14 @@ class FpgaCapturer:
                 mask = d['beam_number'] == beam 
                 d = d[mask]
 
+        return d
 
-            if w is not None:
-                w.write(d) # write to fitsfield
-            
-        rx.issueRequests()
+    def write_data(self, w):
+        d = self.get_data()
+        if w is not None:
+            w.write(d) # write to fitsfile
+
+        self.issue_requests()
 
     def __del__(self):
         log.info(f'Deleting RX for card {self.ccap.values.card}  FPGA {self.fpga}')

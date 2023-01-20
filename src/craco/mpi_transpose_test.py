@@ -98,7 +98,6 @@ def proc_beam(beamid, values):
 
     myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements)
 
-
     
 def dump_rankfile(values):
     from craco import mpiutil

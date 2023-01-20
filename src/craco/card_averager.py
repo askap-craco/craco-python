@@ -8,6 +8,7 @@ import numpy as np
 import os
 import sys
 import logging
+os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
 
 from numba import jit,njit,prange
 import numba
@@ -19,8 +20,15 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 real_dtype = numba.float32
 #real_dtype = numba.int32
 
-@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype, 'v1':real_dtype, 'vsqr':real_dtype,'va':real_dtype})
-def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, beam_data, vis_fscrunch=1, vis_tscrunch=1):
+#@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
+#                                                       'v1':real_dtype,
+#                                                       'vsqr':real_dtype,
+#                                                       'va':real_dtype,
+#                                                       'agg_mean':real_dtype,
+#                                                       'agg_m2':real_dtype,
+#                                                       'delta':real_dtype,
+#                                                       'delta2':real_dtype})
+def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ichan, beam_data, vis_fscrunch=1, vis_tscrunch=1):
     '''
     Computes ICS, CAS and averaged visibilities given a block of nt integration packets from a single FPGA
     
@@ -28,9 +36,11 @@ def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, bea
     :output: Rescaled and averaged output. 1 per beam.
     :rescale_scales: (nbeam, nbl, npol, 2) float 32 scales to apply to vis amplitudes before adding in ICS/CAS. [0] is subtracted and [1] is multiplied. 
     :rescale_stats: (nbeam, nbl, npol, 2) flaot32 statistics of the visibility amplitues. [0] is the sum and [2] is the sum^2
+    :count: Number of samples that have so far been used to do accumulation
     :nant: number of antnenas. Should tally with number of baselines
     :ibeam: Beam number to udpate
     :ichan: Channel number to update
+    :beam_data: len(nt) list containing packets
     :vis_fscrunch: Visibility fscrunch factor
     :vis_tscrunch: Visibility tscrunch factor
     
@@ -41,10 +51,13 @@ def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, bea
     vis = output[ibeam]['vis']
     nsamp = len(beam_data)
     (nsamp2, nbl, npol, _) = beam_data[0]['data'].shape
+    rs_chan_stats = rescale_stats[ibeam, ichan, ...]
+    rs_chan_scales = rescale_scales[ibeam, ichan, ...]
     for samp in range(nsamp):
         bd = beam_data[samp]['data']
         for samp2 in range(nsamp2):
             t = samp2 + nsamp2*samp
+            agg_count = t + count + 1
             ochan = ichan // vis_fscrunch
             otime = t // vis_tscrunch
             a1 = 0
@@ -54,36 +67,46 @@ def do_accumulate(output, rescale_scales, rescale_stats, nant, ibeam, ichan, bea
             for ibl in range(nbl):
                 for pol in range(npol):
                     v = bd[samp2, ibl, pol, :]
-                    v0 = v[0]
-                    v1 = v[1]
-                    vsqr = v0*v0 + v1*v1
+                    v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
+                    v_imag= np.float32(v[1])
+                    # For ICS: Don't subtract before applying square  and square root.
+                    vsqr = v_real*v_real + v_imag*v_imag
                     va = np.sqrt(vsqr)
-                    rescale_stats[ibeam, ibl, pol, 0] += va # Update amplitude
-                    rescale_stats[ibeam, ibl, pol, 1] += vsqr # Add amplitude**2 for stdev
-                    mean = rescale_scales[ibeam, ibl, pol, 0]
-                    scale = rescale_scales[ibeam, ibl, pol, 1]
-                    va_scaled = (va - mean)*scale
-                        
+
+                    # Update mean and M2 for variance calculation using Welfords online algorithm
+                    # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+                    agg_mean = rs_chan_stats[ibl, pol, 0]
+                    agg_m2 = rs_chan_stats[ibl, pol, 1]
+                    delta = va - agg_mean
+                    agg_mean += delta / agg_count
+                    delta2 = va - agg_mean
+                    agg_m2 += delta * delta2
+                    rs_chan_stats[ibl, pol, 0] = agg_mean # Update amplitude
+                    rs_chan_stats[ibl, pol, 1] = agg_m2 # Add amplitude**2 for stdev
+                    
+                    offset = rs_chan_scales[ibl, pol, 0]
+                    scale = rs_chan_scales[ibl, pol, 1]
+                    va_scaled = (va + offset)*scale
+
+                       
                     if a1 == a2:
                         # Could just add a scaled version of v0 here, but it makes  little diffeence
                         # given there are so few autos
                         ics[t,ichan] += va_scaled
                     else:
                         cas[t,ichan] += va_scaled
-                        
+                        if t == 0:
+                            print(f'cas {t} {ichan} {va_scaled} {v0} {v1} {va} {offset} {scale} {pol} {a1}-{a2}={ibl}')
 
-                    vis[ibl, ochan, otime] += complex(v0,v1)
-                    #vis[ibl, ochan, otime,0] += v0
-                    #vis[ibl, ochan, otime,1] += v1
-
+                    vis[ibl, ochan, otime] += complex(v_real, v_imag)
                     
                 a2 += 1
-                if a2 == nant -1:
+                if a2 == nant:
                     a1 += 1
                     a2 = a1
                     
 @njit(fastmath=True, parallel=True)
-def accumulate_all(output, rescale_scales, rescale_stats, nant, beam_data, vis_fscrunch=1, vis_tscrunch=1):
+def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     npkt = len(beam_data[0])
     nbeam, nbl, npol, _ = rescale_scales.shape
@@ -107,7 +130,7 @@ def accumulate_all(output, rescale_scales, rescale_stats, nant, beam_data, vis_f
                 #print(beam, fpga, chan, didx, len(beam_data), data.shape, len(data),  npkt_per_accum, startidx,endidx)
                 #assert endidx <= len(data)
                 bd = data[startidx:endidx]
-                do_accumulate(output, rescale_scales, rescale_stats, nant, beam, ichan, bd, vis_fscrunch, vis_tscrunch)
+                do_accumulate(output, rescale_scales, rescale_stats, count, nant, beam, ichan, bd, vis_fscrunch, vis_tscrunch)
 
 
                 
@@ -133,16 +156,60 @@ class Averager:
                                ('cas', rdtype, (nt, nc)),
                                ('vis', cdtype, vishape)])
         self.output = np.zeros(nbeam, dtype=self.dtype)
-        self.rescale_stats = np.zeros((nbeam, self.nbl, npol, 2), dtype=rdtype)
-        self.rescale_scales = np.zeros((nbeam, self.nbl, npol,  2), dtype=rdtype)
+        self.rescale_stats = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
+        self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol,  2), dtype=rdtype)
+        # set default scale to 1
+        self.rescale_scales[...,1] = 1
+        self.count = 0
 
-    def reset():
+    def reset(self):
         self.output[:] = 0
         self.rescale_stats[:] = 0
+        self.count = 0
 
-    @njit(fasttmath=True, parallel=True)
+    def update_scales(self):
+        '''
+        Updates the rescale scale values - converts sum and sum^2 into mean and varaiance 
+        And sets rescale scales to subtract mean and divide by standard deviation
+
+        :see: Welfords algorithm https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+        '''
+        mean = self.rescale_stats[...,0]
+        m2 = self.rescale_stats[...,1]
+        variance = m2 / self.count
+        sample_variance = m2 / (self.count - 1)
+
+        # not sure if I should use variance, or sample variance, let's use sample variance
+        stdev = np.sqrt(variance)
+
+        offset = -mean
+        scale = 1/stdev
+
+        self.rescale_scales[...,0] = offset
+        self.rescale_scales[...,1] = scale
+
+
+        # reset stats
+        self.rescale_stats[:] = 0
+        self.count = 0
+
+    def accumulate_all(self, beam_data):
+        '''
+        Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
+        '''
+        accumulate_all(self.output,
+                       self.rescale_scales,
+                       self.rescale_stats,
+                       self.count,
+                       self.nant,
+                       beam_data,
+                       self.vis_fscrunch,
+                       self.vis_tscrunch)
+        self.count += self.nt
+
+
     def accumulate_beam(self, ibeam, ichan, beam_data):
-        do_accumulate(self.output, self.rescale_scales, self.rescale_stats, self.nant, ibeam, ichan, beam_data)
+        do_accumulate(self.output, self.rescale_scales, self.rescale_stats, self.count, self.nant, ibeam, ichan, beam_data, self.vis_fscrunch, self.vis_tscrunch)
 
 
 def _main():

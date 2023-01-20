@@ -11,6 +11,7 @@ import numpy as np
 import os
 import sys
 import logging
+from craco.utils import ibc2beamchan
 
 log = logging.getLogger(__name__)
 
@@ -31,23 +32,6 @@ READOUT_CLK = np.array((
     ((1,7),(2,5),(4,7),(7,7))
     ), dtype=np.int32)
 
-def ibc2beamchan(ibc):
-    '''
-    Given a beam/chan index of 0 to 36beamx4chan returns the actual beam and channel
-    assumes channel beam order, with beam0-31 to start, then beams 32-35 at the end
-    i.e. the crazy beamformer ordering
-    '''
-    assert 0 <= ibc < 36*4
-
-    if ibc < 32*4:
-        beam = ibc % 32
-        chan = ibc // 32
-    else:
-        ibc2 = ibc - 32*4
-        beam = ibc2 % 4 + 32
-        chan = ibc2 // 4
-
-    return (beam, chan)
 
 def pol2polidx(p):
     if p == 0 or p == 'X' or p == 'A':
