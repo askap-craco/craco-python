@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Deletes an observation
+# Inputs should not have a prefix
+# e.g. SB046779/targets/NoDrive
+
+for f in $@ ; do
+    fullpath=`ls /data/seren*/big/craco/$f/*`
+    echo deleting $fullpath
+    rm -Rf $fullpath
+done

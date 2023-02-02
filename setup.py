@@ -1,4 +1,4 @@
-import os
+scriptsimport os
 import re
 import glob
 
@@ -59,7 +59,7 @@ if __name__ == '__main__':
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
-        scripts=glob.glob('*/*.sh'),
+        scripts=glob.glob('*/*'),
         entry_points = {
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
