@@ -263,7 +263,7 @@ class CardcapFile:
         if self.tscrunch_bug:
             ntpkt = 1
         else:
-            ntpkt = self.gethdr('NTPKFM') // self.gethdr('TSCRUNCH')
+            ntpkt = self.mainhdr['NTPKFM'] // self.mainhdr['TSCRUNCH']
 
         return ntpkt
 
@@ -605,7 +605,7 @@ class FpgaCapturer:
     def issue_requests(self):
         rx = self.rx
         rx.issueRequests()
-        log.info(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
+        log.debug(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
 
     def get_data(self):
         rx = self.rx

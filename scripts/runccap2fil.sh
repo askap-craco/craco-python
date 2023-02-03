@@ -14,6 +14,7 @@ fi
 scanid=$(echo $thedir | sed s%/data/big/craco/%%)
 outdir=$target/$scanid
 echo $1 $thedir $outdir
+echo SCANID is $scanid
 mkdir -p $outdir
 cd $outdir
 
