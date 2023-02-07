@@ -48,10 +48,9 @@ def gains2solarray(plan, soln):
         s1 = soln[a1-1,:,:]
         s2 = soln[a2-1,:,:]
         p = s1*np.conj(s2)
-        solnarray[ibl,:,0] = p[...,0]
-        solnarray[ibl,:,1] = p[...,1]
-        mask[ibl,:,0] = p.mask[...,0]
-        mask[ibl,:,1] = p.mask[...,1]
+        print(solnarray.shape, p.shape)
+        solnarray[ibl,...] = p[:]
+        mask[ibl,...] = p.mask[:]
 
     solnarray[solnarray != 0] = 1/solnarray[solnarray != 0]
 
@@ -87,8 +86,6 @@ def load_gains(fname):
         miriad_g = miriadsol.g_real + 1j*miriadsol.g_imag
         miriad_gbp = miriad_bp*miriad_g
         nchan = miriad_gbp.shape[0]
-        npol = 2 # assume npol = 2 - possibly invalid but it's hard to know
-        miriad_gbp.shape = (nchan, -1, npol)
         # convert to (nant,nchan,npol) order
         miriad_gbp = np.transpose(miriad_gbp, [1,0,2])
         g = miriad_gbp

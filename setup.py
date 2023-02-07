@@ -81,7 +81,8 @@ if __name__ == '__main__':
                                 'mpipipeline=craco.mpipipeline:_main',
                                 'test_card_averager=craco.test_card_averager:_main',
                                 'obsman=craco.obsman:_main',
-                                'savescan=craco.savescan:_main'
+                                'savescan=craco.savescan:_main',
+                                'calibration=craco.calibration:_main'
             ]
         },
         classifiers=['Development Status :: 3 - Alpha',
