@@ -96,12 +96,13 @@ class Obsman:
        proc = self.process
        if self.process is not None:
             pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
-            log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}')
+            timeout = self.values.timeout
+            log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
             os.killpg(pgid, signal.SIGINT)
             #proc.send_signal(signal.SIGINT)
             #proc.terminate()
             try:
-                proc.wait(5)
+                proc.wait(timeout)
             except TimeoutExpired:
                 log.warning('Process didnt complete after terminate. Doing kill')
                 os.killpg(pgid, signal.SIGKILL)
@@ -143,6 +144,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('--timeout', type=int, help='Timeout to wait after sending signal before killing process', default=30)
     parser.add_argument(dest='cmd', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

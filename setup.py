@@ -59,7 +59,7 @@ if __name__ == '__main__':
         package_dir={'': 'src'},
         packages=find_packages('src'),
         zip_safe=False,
-        scripts=glob.glob('*/*.sh'),
+        scripts=glob.glob('scripts/*'),
         entry_points = {
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
@@ -82,8 +82,9 @@ if __name__ == '__main__':
                                 'test_card_averager=craco.test_card_averager:_main',
                                 'obsman=craco.obsman:_main',
                                 'savescan=craco.savescan:_main',
-                                'calibration=craco.calibration:_main'
-            ]
+                                'calibration=craco.calibration:_main',
+                                'dusb=craco.dusb:_main'
+            ],
         },
         classifiers=['Development Status :: 3 - Alpha',
                      'Intended Audience :: Developers',

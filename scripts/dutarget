@@ -1,0 +1,10 @@
+#!/bin/bash
+cd /data/seren-01/big/craco/
+targets=`ls -d SB*/targets/*`
+for t in $targets ; do
+    for scan in $t/* ; do
+	linkt=$(readlink -f $scan)
+	disk=$(du -h $linkt | cut -f 1)
+	echo $scan $disk
+    done
+done

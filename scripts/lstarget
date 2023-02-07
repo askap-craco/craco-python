@@ -1,0 +1,3 @@
+#!/bin/bash
+cd /data/seren-01/big/craco/
+ls -d SB*/targets/*

@@ -26,7 +26,7 @@ def mycaget(s):
         raise ValueError(f'PV {s} returned None')
     
     return r
-    
+
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -67,16 +67,32 @@ def _main():
     # subprocess.run doesn't work - if you kill with sigterm you get 'terminated' written to stdout - no exception, exit function isn't run.
     #
     proc = subprocess.Popen(cmd, shell=True)
+    finish = False
+
+    def signal_handler(signal, frame):
+        log.info(f'Got signal {signal}')
+        finish = True
+
+#    signal.signal(signal.SIGTERM, signal_handler)
+#    signal.signal(signal.SIGHUP, signal_handler)
+#    signal.signal(signal.SIGINT, signal_handler)
+    
     try:
-        proc.wait()
+        while not finish:
+            time.sleep(1)
+            if proc.returncode is not None:
+                log.info('Process self-terminated with return code %s', proc.returncode)
+            
     except KeyboardInterrupt:
         log.info('Savescan received KeyboardInterrupt/SIGINT - terminating subprocess')
+    finally:
+        log.info('Terminating process')
         proc.terminate()
         proc.wait()
 
-    log.info(f'Process completed with returncode {retcode}')
+    log.info(f'Process completed with returncode {proc.returncode}')
     exit_function()
-    
+
 
 def exit_function():
     log.info('Stopping CRACO in exit_function')

@@ -178,11 +178,15 @@ class CcapMerger:
 
     @property
     def ntpkt_per_frame(self):
-        return self.gethdr('NTPKFM') // self.gethdr('TSCRUNCH')
+        return self.ccap[0].ntpkt_per_frame
 
     @property
     def nint_per_packet(self):
         return self.ccap[0].nint_per_packet
+
+    @property
+    def tscrunch_bug(self):
+        return self.ccap[0].tscrunch_bug
 
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]
@@ -208,7 +212,7 @@ class CcapMerger:
                     packets.append(next(i))
                     finished_array.append(False)
                 except StopIteration:
-                    packet.append((None,None))
+                    packets.append((None,None))
                     finished_array.append(True)
 
             assert len(packets) == len(iters)
@@ -241,7 +245,7 @@ class CcapMerger:
         nfile = len(self.ccap)
         assert self.nchan == len(self.ccap)*self.nchan_per_file
         nint_total = self.ntpkt_per_frame*self.nint_per_packet
-        
+
         shape = (nfile, self.nchan_per_file, self.nbeam, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
         dout = np.zeros(shape, dtype=np.int16)
         mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
@@ -260,10 +264,13 @@ class CcapMerger:
             else: # mask is already false = valid data
                 outfid = fid
                 if self.nbeam == 1: # Data order is just (4, 1, nint_per_frame)
-                    blk = p['data']
                     #print('initial shape', p.shape, blk.shape)
                     #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
                     p.shape = (NCHAN, 1, self.ntpkt_per_frame)
+
+                    if self.tscrunch_bug:
+                        raise NotImplemented('I havent worked out how do to the scrunch bug get')
+                    
                     dout[ip,:] = p['data']
                 else:
                     # This reshapes for teh beams 0-31 first, then beams 32-35 next
@@ -272,17 +279,23 @@ class CcapMerger:
                     blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
                     blk2 = p[32*4:]
                     blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams
-                    dout[ip,:, :32, ...] = blk1['data']
-                    dout[ip,:, 32:, ...] = blk2['data']
+                    if self.tscrunch_bug: # average over 2 integrations
+                        blk1d = blk1['data'].mean(axis=3, keepdims=True)
+                        blk2d = blk2['data'].mean(axis=3, keepdims=True)
+                    else:
+                        blk1d = blk1['data']
+                        blk2d = blk2['data']
 
+                    dout[ip,:, :32, ...] = blk1d
+                    dout[ip,:, 32:, ...] = blk2d
 
-            dout.shape = newshape
-            mask.shape = newshape
-            
-            # permute frequency channels
-            dout = dout[self.fidxs.flatten(),...]
-            mask = mask[self.fidxs.flatten(),...]
-            dout = np.ma.masked_array(dout,mask)
+        dout.shape = newshape
+        mask.shape = newshape
+        
+        # permute frequency channels
+        dout = dout[self.fidxs.flatten(),...]
+        mask = mask[self.fidxs.flatten(),...]
+        dout = np.ma.masked_array(dout,mask)
                 
         return (outfid, dout)
 
