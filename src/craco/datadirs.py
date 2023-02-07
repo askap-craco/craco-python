@@ -89,6 +89,7 @@ class DataDirs:
             all_data.append(row)
 
         df = pd.DataFrame(all_data, columns=columns)
+        #df.style.concat(df.agg(['sum']).style) # add sum to botom https://stackoverflow.com/questions/21752399/pandas-dataframe-total-row needs later version of python
         return df
         
 

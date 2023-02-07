@@ -18,6 +18,7 @@ from craft.parset import Parset
 import scipy
 from collections import namedtuple
 from astropy import units as u
+import warnings
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +82,12 @@ def _main():
     uvout_beams = []
 
     for ibeam, beam in enumerate(merge.beams):
-        source_list = list(md.sources(beam).values())
+        full_source_list = list(md.sources(beam).values())
+        meta_source_idx = md.source_index_at_time(tstart)
+        if len(full_source_list) > 1:
+            warnings.warn(f'Metadata contains more than 1 source. Setting source table to the source at tstart={tstart} which was {full_source_list[meta_source_idx]}')
+            
+        source_list = [full_source_list[meta_source_idx]]
         assert values.output.endswith('.uvfits')
         fileout = values.output.replace('.uvfits',f'_beam{beam:02d}.uvfits')
         log.info('Opening file %s', fileout)
@@ -109,9 +115,14 @@ def _main():
             weights = 1-blk.mask.astype(np.float32) # 0 if flagged. 1 if OK.
             uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
-            sourceidx = md.source_index_at_time(mjd.value)+ 1 # FITS standard starts at 1
+            sourceidx = md.source_index_at_time(mjd.value)
             sourcename = md.source_name_at_time(mjd.value)
             log.debug('ibld=%s mjd=%s source=%s id=%d shape=%s fid=%s', iblk, mjd.value, sourcename, sourceidx, blk.shape, fid)
+            # FITS standard starts at 1
+            assert sourceidx == meta_source_idx, f'Can only write single source UV fits files for the uvfits reader. I originally wrote source source_list[0] but now I\'m getting {sourcename}'
+
+            out_sourceidx = 1 # FITS convention is the first value is 1
+             
             # blk shape is (nchan, nbeam, nint, nbl, npol, 2)
             assert blk.shape[2] == 1, f'Cant handle nint != 1 yet {blk.shape} {blk.shape[2]}'
             
@@ -127,7 +138,7 @@ def _main():
 
                         t = iblk
                         t = None # Don't use the integration time for encoding timestamp - it doesn't work yet
-                        uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, sourceidx)
+                        uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, wblk, out_sourceidx)
                         blidx += 1
 
     except:
