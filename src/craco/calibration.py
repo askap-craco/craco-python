@@ -32,7 +32,7 @@ def pltcomplex(d):
     return fig,ax
     
 
-def gains2solarray(plan, soln):
+def gains2solarray(plan, soln, npol=2):
     '''
     Retuns a complex array that can multiply with an input data cube to calbrate it
     shape: (nbl, nchan, npol, 1) - assumes the final axis (1) is time, so 
@@ -40,23 +40,35 @@ def gains2solarray(plan, soln):
     @param :plan: plane with baseline order
     @param :soln: gain solution from load_gains()
     '''
-    npol = 2
-    solnarray = np.zeros((plan.nbl, plan.nf, npol), np.complex64)
-    mask = np.zeros((plan.nbl, plan.nf, npol), dtype=bool)
-    for ibl, blid in enumerate(plan.baseline_order):
+    solnarray = soln2array(soln, plan.baseline_order, npol)
+    return solnarray
+
+
+def soln2array(soln, baseline_order, npol = 2):
+    '''
+    Retuns a complex array that can multiply with an input data cube to calbrate it
+    shape: (nbl, nchan, npol, 1) - assumes the final axis (1) is time, so 
+    np broadcasting rules will apply the same calibration to all times
+    @param :plan: plane with baseline order
+    @param :soln: gain solution from load_gains()
+    '''
+    nbl = len(baseline_order)
+    nant, nf, npol = soln.shape
+    solnarray = np.zeros((nbl, nf, npol), np.complex64)
+    mask = np.zeros((nbl, nf, npol), dtype=bool)
+    for ibl, blid in enumerate(baseline_order):
         a1,a2 = bl2ant(blid)
         s1 = soln[a1-1,:,:]
         s2 = soln[a2-1,:,:]
         p = s1*np.conj(s2)
-        solnarray[ibl,:,0] = p[...,0]
-        solnarray[ibl,:,1] = p[...,1]
-        mask[ibl,:,0] = p.mask[...,0]
-        mask[ibl,:,1] = p.mask[...,1]
-
+        for ipol in range(npol):
+            solnarray[ibl,:,ipol] = p[...,ipol]
+            mask[ibl,:,ipol] = p.mask[...,ipol]
+            
     solnarray[solnarray != 0] = 1/solnarray[solnarray != 0]
 
     # update shape
-    solnarray.shape = (plan.nbl, plan.nf, npol, 1)
+    solnarray.shape = (nbl, nf, npol, 1)
     mask.shape = solnarray.shape
     solnarray = np.ma.masked_array(solnarray, mask, fill_value=0+0j)
 
@@ -88,6 +100,7 @@ def load_gains(fname):
         miriad_gbp = miriad_bp*miriad_g
         nchan = miriad_gbp.shape[0]
         npol = 2 # assume npol = 2 - possibly invalid but it's hard to know
+        ##VG -> TODO: We need to get rid of this assumption and take into account what happens when there is only one pol in the calibration soln file
         miriad_gbp.shape = (nchan, -1, npol)
         # convert to (nant,nchan,npol) order
         miriad_gbp = np.transpose(miriad_gbp, [1,0,2])
