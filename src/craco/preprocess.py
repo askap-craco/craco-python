@@ -22,17 +22,17 @@ def normalise(block, mean = 0, std = 1):
     '''
     if type(block) == dict:
         for ibl, bldata in block.items():
-            existing_rms = bldata.std(axis=-1, keepdims=True)
+            existing_rms = bldata.std(axis=-1, keepdims=True) / np.sqrt(2)
             block[ibl] = (bldata - bldata.mean(axis=-1, keepdims=True)) * (std / existing_rms) + mean
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
-        existing_rms = block.std(axis=-1, keepdims=True)
+        existing_rms = block.std(axis=-1, keepdims=True) / np.sqrt(2)   
         block = (block - block.mean(axis=-1, keepdims = True)) * (std / existing_rms) + mean
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
     return block
 
 
-def average_pols(block):
+def average_pols(block, keepdims = True):
     '''
     Average the pol axis and remove the extra dimension. Edits it in-place
 
@@ -49,10 +49,10 @@ def average_pols(block):
     if type(block) == dict:
         for ibl, bldata in block.items():
             assert bldata.ndim == 3, f"Exptected 3 dimensions (nf, npol, nt), but got {bldata.ndim}"
-            block[ibl] = bldata.mean(axis=1).squeeze()
+            block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
-        block = block.mean(axis=2).squeeze()
+        block = block.mean(axis=2, keepdims=keepdims)
     return block
 
 
@@ -291,5 +291,3 @@ class RFI_cleaner:
                 block[..., cas_masks['t']] = 0
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
-
-
