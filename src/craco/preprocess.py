@@ -3,7 +3,7 @@ from iqrm import iqrm_mask
 import numpy as np
 from craft.craco import bl2ant
 
-def normalise(block, mean = 0, std = 1):
+def normalise(block, target_input_rms = 1):
     '''
     Normalises each baseline and channel in the visibility block to the
     specified mean and std values along the time axis.
@@ -15,18 +15,17 @@ def normalise(block, mean = 0, std = 1):
             Input visbility data of shape (nbl, nf, [npol], nt) if array, or,
             Visibility dict with nbl arrays/masked arrays of 
             (nf, [npol], nt) shape each. The npol axis is optional
-    mean: float
-            Desired mean of each channel
-    std: float
+
+    target_input_rms: float
             Desired std of each channel
     '''
     if type(block) == dict:
         for ibl, bldata in block.items():
             existing_rms = bldata.std(axis=-1, keepdims=True) / np.sqrt(2)
-            block[ibl] = (bldata - bldata.mean(axis=-1, keepdims=True)) * (std / existing_rms) + mean
+            block[ibl] = (bldata - bldata.mean(axis=-1, keepdims=True)) * (target_input_rms / existing_rms)
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         existing_rms = block.std(axis=-1, keepdims=True) / np.sqrt(2)   
-        block = (block - block.mean(axis=-1, keepdims = True)) * (std / existing_rms) + mean
+        block = (block - block.mean(axis=-1, keepdims = True)) * (target_input_rms / existing_rms)
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
     return block
@@ -64,6 +63,8 @@ def get_isMasked_nPol(block):
     elif type(data) == np.ma.core.MaskedArray:
         isMasked = True
         ndim = data.ndim
+    else:
+        raise Exception(f"Expected to get a numpy.ndarray or np.ma.core.MaskedArray, but got {type(block)} instead")
 
     if ndim == 3:
         nPol = 0
@@ -78,6 +79,7 @@ def get_isMasked_nPol(block):
 class Calibrate:
     def __init__(self, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
         self.gains_file = miriad_gains_file
+        self.baseline_order = baseline_order
         self.reload_gains()
 
         if block_dtype not in [np.ndarray, np.ma.core.MaskedArray]:
@@ -85,7 +87,7 @@ class Calibrate:
 
         self.block_dtype = block_dtype
         self.keep_masks = keep_masks
-        self.baseline_order = baseline_order
+        
 
     def reload_gains(self):
         self.ant_gains = calibration.load_gains(self.gains_file)
@@ -134,9 +136,9 @@ class RFI_cleaner:
         #Take the mean along the pol axis and rms along the time axis
 
         if self.pol_axis_exists:
-            rms = baseline_data.mean(axis=1).std(axis=-1)    
+            rms = baseline_data.mean(axis=1).std(axis=-1).squeeze()
         else:
-            rms = baseline_data.std(axis=-1)
+            rms = baseline_data.std(axis=-1).squeeze()
 
         mask, votes = iqrm_mask(rms, radius = len(rms) / 10, threshold=threshold)
         return mask
@@ -144,10 +146,13 @@ class RFI_cleaner:
     def get_time_mask(self, baseline_data, threshold = 5.0):
         #Take the mean along the pol axis and rms along freq axis
         if self.pol_axis_exists:
-            rms = baseline_data.mean(axis=1).std(axis=0)
+            print("Shape of baseline_data given to me is=  ",baseline_data.shape)
+            rms = baseline_data.mean(axis=1).std(axis=0).squeeze()
         else:
-            rms = baseline_data.std(axis=0)
+            print("Shape of baseline_data given to me is=  ~~~~~~",baseline_data.shape)
+            rms = baseline_data.std(axis=0).squeeze()
 
+        print("LEN(RMS)  =  ", len(rms))
         mask, votes = iqrm_mask(rms, radius = len(rms)/ 10, threshold=threshold)
         return mask
 
@@ -168,20 +173,23 @@ class RFI_cleaner:
         return autocorr_masks
 
     def clean_bl_using_autocorr_mask(self, ibl, baseline_data, autocorr_masks, freq, time):
+        print("Cleaning autocorr for ibl", ibl, "the ant is going to be ", bl2ant(self.baseline_order[ibl]))
+        if len(autocorr_masks) == 0:
+            return baseline_data
         ant1, ant2 = bl2ant(self.baseline_order[ibl])
         if freq:
             autocorr_freq_mask = autocorr_masks[str(ant1) + 'f'] | autocorr_masks[str(ant2) + 'f']
             if self.isMasked:
-                baseline_data[autocorr_freq_mask].mask = True
-                baseline_data[autocorr_freq_mask].data = 0
+                baseline_data.mask[autocorr_freq_mask] = True
+                baseline_data.data[autocorr_freq_mask] = 0
             else:
                 baseline_data[autocorr_freq_mask] = 0
 
         if time:
             autocorr_time_mask = autocorr_masks[str(ant1) + 't'] | autocorr_masks[str(ant2) + 't']
             if self.isMasked:
-                baseline_data[..., autocorr_time_mask].mask = True
-                baseline_data[..., autocorr_time_mask].data = 0
+                baseline_data.mask[..., autocorr_time_mask] = True
+                baseline_data.data[..., autocorr_time_mask] = 0
             else:
                 baseline_data[..., autocorr_time_mask] = 0
 
@@ -193,7 +201,15 @@ class RFI_cleaner:
         Does the IQRM magic
 
         block needs to be a np.ndarray or np.ma.core.MaskedArray
-        Each block data should have shape (nbl, nf, npol, nt) or (nbl, nf, nt)
+        Each block data should have shape (nbl, nf, npol, nt) or (nbl, nf, nt) of absolute values (np.abs(block))
+
+        All of the remaining flags need boolean values (True/False)
+        maf: Mask auto-corrs in freq (True to enable, False to disable)
+        mat: Mask auto-corrs in time (True to enable, False to disable)
+        mcf: Mask cross-corrs in freq (True to enable, False to disable)
+        mct: Mask cross-corrs in time (True to enable, False to disable)
+        mcasf: Mask cross-amp sum in freq (True to enable, False to disable)
+        mcast: Mask cross-amp sum in time (True to enable, False to disable)
 
         Returns
         -------
@@ -210,10 +226,12 @@ class RFI_cleaner:
 
         assert type(block) == self.block_dtype, "You Liar!"
 
-        self.isMasked, self.pol_axis_exists = get_isMasked_nPol(block[0])
+        self.isMasked, self.pol_axis_exists = get_isMasked_nPol(block)
 
         if maf or mat:
-            autocorr_masks = self.get_IQRM_autocorr_masks(maf, mat)
+            autocorr_masks = self.get_IQRM_autocorr_masks(block, maf, mat)
+
+            print("autocorr masks are", autocorr_masks)
         
         if mcast or mcasf:
             cas_sum = np.zeros_like(block[0])
@@ -235,12 +253,13 @@ class RFI_cleaner:
                        continue
 
                     if mct:
+                        print("Shape of baseline_data = ", baseline_data.shape)
                         bl_time_mask = self.get_time_mask(baseline_data)
-                        #print("Shape of time_mask = ", time_mask.shape)
+                        print("Shape of time_mask = ", bl_time_mask.shape)
 
                         if self.isMasked:
-                            baseline_data[..., bl_time_mask].data = 0
-                            baseline_data[..., bl_time_mask].mask = True
+                            baseline_data.data[..., bl_time_mask] = 0
+                            baseline_data.mask[..., bl_time_mask] = True
                         else:
                             baseline_data[..., bl_time_mask] = 0
 
@@ -249,8 +268,8 @@ class RFI_cleaner:
                     if mcf:
                         bl_freq_mask = self.get_freq_mask(baseline_data)
                         if self.isMasked:
-                            baseline_data[bl_freq_mask, ...].data = 0
-                            baseline_data[bl_freq_mask, ...].mask = True
+                            baseline_data.data[bl_freq_mask, ...] = 0
+                            baseline_data.mask[bl_freq_mask, ...] = True
                         else:
                             baseline_data[bl_freq_mask, ...] = 0
 
@@ -265,8 +284,8 @@ class RFI_cleaner:
             #Finally find bad samples in the CAS
             cas_masks['f'] = self.get_freq_mask(cas_sum)    #Currently the IQRM cannot support masked arrays, so passing only the data values
             if self.isMasked:
-                cas_sum[cas_masks['f']].data = 0
-                cas_sum[cas_masks['f']].mask = True
+                cas_sum.data[cas_masks['f']] = 0
+                cas_sum.mask[cas_masks['f']] = True
             else:
                 cas_sum[cas_masks['f']] = 0
 
@@ -280,11 +299,11 @@ class RFI_cleaner:
                 #cas_sum[..., cas_masks['t']] = 0
 
             if self.isMasked:
-                block[:, cas_masks['f'], ...].data = 0
-                block[:, cas_masks['f'], ...].mask = True
+                block.data[:, cas_masks['f'], ...] = 0
+                block.mask[:, cas_masks['f'], ...] = True
 
-                block[..., cas_masks['t']].data = 0
-                block[..., cas_masks['t']].mask = True
+                block.data[..., cas_masks['t']] = 0
+                block.mask[..., cas_masks['t']] = True
 
             else:
                 block[:, cas_masks['f'], ...] = 0
