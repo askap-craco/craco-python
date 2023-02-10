@@ -33,6 +33,27 @@ def ibc2beamchan(ibc):
 
     return (beam, chan)
 
+def beamchan2ibc(beam, chan):
+    '''
+    Converts beam and channel indexs into index in time from the channel beam order
+    
+    :param: beam beam nummber (0--35) includsive
+    :param: channel number (0-3) inclusive
+    :returns: IBc index (0-143)
+    '''
+    assert 0 <= beam < 36
+    assert 0 <= chan < 4
+    if beam < 32:
+        ibc = beam + chan*32
+    else:
+        ibc = 32*4 + (beam - 32) + chan*4
+
+    assert 0 <= ibc < 36*4
+
+    return ibc
+    
+    
+
 def bl2ant(bl):
     '''
     Convert baseline to antena numbers according to UV fits convention

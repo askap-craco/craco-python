@@ -14,13 +14,12 @@ fi
 scanid=$(echo $thedir | sed s%/data/big/craco/%%)
 outdir=$target/$scanid
 echo $1 $thedir $outdir
-echo SCANID is $scanid
 mkdir -p $outdir
 cd $outdir
 
 if [[ ! -d files ]] ; then
-    mkdir files
-    cmd="ln -s /data/seren-*/big/craco/$scanid/*.fits files"
+    mkdir ccap
+    cmd="ln -s /data/seren-*/big/craco/$scanid/*.fits ccap"
     echo Linking files with $cmd
     $cmd
 else
@@ -30,6 +29,8 @@ fi
 if [[ -e ics.fil ]]  ; then
     echo ics.fil already exists
 else
-    ccapfits2fil files/*.fits
+    mkdir -p filterbanks
+    cd filterbanks
+    ccapfits2fil ../ccap/*.fits
 fi
 
