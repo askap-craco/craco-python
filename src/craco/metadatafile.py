@@ -143,7 +143,7 @@ class MetadataFile:
         return self.d0['sbid']
 
     def __str__(self):
-        s = f'''Metadata for {self.fname} is SB{self.sbid} contains {len(self.data)} packets from {self.times[0].iso} to {self.times[-1].iso} = {self.times[0].mjd}-{self.times[-1].mjd} duration={(self.times[-1] - self.times[0]).datetime} d:m:s for {len(self.antnames)} antennas {self.antnames}'''
+        s = f'''Metadata for {self.fname} is SB{self.sbid} contains {len(self.data)} packets from {self.times[0].iso} to {self.times[-1].iso} = {self.times[0].mjd}-{self.times[-1].mjd} duration={(self.times[-1] - self.times[0]).datetime} d:m:s for {len(self.antnames)} antennas {self.antnames} and has sources {self.sources(0)}'''
         return s
         
 

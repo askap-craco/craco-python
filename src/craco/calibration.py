@@ -61,10 +61,10 @@ def soln2array(soln, baseline_order, npol = 2):
         s1 = soln[a1-1,:,:]
         s2 = soln[a2-1,:,:]
         p = s1*np.conj(s2)
-        for ipol in range(npol):
-            solnarray[ibl,:,ipol] = p[...,ipol]
-            mask[ibl,:,ipol] = p.mask[...,ipol]
-            
+        print(solnarray.shape, p.shape)
+        solnarray[ibl,...] = p[:]
+        mask[ibl,...] = p.mask[:]
+
     solnarray[solnarray != 0] = 1/solnarray[solnarray != 0]
 
     # update shape
@@ -99,9 +99,6 @@ def load_gains(fname):
         miriad_g = miriadsol.g_real + 1j*miriadsol.g_imag
         miriad_gbp = miriad_bp*miriad_g
         nchan = miriad_gbp.shape[0]
-        npol = 2 # assume npol = 2 - possibly invalid but it's hard to know
-        ##VG -> TODO: We need to get rid of this assumption and take into account what happens when there is only one pol in the calibration soln file
-        miriad_gbp.shape = (nchan, -1, npol)
         # convert to (nant,nchan,npol) order
         miriad_gbp = np.transpose(miriad_gbp, [1,0,2])
         g = miriad_gbp

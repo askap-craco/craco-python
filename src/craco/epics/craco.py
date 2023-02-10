@@ -21,7 +21,7 @@ class Craco(EpicsSubsystem):
     def configure(
         self,
         fpgaMask: int,
-        enMultiDest: bool,
+        flushOnBeam: bool,
         enPktzrDbgHdr: bool,
         enPktzrTestData: bool,
         lsbPosition: int,
@@ -37,7 +37,7 @@ class Craco(EpicsSubsystem):
         self,
         card: int,
         fpgaMask: int,
-        enMultiDest: bool,
+        flushOnBeam: bool,
         enPktzrDbgHdr: bool,
         enPktzrTestData: bool,
         lsbPosition: int,

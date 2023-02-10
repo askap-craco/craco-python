@@ -30,6 +30,7 @@ from craco.epics.craco import Craco as CracoEpics
 from astropy.time import Time
 from astropy.io import fits
 from craco import leapseconds
+from craco.utils import ibc2beamchan
 import ast
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ FINE_CHANBW = 1.0*32./27./64. # MHz
 FINE_TSAMP = 1.0/FINE_CHANBW # Microseconds
 NFPGA = 6 # number of FPGAs per card
 NCHAN = 4 # number of CRACO output channels per FPGA
+NBEAM = 36 # number of beams per FPGA (or even per ASKAP!)
+NSAMP_PER_FRAME = 2048 # Number of fine filterbank samples per beamformer frame
 
 def uint8tostr(d):
     if isinstance(d, str):
@@ -191,7 +194,7 @@ class CardcapFile:
         Returns a numpy array containing the list of beams in this file
         Zero indexed
         '''
-        if self.nbeam == 36:
+        if self.nbeam == NBEAM:
             b = np.arange(36, dtype=np.int)
         else:
             thebeam = self.mainhdr['BEAM']
@@ -619,7 +622,6 @@ class FpgaCapturer:
         if self.total_completions == 0 and ncompletions > 0:
             self.first_packet_time = self.curr_packet_time
 
-        self.total_completions += ncompletions
         assert ncompletions == len(completions)
         num_cmsgs = self.ccap.num_cmsgs
         #print(f'\rCompletions={ncompletions} {len(completions)}')
@@ -627,22 +629,29 @@ class FpgaCapturer:
         if ncompletions > self.max_ncompletions:
             log.critical(f'{self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
             self.max_ncompletions = ncompletions
+            
+        d = None # in case something quits before it's set. We return None so we don't get an unboundLocalError
+
+        # number of of packets per message (1 message = 1 completion)
+        # should be either 1 or 144
+        npacket_per_message = int(self.ccap.nbeam_per_message * self.ccap.nchan_per_message)
+        assert npacket_per_message == 1 or npacket_per_message == NCHAN*NBEAM
         
         for c in completions:
-            #assert c.status == ibv_wc_status.IBV_WC_SUCCESS
             index = c.wr_id
             nbytes = c.byte_len
             assert nbytes == msg_size, f'Unexpected messages size. Was={nbytes} expected={msg_size}'
             immediate = c.imm_data
-            #immediate = socket.ntohl(immediate)
-            self.total_bytes += nbytes
 
-            immdiff = 2048 # fixed samples per frame
+            immdiff = NSAMP_PER_FRAME # Immediate value should increase by 2048 samples for every ... frame
+            ibc = self.total_completions*npacket_per_message % (NCHAN*NBEAM) # which bemchan index we're up to.
 
-            if self.curr_imm is None:
+            if self.curr_imm is None: # set to first current value
                 expected_immediate = immediate
-            else:
+            elif ibc == 0: # increment expected immediate if we're on the first packet of the next frame
                 expected_immediate = (self.curr_imm + immdiff) % (1<<32)
+            else:
+                expected_immediate = self.curr_imm # in flush-on-beam mode we get lots of packets with the same immediate. Cool@
 
             diff  = (immediate - expected_immediate)
             # Get data for buffer regions
@@ -655,14 +664,21 @@ class FpgaCapturer:
                 fid_diff = 0
             else:
                 fid_diff = fid - self.curr_fid
-                
+
+            expected_beamchan = ibc2beamchan(ibc)
+
+            #print(immediate, expected_immediate, diff, fid, self.curr_fid, fid_diff, ibc, expected_beamchan, npacket_per_message)
+            # need to fix this logic for flush-on-beam
             if immediate != expected_immediate:
                 self.total_missing += diff
-                log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} MISSED PACKET imm={immediate}={hex(immediate)} fid={fid}={hex(fid)} fid_diff={fid_diff}expected={expected_immediate} Diff={diff}  nmiss={self.total_missing} nbytes={nbytes} qloading={rx.currentQueueLoading}')
+                log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} MISSED PACKET imm={immediate}={hex(immediate)} expected={expected_immediate} Diff={diff} fid={fid}={hex(fid)} fid_diff={fid_diff}   nmiss={self.total_missing} nbytes={nbytes} qloading={rx.currentQueueLoading}')
             
 
             self.curr_imm = immediate
             self.curr_fid = fid
+            self.total_completions += 1
+            self.total_bytes += nbytes
+
 
             if self.ccap.values.workaround_craco63:
                 d['data'] = np.roll(d['data'], shift=-1, axis=0)
@@ -686,7 +702,7 @@ class FpgaCapturer:
 
     def write_data(self, w):
         d = self.get_data()
-        if w is not None:
+        if w is not None and d is not None:
             w.write(d) # write to fitsfile
 
         self.issue_requests()
@@ -708,8 +724,14 @@ class CardCapturer:
         gidIndex = values.gid_index
         # In mike's test setup he sends beam0, channel 155, samples 0,1,2,3. Samp=0 is FIRST, 1,2 are MIDDLE and 3 is LAST with immediate.
         # I.e. there are 4 packets per "message"
-        nbeam = 36
-        nchan = 4
+        if values.flush_on_beam:
+            nbeam_per_msg = 1
+            nchan_per_msg = 1
+        else:
+            nbeam_per_msg = NBEAM
+            nchan_per_msg = NCHAN
+        
+
         nsamp_per_frame = 2048
         nsamp_per_integration = values.samples_per_integration
         nint_per_frame = nsamp_per_frame // nsamp_per_integration
@@ -729,7 +751,7 @@ class CardCapturer:
             nint_per_packet = 1
 
         nintpacket_per_frame = nint_per_frame // nint_per_packet # number of integrations per frame
-        npacket_per_msg= nbeam*nchan*nintpacket_per_frame
+        npacket_per_msg= nbeam_per_msg*nchan_per_msg*nintpacket_per_frame
             
         enable_debug_header = values.debug_header
         packet_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum)
@@ -740,16 +762,16 @@ class CardCapturer:
 
         self.msg_size = msg_size
         self.npacket_per_msg = npacket_per_msg
-        self.nbeam = nbeam
-        self.nchan = nchan
+        self.nbeam_per_message = nbeam_per_msg
+        self.nchan_per_message = nchan_per_msg
         self.nint_per_frame = nint_per_frame
         self.nint_per_packet = nint_per_packet
         self.nintpacket_per_frame = nintpacket_per_frame
         self.nintout_per_frame = nintpacket_per_frame // self.values.tscrunch
 
         assert self.values.tscrunch == 1 or self.values.tscrunch * self.values.samples_per_integration == nsamp_per_frame, 'Invalid tscrunch - it must be 1 or multiply SPI to 2048'
-        self.msg_shape = (num_cmsgs, self.nbeam*self.nchan, self.nintpacket_per_frame)
-        self.out_shape = (self.nbeam*self.nchan, self.nintout_per_frame)
+        self.msg_shape = (num_cmsgs, self.nbeam_per_message*self.nchan_per_message, self.nintpacket_per_frame)
+        self.out_shape = (self.nbeam_per_message*self.nchan_per_message, self.nintout_per_frame)
         nmsg = 1000000
         shelf = values.block
         card = values.card
@@ -769,7 +791,7 @@ class CardCapturer:
             
         log.info(f'Listening on {device} port {rdmaPort} for msg_size={msg_size} {num_blks} {num_cmsgs} {nmsg} npacket_per_msg={npacket_per_msg} nbl={nbl} dtype={packet_dtype} fpgaMask=0x{fpgaMask:x}')
 
-        enMultiDest = values.dump_per_beam
+        flushOnBeam = values.flush_on_beam
         enPktzrDbugHdr = enable_debug_header
         enPktzrTestData = values.enable_test_data
         lsbPosition = values.lsb_position
@@ -856,14 +878,17 @@ class CardCapturer:
         hdr['HOST'] = (hostname, 'Capture host name')
         hdr['MSG_SIZE'] = (msg_size, 'Number of bytes in a message')
         hdr['NPCKMSG'] =  (self.npacket_per_msg, 'Number of debug header packets per message')
-        hdr['NBEAM'] = (self.nbeam, 'Number of beams being downlaoded (always 36)')
-        hdr['NCHAN'] = (self.nchan, 'Number of channels per FPGA (4)')
+        hdr['NBEAM'] = (NBEAM, 'Number of beams being downlaoded (always 36)')
+        hdr['NCHAN'] = (NCHAN, 'Number of channels per FPGA (4)')
+        hdr['NBEPMSG'] = (self.nbeam_per_message, 'Number of beams per ROCE message')
+        hdr['NCHPMSG'] = (self.nchan_per_message, 'Number of channels per ROCE message')
         hdr['NTPFM'] = (self.nint_per_frame, 'Total number of integrations per frame')
         hdr['NTPKFM'] = (self.nintpacket_per_frame, 'Total number of packet integrations per frame')
         hdr['MSGSHAPE'] = (str(self.msg_shape), 'Shape of a message buffer')
         hdr['TSCRUNCH'] = (self.values.tscrunch, 'Tscrunch factor')
         hdr['OUTSHAPE'] = (str(self.out_shape), 'Shape of file output')
         hdr['NTOUTPFM'] = (self.nintout_per_frame, 'Number of output integraitons per frame, after tscrunch')
+        hdr['FLUSHBM'] = (flushOnBeam, 'T if flush on beam is enabled')
         
         self.hdr = hdr
         if values.prefix != 'ma':
@@ -873,7 +898,7 @@ class CardCapturer:
             self.pvhdr('F_options:altFirmwareDir_O', 'FWDIR', 'Alternate firmware directory')
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
-        self.configure_args  = (fpgaMask, enMultiDest, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
+        self.configure_args  = (fpgaMask, flushOnBeam, enPktzrDbugHdr, enPktzrTestData, lsbPosition, sumPols, integSelect)
 
         #self.clear_headers()
         self.fpga_cap = [FpgaCapturer(self, fpga) for fpga in values.fpga]
@@ -1040,7 +1065,7 @@ def add_arguments(parser):
     parser.add_argument('--mpi', action='store_true', help='RunMPI version', default=False)
     parser.add_argument('--workaround-craco63', action='store_true', help='CRACO63 workaround', default=False)
     parser.add_argument('--fpga-mask', type=hexstr, help='(hex) FPGA mask for configuration', default=0x3f)
-    parser.add_argument('--dump-per-beam', action='store_true', help='Dump per beam, rather than per beamformer frame', default=False)
+    parser.add_argument('--flush-on-beam', action='store_true', help='Flush a packet per beam, rather than per beamformer frame', default=False)
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
 
