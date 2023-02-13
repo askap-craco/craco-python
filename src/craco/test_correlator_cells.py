@@ -1,5 +1,5 @@
 
-from correlator_cells import *
+from craco.correlator_cells import *
 
 def test_pol2polidx():
     assert pol2polidx(0) == 0
@@ -46,8 +46,11 @@ def test_ibc2beamchan():
     assert ibc2beamchan(32*4 + 1) == (33,0)
     assert ibc2beamchan(36*4 - 1) == (35,3)
 
-    
-    
+def test_ibc2beamchan_back():
+    for ibc in range(36*4):
+        bc = ibc2beamchan(ibc)
+        ibc2 = beamchan2ibc(*bc)
+        assert ibc == ibc2
 
 
 def test_readout_clk():

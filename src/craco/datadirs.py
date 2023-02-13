@@ -32,30 +32,30 @@ def get_dir_size(start_path = '.'):
 
 class DataDirs:
     def __init__(self):
-        self.cracodata = os.environ.get('CRACO_DATA') # local data dir when recording
-        assert os.path.isdir(self.cracodata)
+        self.cracodata = os.environ['CRACO_DATA'] # local data dir when recording
+        assert self.cracodata is not None, 'Set CRACO_DATA environment variable'
+        assert os.path.isdir(self.cracodata), f'CRACO DATA dir {self.cracodata} not a directory'
 
-    def seren_dir(self, sid):
+    def node_dir(self, sid):
         ddir = f'/data/seren-{sid:02d}/big/craco'
         return ddir
 
 
     @property
-    def seren_dirs(self):
+    def node_dirs(self):
         for s in range(1,11):
-            sdir = self.seren_dir(s)
+            sdir = self.node_dir(s)
             yield sdir
 
     @property
-    def seren_names(self):
+    def node_names(self):
         for s in range(1,11):
             yield f'seren-{s:02d}'
         
-
     @property
-    def schedblocks_by_seren(self):
+    def schedblocks_by_node(self):
         all_sbs = []
-        for ddir in self.seren_dirs:
+        for ddir in self.node_dirs:
             all_sbs.append(list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*')))))
 
         return all_sbs
@@ -63,19 +63,38 @@ class DataDirs:
     @property
     def all_schedblocks(self):
         allsbs = set()
-        for sbs in self.schedblocks_by_seren:
+        for sbs in self.schedblocks_by_node:
             allsbs.update(sbs)
 
         return sorted(list(allsbs))
 
     def sb_sizes(self, sb):
-        sizes = np.array(list(map(get_dir_size, [os.path.join(ddir, sb) for ddir in self.seren_dirs])))
+        sizes = np.array(list(map(get_dir_size, [os.path.join(ddir, sb) for ddir in self.node_dirs])))
         return sizes
+
+    def sb_scan_dumps(self, sb):
+        '''
+        Returns a list of data dumps in teh given SB
+        of the form scans/00/20230204105616
+        '''
+        topdir = os.path.join(self.cracodata, sb)
+        if not os.path.isdir(topdir):
+            raise ValueError(f'SB {sb} not found in {self.cracodata}')
+
+        globpath = os.path.join(topdir, 'scans/*/*')
+        sb_dumps = glob.glob(globpath)
+        log.debug('Globbing path %s had %d results', globpath, len(sb_dumps))
+
+        
+        # strip leding bits including /
+        sb_dumps = [d[len(topdir)+1:] for d in sb_dumps]
+
+        return sb_dumps
 
     @property
     def sb_size_table(self, sbs=None):
         columns = ['SB']
-        columns.extend(list(self.seren_names))
+        columns.extend(list(self.node_names))
         columns.append('Total')
         all_data = []
         if sbs is None:

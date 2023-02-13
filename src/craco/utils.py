@@ -33,6 +33,27 @@ def ibc2beamchan(ibc):
 
     return (beam, chan)
 
+def beamchan2ibc(beam, chan):
+    '''
+    Converts beam and channel indexs into index in time from the channel beam order
+    
+    :param: beam beam nummber (0--35) includsive
+    :param: channel number (0-3) inclusive
+    :returns: IBc index (0-143)
+    '''
+    assert 0 <= beam < 36
+    assert 0 <= chan < 4
+    if beam < 32:
+        ibc = beam + chan*32
+    else:
+        ibc = 32*4 + (beam - 32) + chan*4
+
+    assert 0 <= ibc < 36*4
+
+    return ibc
+    
+    
+
 def bl2ant(bl):
     '''
     Convert baseline to antena numbers according to UV fits convention
@@ -209,6 +230,29 @@ def fdmt_transpose(dblk, ncu=1, nt_per_cu=2):
     assert oblk.shape == (ncu, ndm, nt_rest, nt_per_cu, nuv), 'Invalid shape = {}'.format(oblk.shape)
     
     return oblk
+
+
+def get_target_beam(targname:str):
+    '''
+    Parses a target name of the form  'B1934-638_beam0'
+    
+    And returns the beam numebr as an int
+
+    Thorws ValueError if the string isnt parseable
+    '''
+
+    bits = targname.split('beam')
+    if len(bits) != 2:
+        raise ValueError(f'Target name does not contain "beam" keyword: {targname}')
+    
+    try:
+        beam = int(bits[1])
+    except:
+        raise ValueError('Target name does not contin beam {targname}')
+    
+    assert 0 <= beam < 36
+    return beam
+
 
 def fdmt_transpose_inv(oblk, ncu=1, nt_per_cu=2, nuv=None, ndm=None, nt=None):
     '''

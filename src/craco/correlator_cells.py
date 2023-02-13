@@ -11,7 +11,7 @@ import numpy as np
 import os
 import sys
 import logging
-from craco.utils import ibc2beamchan
+from craco.utils import ibc2beamchan,beamchan2ibc
 
 log = logging.getLogger(__name__)
 
