@@ -83,7 +83,8 @@ if __name__ == '__main__':
                                 'obsman=craco.obsman:_main',
                                 'savescan=craco.savescan:_main',
                                 'calibration=craco.calibration:_main',
-                                'dusb=craco.dusb:_main'
+                                'dusb=craco.dusb:_main',
+                                'prepsb=craco.prepsb:_main'
             ],
         },
         classifiers=['Development Status :: 3 - Alpha',

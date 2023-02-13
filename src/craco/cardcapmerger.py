@@ -8,8 +8,9 @@ import numpy as np
 import os
 import sys
 import logging
-from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME
+from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
 from numba.types import List
+from craco.utils import get_target_beam
 
 log = logging.getLogger(__name__)
 
@@ -201,6 +202,8 @@ class CcapMerger:
         '''
         iters = [frame_id_iter(c.frame_iter(beam), self.frame_id0) for c in self.ccap]
         #packets = List() # TODO: Make NUMBA happy with List rather than  array
+
+        assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
         
         while True:
             packets = []

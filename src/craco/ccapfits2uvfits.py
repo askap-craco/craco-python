@@ -11,10 +11,12 @@ import numpy as np
 import os
 import sys
 import logging
+from craco.cardcapfile import NBEAM
 from craco.cardcapmerger import CcapMerger
 from craft.corruvfits import CorrUvFitsFile
 from craco.metadatafile import MetadataFile
 from craft.parset import Parset
+from craco.utils import get_target_beam
 import scipy
 from collections import namedtuple
 from astropy import units as u
@@ -45,6 +47,7 @@ def _main():
     parser.add_argument('-f', '--fcm', help='Path to FCM file for antenna positions', required=True)
     parser.add_argument('-o','--output', help='Output fits file', default='output.uvfits')
     parser.add_argument('-N','--nblocks', help='Maximum number of blocks to write', default=-1, type=int)
+    parser.add_argument('-b','--beam', help='Beam to dump. set to -1 for 36 beams, -2 is for the beam name in that TARGET field, else 0-35 for selected beam. Leave it along for whatevers in the file', type=int)
     parser.add_argument('-D','--dtype', help='Data type of output f4 is 32 bit float. i2 is 16 bit integer', default='f4', choices=('f4','i2', 'i4'))
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
@@ -65,8 +68,8 @@ def _main():
     antnos = merge.antnos
     fcm = Parset.from_file(values.fcm)
     antennas = get_antennas(fcm)
-    log.debug('FCM %s contained %d antennas %s', values.fcm, len(antennas), antennas)
-    log.info('Merge containes %d beams: %s', merge.nbeam, merge.beams)
+    log.info('FCM %s contained %d antennas %s', values.fcm, len(antennas), antennas)
+    log.info('Merge contains %d beams: %s. Requested: %s', merge.nbeam, merge.beams, values.beam)
 
     # fits format is for UVW in seconds
     # we set the scale parameter in the firts format to max out the integers for
@@ -81,7 +84,17 @@ def _main():
 
     uvout_beams = []
 
-    for ibeam, beam in enumerate(merge.beams):
+    if values.beam is None or values.beam == -1:
+        beams = [b for b in range(1, NBEAM+1)]
+    elif values.beam == -2:
+        targname = merge.gethdr('TARGET')
+        beams = [get_target_beam(targname)]
+        values.beam = beams[0]
+        log.info('Outputting beam %s for target %s', beams[0], targname)
+    else:
+        beams = [values.beam]
+
+    for ibeam, beam in enumerate(beams):
         full_source_list = list(md.sources(beam).values())
         meta_source_idx = md.source_index_at_time(tstart)
         if len(full_source_list) > 1:
@@ -106,7 +119,7 @@ def _main():
         uvout_beams.append((beam, uvout))
 
     try:
-        for iblk, (fid, blk) in enumerate(merge.block_iter()):
+        for iblk, (fid, blk) in enumerate(merge.block_iter(beam=values.beam)):
             mjd = merge.fid_to_mjd(fid)
             log.debug('Starting block %s FID=%s mjd=%s shape=%s', iblk, fid, mjd, blk.shape)
             if values.nblocks == iblk:
@@ -119,7 +132,9 @@ def _main():
             sourcename = md.source_name_at_time(mjd.value)
             log.debug('ibld=%s mjd=%s source=%s id=%d shape=%s fid=%s', iblk, mjd.value, sourcename, sourceidx, blk.shape, fid)
             # FITS standard starts at 1
-            assert sourceidx == meta_source_idx, f'Can only write single source UV fits files for the uvfits reader. I originally wrote source source_list[0] but now I\'m getting {sourcename}'
+            if sourceidx != meta_source_idx:
+                log.info('Source changed from %s to %s at iblk=%s. Quitting', source_list[0], sourcename, iblk)
+                break
 
             out_sourceidx = 1 # FITS convention is the first value is 1
              

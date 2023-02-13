@@ -231,6 +231,29 @@ def fdmt_transpose(dblk, ncu=1, nt_per_cu=2):
     
     return oblk
 
+
+def get_target_beam(targname:str):
+    '''
+    Parses a target name of the form  'B1934-638_beam0'
+    
+    And returns the beam numebr as an int
+
+    Thorws ValueError if the string isnt parseable
+    '''
+
+    bits = targname.split('beam')
+    if len(bits) != 2:
+        raise ValueError(f'Target name does not contain "beam" keyword: {targname}')
+    
+    try:
+        beam = int(bits[1])
+    except:
+        raise ValueError('Target name does not contin beam {targname}')
+    
+    assert 0 <= beam < 36
+    return beam
+
+
 def fdmt_transpose_inv(oblk, ncu=1, nt_per_cu=2, nuv=None, ndm=None, nt=None):
     '''
     Transpose the given data from a format suitable for the image kernel back into something sane.
