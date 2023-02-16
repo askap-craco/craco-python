@@ -48,40 +48,6 @@ def uint8tostr(d):
 
     return s.strip().replace('\x00','')
 
-def get_indexes(nant):
-    '''
-    Returns a set of array indexs that can be used to index into baseline arrays
-    assumign the way the correlator orders everythign (baseically, sensibly)
-    One day if you have a more complex configuration than just antennas, this might
-    need to be made more sophisticated.
-
-    Returns 4-typple containing (products, revproducts, auto_products, cross_products
-    where
-    products: Array length=nbl, contains (a1, a2) where a1 is antenna1 and a2 is antenna2 (1 based)
-    revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
-    auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
-    cross_products: length=nbl array of which indices contain cross correlations
-    '''
-    
-    products = []
-    revproducts = {}
-    auto_products = []
-    cross_products = []
-    idx = 0
-    for a1 in range(1, nant+1):
-        for a2 in range(a1, nant+1):
-            products.append((a1,a2))
-            revproducts[(a1,a2)] = idx
-            if a1 == a2:
-                auto_products.append(idx)
-            else:
-                cross_products.append(idx)
-            
-            idx += 1
-              
-    products = np.array(products, dtype=[('a1',np.int16), ('a2', np.int16)])
-
-    return (products, revproducts, auto_products, cross_products)
 
 
 

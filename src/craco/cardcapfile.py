@@ -53,7 +53,7 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     Whether sum_pols is true or false, a single packet always contiains 2xnbl entries. This is how
     John's firmware works.
 
-    if su m_pols is True, npol=1, nint=2
+    if sum_pols is True, npol=1, nint=2
     if sum_pols is False, npol=2, nint=1
     
     '''
@@ -77,6 +77,42 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     
     return np.dtype(dtype)
 
+def get_indexes(nant):
+    '''
+    Returns a set of array indexs that can be used to index into baseline arrays
+    assumign the way the correlator orders everythign (baseically, sensibly)
+    One day if you have a more complex configuration than just antennas, this might
+    need to be made more sophisticated.
+
+    Returns 4-typple containing (products, revproducts, auto_products, cross_products
+    where
+    products: Array length=nbl, contains (a1, a2) where a1 is antenna1 and a2 is antenna2 (1 based)
+    revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
+    auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
+    cross_products: length=nbl array of which indices contain cross correlations
+    '''
+    
+    products = []
+    revproducts = {}
+    auto_products = []
+    cross_products = []
+    idx = 0
+    for a1 in range(1, nant+1):
+        for a2 in range(a1, nant+1):
+            products.append((a1,a2))
+            revproducts[(a1,a2)] = idx
+            if a1 == a2:
+                auto_products.append(idx)
+            else:
+                cross_products.append(idx)
+            
+            idx += 1
+              
+    products = np.array(products, dtype=[('a1',np.int16), ('a2', np.int16)])
+
+    return (products, revproducts, auto_products, cross_products)
+
+
 
 class CardcapFile:
     def __init__(self, fname, workaround_craco63=False):
@@ -93,7 +129,7 @@ class CardcapFile:
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
-        if self.mainhdr['NTOUTPFM'] == 0:
+        if self.mainhdr.get('NTOUTPFM', None) == 0:
             warnings.warn(f'File {fname} has tscrunch/polsum bug. Will tscrunch final integrations')
             self.tscrunch_bug = True
         else:
@@ -117,6 +153,17 @@ class CardcapFile:
         '''
         return self.mainhdr['NANT']
 
+    @property
+    def target(self):
+        return self.mainhdr['TARGET']
+
+    @property
+    def sbid(self):
+        return self.mainhdr['SBID']
+
+    @property
+    def scanid(self):
+        return self.mainhdr['SCANID']
 
     @property
     def card_frequencies(self):
@@ -238,13 +285,27 @@ class CardcapFile:
         return len(self) == 0
 
     @property
+    def tscrunch(self):
+        return self.mainhdr.get('TSCRUNCH', 1)
+
+    @property
     def ntpkt_per_frame(self):
         if self.tscrunch_bug:
             ntpkt = 1
         else:
-            ntpkt = self.mainhdr['NTPKFM'] // self.mainhdr['TSCRUNCH']
+            ntpkt = self.mainhdr['NTPKFM'] // self.tscruch
 
         return ntpkt
+
+    @property
+    def npackets_per_frame(self):
+        '''
+        Number of packets per beamformer frame (110ms)
+        is NCHAN * the numebr of beams recorded * number of time packets
+        Don't forget: If npol=1 then you get 2 integrations per packet
+        '''
+        npkt = NCHAN*self.nbeam*self.ntpkt_per_frame
+        return npkt
 
 
     def __len__(self):
@@ -318,7 +379,7 @@ class CardcapFile:
             if beam not in self.beams:
                 raise ValueError(f'Requested beam {beam} is not in cardcap file. Which does contain beams={self.beams}')
 
-        packets_per_frame = NCHAN*self.nbeam*self.ntpkt_per_frame
+        packets_per_frame = self.npackets_per_frame
         packet_size_bytes = self.dtype.itemsize
 
         if beam is None or beam == -1:

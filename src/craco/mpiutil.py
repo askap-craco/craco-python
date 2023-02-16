@@ -6,10 +6,23 @@ Copyright (C) CSIRO 2020
 """
 import mpi4py
 import logging
+from array import array
+import numpy as np
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 log = logging.getLogger(__name__)
+
+def np2array(d):
+    '''
+    This is how :https://github.com/erdc/mpi4py/blob/master/demo/osu_alltoallv.py does it
+    Not sure it's absolutely necessary
+    '''
+    assert d.dtype == np.int32
+    a =  array('i', d)
+    
+    return a
+
 
 def parse_hostfile(hostfile):
     '''

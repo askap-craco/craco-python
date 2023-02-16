@@ -20,14 +20,14 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 real_dtype = numba.float32
 #real_dtype = numba.int32
 
-#@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
-#                                                       'v1':real_dtype,
-#                                                       'vsqr':real_dtype,
-#                                                       'va':real_dtype,
-#                                                       'agg_mean':real_dtype,
-#                                                       'agg_m2':real_dtype,
-#                                                       'delta':real_dtype,
-#                                                       'delta2':real_dtype})
+@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
+                                                       'v1':real_dtype,
+                                                       'vsqr':real_dtype,
+                                                       'va':real_dtype,
+                                                       'agg_mean':real_dtype,
+                                                      'agg_m2':real_dtype,
+                                                      'delta':real_dtype,
+                                                       'delta2':real_dtype})
 def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ichan, beam_data, vis_fscrunch=1, vis_tscrunch=1):
     '''
     Computes ICS, CAS and averaged visibilities given a block of nt integration packets from a single FPGA
@@ -96,7 +96,8 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                     else:
                         cas[t,ichan] += va_scaled
                         if t == 0:
-                            print(f'cas {t} {ichan} {va_scaled} {v0} {v1} {va} {offset} {scale} {pol} {a1}-{a2}={ibl}')
+                            pass
+                        #print(f'cas {t} {ichan} {va_scaled} {v1} {va} {offset} {scale} {pol} {a1}-{a2}={ibl}')
 
                     vis[ibl, ochan, otime] += complex(v_real, v_imag)
                     
@@ -106,16 +107,23 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                     a2 = a1
                     
 @njit(fastmath=True, parallel=True)
-def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, vis_fscrunch=1, vis_tscrunch=1):
+def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     npkt = len(beam_data[0])
-    nbeam, nbl, npol, _ = rescale_scales.shape
+    nbeam, nc, nbl, npol, _ = rescale_scales.shape
     nc_per_fpga = 4
     npkt_per_accum = npkt // (nbeam * nc_per_fpga)
     for beam in prange(nbeam):
-        for fpga in range(6):
-            for chan in range(4):
+        for fpga in range(nfpga):
+            for chan in range(nc_per_fpga):
                 data = beam_data[fpga]
+
+                # TODO: Work out what should do if some data isn't valid.
+                # do we Just not add it, do we note it somewhere in some arrays ... what should we do?
+                isvalid = valid[fpga]
+                if not isvalid:
+                    continue
+                
                 if beam < 32:
                     didx = beam + 32*chan
                 else:
@@ -133,9 +141,26 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 do_accumulate(output, rescale_scales, rescale_stats, count, nant, beam, ichan, bd, vis_fscrunch, vis_tscrunch)
 
 
+def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.complex64):
+
+    nbl = nant*(nant+1)//2
+    assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
+    assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
+    vis_nt = nt // vis_tscrunch
+    vis_nc = nc // vis_fscrunch
+    if cdtype == np.complex64:
+        vishape = (nbl, vis_nc, vis_nt)
+    else: # assumed real type
+        vishape = (nbl, vis_nc, vis_nt, 2)
+
+    dt = np.dtype([('ics', rdtype, (nt, nc)),
+                   ('cas', rdtype, (nt, nc)),
+                   ('vis', cdtype, vishape)])
+
+    return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, rdtype=np.float32, cdtype=np.complex64, vis_fscrunch=6, vis_tscrunch=2):
+    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64):
         nbl = nant*(nant+1)//2
         self.nbl = nbl
         self.nant = nant
@@ -143,24 +168,15 @@ class Averager:
         self.npol = npol
         self.vis_fscrunch = vis_fscrunch
         self.vis_tscrunch = vis_tscrunch
-        assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
-        assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
-        vis_nt = nt // vis_tscrunch
-        vis_nc = nc // vis_fscrunch
-        if cdtype == np.complex64:
-            vishape = (nbl, vis_nc, vis_nt)
-        else: # assumed real type
-            vishape = (nbl, vis_nc, vis_nt, 2)
-            
-        self.dtype = np.dtype([('ics', rdtype, (nt, nc)),
-                               ('cas', rdtype, (nt, nc)),
-                               ('vis', cdtype, vishape)])
+        self.dtype = get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype, cdtype)
         self.output = np.zeros(nbeam, dtype=self.dtype)
         self.rescale_stats = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
-        self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol,  2), dtype=rdtype)
+        self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
         # set default scale to 1
         self.rescale_scales[...,1] = 1
         self.count = 0
+
+        # TODO: pre-run accumulate_all to get it to compile before everything starts
 
     def reset(self):
         self.output[:] = 0
@@ -193,7 +209,7 @@ class Averager:
         self.rescale_stats[:] = 0
         self.count = 0
 
-    def accumulate_all(self, beam_data):
+    def accumulate_all(self, beam_data, valid):
         '''
         Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
         '''
@@ -203,13 +219,18 @@ class Averager:
                        self.count,
                        self.nant,
                        beam_data,
+                       valid,
                        self.vis_fscrunch,
                        self.vis_tscrunch)
         self.count += self.nt
 
+        return self.output
+
 
     def accumulate_beam(self, ibeam, ichan, beam_data):
         do_accumulate(self.output, self.rescale_scales, self.rescale_stats, self.count, self.nant, ibeam, ichan, beam_data, self.vis_fscrunch, self.vis_tscrunch)
+
+        return self.output
 
 
 def _main():

@@ -20,7 +20,7 @@ enable_hcoll=0
 verbose=0
 commonargs="--mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll"
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca pml_ucx_verbose $verbose"
-tcpargs="--mca pml ob1 --mca btl tcp,vader,self" # --mca btl_tcp_if_include $ifaces"
+tcpargs="--mca pml ob1 --mca btl tcp,self" # --mca btl_tcp_if_include $ifaces"
 
 # runwith the rankfile
 # add --report-bindings

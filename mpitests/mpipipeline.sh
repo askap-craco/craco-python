@@ -1,5 +1,4 @@
 #!/bin/bash
-echo $UCX_TLS
 
 rankfile=mpipipeline.rank
 hostfile=mpi_seren.txt
@@ -15,17 +14,19 @@ ifaces="enp216s0"
 # IF HCOLL IS ENABED WITH col-hcoll-enable 1 THEN IT HANGS ON MPI_FINALIZE !!!!
 enable_hcoll=0
 
-tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0  --mca oob_base_verbose 0 --mca orte_base_help_aggregate 0"
-
 # use UCX and set UX values
 export UCX_NET_DEVICES=$ifaces
+export UCX_TLS=self,tcp
 
-export UCX_TLS=self,tcp,,mm,cma
+tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0 --mca orte_base_help_aggregate 0"
+
 verbose=0
-roceargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
+ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
+
+commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST"
 
 # runwith the rankfile
-cmd="mpirun $roceargs -rf $rankfile   --report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST  `which mpipipeline` --mpi $@"
+cmd="mpirun $commonargs $tcpargs -rf $rankfile `which mpipipeline` --mpi $@"
 echo $cmd
 $cmd
 

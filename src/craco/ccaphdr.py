@@ -18,6 +18,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('--dump-timestamps', action='store_true', default=False, help='Dump timstamps from data')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -31,7 +32,8 @@ def _main():
     first_bat = None
     for f in values.files:
         cc = CardcapFile(f)
-        s = f"{f} {len(cc)} {cc.syncbat} "
+        s = f"{f} {len(cc)} {cc.syncbat} {cc.sbid}/{cc.scanid} {cc.target} {cc.mjd0} {cc.nant} {cc.nbeam} {cc.npol} {cc.dtype['data'].shape} {len(cc)} "
+
         try:
             f1 = next(cc.packet_iter())
             fid = int(f1['frame_id'])

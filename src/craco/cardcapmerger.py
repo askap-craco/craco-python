@@ -93,7 +93,7 @@ class CcapMerger:
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
         self.fidxs = fidxs
         self.frame_id0 = min([fid for fid in frame_ids if fid is not None])
-        self.tscrunch = self.ccap[0].mainhdr['TSCRUNCH']
+        self.tscrunch = self.ccap[0].tscrunch
         self.nbeam = self.ccap[0].nbeam
         self.nbl = self.ccap[0].mainhdr['NBL']
         self.__npol = self.ccap[0].npol
@@ -170,7 +170,7 @@ class CcapMerger:
 
     @property
     def inttime(self):
-        t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].mainhdr['TSCRUNCH']
+        t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].tscrunch
         return t
 
     @property
@@ -189,6 +189,14 @@ class CcapMerger:
     def tscrunch_bug(self):
         return self.ccap[0].tscrunch_bug
 
+    @property
+    def npackets_per_frame(self):
+        return self.ccap[0].npackets_per_frame
+
+    @property
+    def dtype(self):
+        return self.ccap[0].dtype
+
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]
     
@@ -199,6 +207,9 @@ class CcapMerger:
         '''
         Returns an iterator that returns arrays of blocks of data but without converting them 
         into a masked array
+        Yields a tuple containing (packets, fids)
+        Packets are the packets from each input
+        fids is a tuple of frame_ids, one from each input
         '''
         iters = [frame_id_iter(c.frame_iter(beam), self.frame_id0) for c in self.ccap]
         #packets = List() # TODO: Make NUMBA happy with List rather than  array
