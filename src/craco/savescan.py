@@ -42,8 +42,7 @@ def _main():
     scanid = mycaget('ak:md2:scanId_O')
     sbid = mycaget('ak:md2:schedulingblockId_O')
     target = mycaget('ak:md2:targetName_O')
-    bigdir = os.environ['DATA_DIR_BIG']
-    fastdir = os.environ['DATA_DIR_FAST']
+    bigdir = os.environ['CRACO_DATA']
     now = datetime.datetime.utcnow()
     nowstr = now.strftime('%Y%m%d%H%M%S')
     scandir = os.path.join(bigdir, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
@@ -58,8 +57,26 @@ def _main():
     cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpicardcap.sh'
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
+    pol='--pol-sum'
+    #pol = '--dual-pol'
+
+    #tscrunch='--tscrunch 64'
+    tscrunch = '--tscrunch 1'
+
+    spi='--samples-per-integration 32'
+
+    beam='--beam 0'
+    beam = ''
+
+    card  = '-a 1-12'
+    block = '-b 2-4'
+    max_ncards = '--max-ncards 30'
+
+    num_msgs = '-N 1000'
+    num_cmsgs = '--num-cmsgs 1'
+    num_blocks = '--num-blks 16'
     
-    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak --num-msgs 1000000 -f {target_file} --pol-sum --tscrunch 64 --samples-per-integration 32 -a 1-12 -b 2-4'
+    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {block} {max_ncards} --flush-on-beam'
 
     log.info(f'Running command {cmd}')
 

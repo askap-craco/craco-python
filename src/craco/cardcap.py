@@ -48,6 +48,40 @@ def uint8tostr(d):
 
     return s.strip().replace('\x00','')
 
+def get_indexes(nant):
+    '''
+    Returns a set of array indexs that can be used to index into baseline arrays
+    assumign the way the correlator orders everythign (baseically, sensibly)
+    One day if you have a more complex configuration than just antennas, this might
+    need to be made more sophisticated.
+
+    Returns 4-typple containing (products, revproducts, auto_products, cross_products
+    where
+    products: Array length=nbl, contains (a1, a2) where a1 is antenna1 and a2 is antenna2 (1 based)
+    revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
+    auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
+    cross_products: length=nbl array of which indices contain cross correlations
+    '''
+    
+    products = []
+    revproducts = {}
+    auto_products = []
+    cross_products = []
+    idx = 0
+    for a1 in range(1, nant+1):
+        for a2 in range(a1, nant+1):
+            products.append((a1,a2))
+            revproducts[(a1,a2)] = idx
+            if a1 == a2:
+                auto_products.append(idx)
+            else:
+                cross_products.append(idx)
+            
+            idx += 1
+              
+    products = np.array(products, dtype=[('a1',np.int16), ('a2', np.int16)])
+
+    return (products, revproducts, auto_products, cross_products)
 
 
 
@@ -348,7 +382,7 @@ class FpgaCapturer:
                 d['data'] = np.roll(d['data'], shift=-1, axis=0)
 
             if self.ccap.values.tscrunch != 1:
-                # BUG: When tscrunch is 1, we average over the packest, but not inside the packet, by accident.
+                # BUG: When tscrunch != and polsum, we average over the packest, but not inside the packet, by accident.
                 # THis will need to be fixed, but no time now. It's Xmas!
                 # OK this is slow, but it works
                 dout = np.empty(d.shape[0], dtype=d.dtype)
@@ -689,9 +723,14 @@ def dump_rankfile(values):
     #embed()
 
     rank = 0
+    cardno = 0
     with open(values.dump_rankfile, 'w') as fout:
         for block in values.block:
             for card in values.card:
+                cardno += 1
+                if values.max_ncards != 0 and cardno >= values.max_ncards + 1:
+                    break
+                
                 for fpga in values.fpga:
                     hostidx = rank // nranks_per_host
                     hostrank = rank % nranks_per_host
@@ -713,7 +752,7 @@ def add_arguments(parser):
     parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=2)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
-    parser.add_argument('--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
+    parser.add_argument('-N', '--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
@@ -732,6 +771,7 @@ def add_arguments(parser):
     parser.add_argument('--flush-on-beam', action='store_true', help='Flush a packet per beam, rather than per beamformer frame', default=False)
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
+    parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=0)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -764,8 +804,11 @@ def _main():
 
         block_cards  = []
         procid = 0
+        cardno = 0
+
         for blk in values.block:
             for crd in values.card:
+                cardno += 1
                 for fpga in values.fpga:
                     block_cards.append((blk, crd, fpga))
                     procid += 1
