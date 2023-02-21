@@ -293,7 +293,7 @@ class CardcapFile:
         if self.tscrunch_bug:
             ntpkt = 1
         else:
-            ntpkt = self.mainhdr['NTPKFM'] // self.tscruch
+            ntpkt = self.mainhdr['NTPKFM'] // self.tscrunch
 
         return ntpkt
 

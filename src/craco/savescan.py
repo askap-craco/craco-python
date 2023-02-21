@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Saves a scan. Run by obsnam
+Saves a scan. Run by obman
 
 Copyright (C) CSIRO 2022
 """
@@ -70,13 +70,17 @@ def _main():
 
     card  = '-a 1-12'
     block = '-b 2-4'
+    #card = '-a 5-7'
+    #block = '-b 3'
+
+    
     max_ncards = '--max-ncards 30'
 
     num_msgs = '-N 1000'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     
-    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {block} {max_ncards} --flush-on-beam'
+    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {block} {max_ncards}'
 
     log.info(f'Running command {cmd}')
 

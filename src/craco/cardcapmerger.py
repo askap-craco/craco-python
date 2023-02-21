@@ -290,7 +290,9 @@ class CcapMerger:
                 else:
                     # This reshapes for teh beams 0-31 first, then beams 32-35 next
                     assert self.nbeam == 36
-                    blk1 = p[:32*4] 
+                    p.shape = (NCHAN*nbeam, self.ntpkt_per_frame)
+                                    
+                    blk1 = p[:32*4, :] 
                     blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
                     blk2 = p[32*4:]
                     blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams

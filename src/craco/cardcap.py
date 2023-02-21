@@ -629,7 +629,7 @@ class CardCapturer:
         except KeyboardInterrupt as e:
             print(f'Closing due to ctrl-C')
         finally:
-            self.stop(wait=False)
+            #self.stop(wait=False)
             self.finish_time = time.process_time()
 
             self.report_stats()

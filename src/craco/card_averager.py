@@ -9,9 +9,11 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-
+from craco.cardcap import NCHAN, NFPGA
 from numba import jit,njit,prange
 import numba
+from numba.typed import List
+
 
 log = logging.getLogger(__name__)
 
@@ -160,7 +162,7 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64):
+    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None):
         nbl = nant*(nant+1)//2
         self.nbl = nbl
         self.nant = nant
@@ -173,15 +175,24 @@ class Averager:
         self.rescale_stats = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
         self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
         # set default scale to 1
-        self.rescale_scales[...,1] = 1
-        self.count = 0
+        # OMG - I the fact that dummy_packet has to come in tells you that
+        # thisis all wrong. I need to do some tidying up
+        if dummy_packet is not None:
+            self.dummy_packet = dummy_packet
+            # run it so it compiles
+            packets = [self.dummy_packet for i in range(NFPGA)]
+            #self.accumulate_packets(packets)
+            self.reset()
+            self.reset_scales()
 
-        # TODO: pre-run accumulate_all to get it to compile before everything starts
 
     def reset(self):
         self.output[:] = 0
-        self.rescale_stats[:] = 0
-        self.count = 0
+
+    def reset_scales(self):
+        self.rescale_scales[...,0] = 0 # offset = 0
+        self.rescale_scales[...,1] = 1 # scale = 1
+        self.count = 0 # count = 0
 
     def update_scales(self):
         '''
@@ -208,6 +219,22 @@ class Averager:
         # reset stats
         self.rescale_stats[:] = 0
         self.count = 0
+
+    def accumulate_packets(self, packets):
+        '''
+        Converst packets to beam datda and runs accumulate_all
+        '''
+                #print('RX', ibuf, fids, type(packets), len(packets),  type(packets[0]), len(packets[0]), type(packets[0][0]), packets[0][0], type(packets[0][1]))
+        # Ugh, this is ugly, packets is a list of (fid, data) = need to tidy this up
+        # data = List() # construct a typed list for NUMBA - not sure if this needs to be cached  if it's slow
+
+        # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
+
+        data = List()
+        valid = np.array([pkt[1] is not None for pkt in packets], dtype=np.bool)
+        [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
+        return self.accumulate_all(data, valid)
+
 
     def accumulate_all(self, beam_data, valid):
         '''

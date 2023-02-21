@@ -32,12 +32,15 @@ def get_dir_size(start_path = '.'):
 
 class DataDirs:
     def __init__(self):
-        self.cracodata = os.environ['CRACO_DATA'] # local data dir when recording
+        self.cracodata = os.environ['CRACO_DATA'] # local data dir when recording usuall /data/fast/craco or /data/big/craco
         assert self.cracodata is not None, 'Set CRACO_DATA environment variable'
         assert os.path.isdir(self.cracodata), f'CRACO DATA dir {self.cracodata} not a directory'
+        
+        self.disktype = self.cracodata.split('/')[2] #
+        assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
 
     def node_dir(self, sid):
-        ddir = f'/data/seren-{sid:02d}/big/craco'
+        ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
         return ddir
 
 

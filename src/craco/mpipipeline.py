@@ -17,7 +17,6 @@ from craco.cardcapmerger import CcapMerger
 from craco.mpiutil import np2array
 from craco.vissource import VisSource
 import numba
-from numba.typed import List
 import glob
 import craft.sigproc as sigproc
 
@@ -54,6 +53,7 @@ def get_transpose_dtype(values):
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
     return dt
 
+## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
 
 class CardFileSource:
     '''
@@ -152,32 +152,30 @@ def proc_rx(cardidx, vis_source, values):
     npol = 1 if values.pol_sum else 2
 
     assert numprocs == nrx + nbeam
-    transposer = TransposeSender(cardidx, vis_source, values)
-    averager = Averager(nbeam, nant, nc, nt, npol, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
+
+
     ccap = CardFileSource(cardidx, vis_source, values)
+    dummy_packet = np.zeros((ccap.merger.npackets_per_frame), dtype=ccap.merger.dtype)
+    averager = Averager(nbeam, nant, nc, nt, npol, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet)
+    transposer = TransposeSender(cardidx, vis_source, values)
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
     t_start = MPI.Wtime()
-    dummy_packet = np.zeros((ccap.merger.npackets_per_frame), dtype=ccap.merger.dtype)
-    log.debug('Dummy packet shape %s dtype=%s', dummy_packet.shape, dummy_packet.dtype)
 
+    log.debug('Dummy packet shape %s dtype=%s', dummy_packet.shape, dummy_packet.dtype)
+    # Run dummy packet into averager to make it compile
+    dummy_packets = [dummy_packet for pkt in range(NFPGA)]
+    #averager.accumulate_packets(dummy_packets)
+    #averager.reset()
+    
     for ibuf, (packets, fids) in enumerate(ccap.packet_iter()):
         now = MPI.Wtime()
         read_time = now - t_start
-        #print('RX', ibuf, fids, type(packets), len(packets),  type(packets[0]), len(packets[0]), type(packets[0][0]), packets[0][0], type(packets[0][1]))
-        # Ugh, this is ugly, packets is a list of (fid, data) = need to tidy this up
-        # data = List() # construct a typed list for NUMBA - not sure if this needs to be cached  if it's slow
-        data = List()
-
-        # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
         # so we have to put a dummy value in and add a separate flags array
-        valid = np.array([pkt[1] is not None for pkt in packets], dtype=np.bool)
-        
-        [data.append(dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
         avg_start = MPI.Wtime()
-        averaged = averager.accumulate_all(data, valid)
+        averaged = averager.accumulate_packets(packets)
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
@@ -188,8 +186,9 @@ def proc_rx(cardidx, vis_source, values):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
+        #averager.update_scales()
+        averager.reset()
         t_start = MPI.Wtime()
-
 
 class FilterbankSink:
     def __init__(self, prefix, beamid, vis_source, values):
@@ -215,7 +214,7 @@ class FilterbankSink:
         assert beam_data.dtype == np.float32, 'WE set nbits=32 for this filterbank, so if it isnt we need to do some work'
         dout = np.transpose(beam_data, [1, 0, 2])
         if rank == 0:
-            print(dout.shape, dout.flatten().shape)
+            print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
         dout.tofile(self.fout.fin)
 
     def close(self):
@@ -230,7 +229,7 @@ def proc_beam(beamid, vis_source, values):
     nc = NCHAN*NFPGA
     npol = 1 if values.pol_sum else 2
 
-    assert numprocs == nrx + nbeam
+    assert numprocs == nrx + nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
 
     transposer = TransposeReceiver(beamid, vis_source, values)
     cas_filterbank = None
@@ -277,8 +276,12 @@ def dump_rankfile(values, fpga_per_rx=3):
             rank += 1
 
         rxrank = 0
+        cardno = 0
         for block in values.block:
             for card in values.card:
+                cardno += 1
+                if values.max_ncards != 0 and cardno >= values.max_ncards + 1:
+                    break
                 for fpga in values.fpga[::fpga_per_rx]:
                     hostidx = rxrank // nrx_per_host
                     hostrank = rxrank % nrx_per_host
@@ -302,9 +305,9 @@ class DummyVisSource:
         self.ra = 255.00
         self.dec = -30.00
         self.tstart = 888.88
-        self.tsamp = 1.0
-        self.fch1 = 888.88
-        self.foff = 1.0
+        self.tsamp = 1.7e-3
+        self.fch1 = 743.5
+        self.foff = 0.166
         # beams first, then rx
     
 def _main():
@@ -329,9 +332,14 @@ def _main():
         dump_rankfile(values, values.nfpga_per_rx)
         sys.exit(0)
 
-    values.nrx = len(values.block)*len(values.card)*len(values.fpga)//values.nfpga_per_rx
-    values.nt = 128
+    if values.max_ncards <= 0:
+        ncards = len(values.block)*len(values.card)
+    else:
+        ncards = values.max_ncards
 
+    values.nrx = ncards*len(values.fpga)//values.nfpga_per_rx
+    values.nt = 64
+    
     vis_source = DummyVisSource(values)
 
     if rank < values.nbeams:
