@@ -145,7 +145,7 @@ def _main():
                 blidx = 0
                 for ia1 in range(nant):
                     for ia2 in range(ia1, nant):
-                        uvwdiff = uvw[ia1,ibeam,:] - uvw[ia2,ibeam,:] 
+                        uvwdiff = uvw[ia1,beam,:] - uvw[ia2,beam,:] 
                         dblk = blk[:, ibeam,0,blidx,:,:]
                         wblk = weights[:, ibeam, 0, blidx, :, 0] # real and imaginary part should have same flag
                         if antflags[ia1] or antflags[ia2]:
