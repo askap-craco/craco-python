@@ -11,8 +11,9 @@ import logging
 import warnings
 from astropy.time import Time
 from astropy.io import fits
-import ast
+from  astropy.io.fits.header import Header
 from craco.utils import beamchan2ibc
+import ast
 
 log = logging.getLogger(__name__)
 
@@ -115,17 +116,25 @@ def get_indexes(nant):
 
 
 class CardcapFile:
-    def __init__(self, fname, workaround_craco63=False):
+    def __init__(self, fname, mainhdr=None, workaround_craco63=False):
+        '''
+        Supply the file name, or else mainhdr as a pyfits Header
+        If you don't supply a file, some values won't work
+        '''
         self.fname = fname
-        hdr1  = fits.getheader(fname)
-        mainhdr = fits.getheader(fname, 1)
+        if fname is not None:
+            hdr1  = fits.getheader(fname)
+            mainhdr = fits.getheader(fname, 1)
+        else:
+            assert mainhdr is not None
+            hdr1 = Header()
+
+        self.hdr1 = hdr1
         hdr_nbytes = len(str(hdr1)) + len(str(mainhdr))
         self.nbl = mainhdr.get('NBL', 465)
         self.debughdr = int(mainhdr.get('DEBUGHDR')) == 1
         self.polsum = int(mainhdr.get('POLSUM')) == 1
         self.dtype = get_single_packet_dtype(self.nbl, self.debughdr, self.polsum)
-
-        self.hdr1 = hdr1
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
@@ -134,9 +143,25 @@ class CardcapFile:
             self.tscrunch_bug = True
         else:
             self.tscrunch_bug = False
-            
-        self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
 
+        if fname is None:
+            self.pkt0 = None
+        else:
+            self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
+
+    @classmethod
+    def from_header_string(cls, hdrstring:str):
+        '''
+        Creates a cardcap file from the given header string
+        maindhr is set as a FITS header.
+        Use this to get a hold of various properties in the file
+        e.g. nant, indexes etc
+        If the file doesn't exist on  your system, then reading data won't work 
+        and you won't be able to get start times etc.
+        '''
+        mainhdr = Header.fromstring(hdrstring)
+        return CardcapFile(None, mainhdr)
+        
     @property
     def indexes(self):
         '''

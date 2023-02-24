@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Template for making scripts to run from the command line
+Runs MPI pipeline for CRACO.
 
 Copyright (C) CSIRO 2022
 """
@@ -15,7 +15,8 @@ import craco.card_averager
 from craco.card_averager import Averager
 from craco.cardcapmerger import CcapMerger
 from craco.mpiutil import np2array
-from craco.vissource import VisSource
+from craco.vissource import VisSource,CardCapFileSource
+from astropy.coordinates import SkyCoord
 import numba
 import glob
 import craft.sigproc as sigproc
@@ -39,6 +40,96 @@ numprocs = comm.Get_size()
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
 CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
 
+class MpiObsInfo:
+    '''
+    Gets headers from everyone and tells everyone what they need to know
+    uses lots of other classes in a hacky way to interpret the headers, and merge of the headers
+    '''
+    def __init__(self, hdrs, values):
+        '''
+        '''
+        # make megers for all the receiers
+        # just assume beams will have returned ['']
+        self.card_mergers = [CcapMerger.from_headers(card_hdrs)
+                    for card_hdrs in hdrs if len(card_hdrs) == NFPGA]
+
+        all_hdrs = []
+        # flatten into all headers
+        for card_hdrs in hdrs:
+            if len(card_hdrs) != NFPGA:
+                continue
+            
+            for fpga_hdr in card_hdrs:
+                all_hdrs.append(fpga_hdr)
+
+        self.main_merger = CcapMerger.from_headers(all_hdrs)
+
+        m = self.main_merger
+        assert m.fch1 == m.all_freqs.min(), f'Channel 0 = {m.fch1} but lowest channel is {m.all_freqs.min()}'
+
+        # we're goign to assume the individual card receiver mergers and preprocessing
+        # will do the right thing. So we're just going to check channels at a card level
+
+        card_freqs = np.array([m.fch1 for m in self.card_mergers])
+        card_freqdiff = card_freqs[1:] - card_freqs[:-1]
+        card_foff = np.abs(card_freqdiff[0] - card_freqdiff)
+        assert np.all(card_foff < 1e-3), f'Cards frequencies not contiguous {card_foff} {card_freqs} {card_freqdiff}'
+        assert card_freqdiff[0] > 0, f'Card frequency increment should probably be positive. It was {card_freqdiff[0]}'
+        self.__fid0 = None # this gets sent with some transposes later
+
+    @property
+    def target(self):
+        return self.main_merger.target
+
+    @property
+    def fid0(self):
+        return self.__fid0
+
+    @fid0.setter
+    def fid0(self, fid):
+        self.__fid0 = fid
+
+    @property
+    def tstart(self):
+        '''
+        Returns astropy time given fid0
+        We assume we start on the frame after fid0
+        '''
+        assert self.__fid0 is not None, 'First frame ID must be set before we can calculate tstart'
+        fid_first = self.fid0 + 2048
+        return self.main_merger.ccap[0].time_of_frame_id(fid_first)
+
+    @property
+    def nchan(self):
+        return self.main_merger.nchan
+
+    @property
+    def npol(self):
+        return self.main_merger.npol
+
+    @property
+    def fch1(self):
+        return self.main_merger.fch1
+
+    @property
+    def foff(self):
+        return self.main_merger.foff
+
+    def skycoord(self, beam):
+        '''
+        TODO: Fill this in
+        '''
+        return SkyCoord('15h30m00s','-30d00m00s')
+
+    @property
+    def inttime(self):
+        return self.main_merger.inttime
+
+    def __str__(self):
+        m = self.main_merger
+        s = f'fch1={m.fch1} foff={m.foff} nchan={m.nchan} nant={m.nant} inttime={m.inttime}'
+        return s
+
 
 def get_transpose_dtype(values):
     nbeam = values.nbeams
@@ -54,30 +145,6 @@ def get_transpose_dtype(values):
     return dt
 
 ## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
-
-class CardFileSource:
-    '''
-    Gets data from a single card - i.e. 6 FPGAs
-    '''
-    def __init__(self, cardidx, vis_source, values):
-        icard = cardidx % len(values.card)
-        iblk = cardidx  // len(values.card)
-        card = values.card[icard]
-        block = values.block[iblk]
-        if values.cardcap_dir is not None:
-            files = glob.glob(os.path.join(values.cardcap_dir, '*.fits'))
-            log.debug('Found %d cards in %s', len(files), values.cardcap_dir)
-        else:
-            files = values.files
-            
-        fstr = f'b{block:02d}_c{card:02d}'
-        myfiles = sorted(filter(lambda f: fstr in f, files))
-        log.info(f'Cardidx {cardidx} icard={icard} iblk={iblk} card={card} iblk={iblk} has {len(myfiles)} files ')
-        assert len(myfiles) == NFPGA, f'Incorrect number of cards for cardidx={cardidx} {fstr} {myfiles}'
-        self.merger = CcapMerger(myfiles)
-
-    def packet_iter(self):
-        return self.merger.packet_iter()
 
 class Transposer:
     def __init__(self, cardidx, vis_source, values):
@@ -138,7 +205,7 @@ class TransposeReceiver(Transposer):
         return self.all2all(self.dtx)
 
 
-def proc_rx(cardidx, vis_source, values):
+def proc_rx(cardidx, values):
     '''
     Process 1 card per beam
     1 card = 6 FGPAs
@@ -152,12 +219,15 @@ def proc_rx(cardidx, vis_source, values):
     npol = 1 if values.pol_sum else 2
 
     assert numprocs == nrx + nbeam
+    ccap = CardCapFileSource(cardidx, values)
 
-
-    ccap = CardFileSource(cardidx, vis_source, values)
+    # tell rank 0 about my headers
+    all_hdrs = comm.allgather(ccap.fpga_headers)
+    info = MpiObsInfo(all_hdrs, values)
+    
     dummy_packet = np.zeros((ccap.merger.npackets_per_frame), dtype=ccap.merger.dtype)
     averager = Averager(nbeam, nant, nc, nt, npol, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet)
-    transposer = TransposeSender(cardidx, vis_source, values)
+    transposer = TransposeSender(cardidx, info, values)
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
@@ -185,23 +255,37 @@ def proc_rx(cardidx, vis_source, values):
             averaged['cas'].flat = np.arange(averaged['cas'].size)
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
-        transposer.send(averaged)
-        #averager.update_scales()
+        if ibuf == 0:
+            # The first buffer is used and discarded for 2 reasons.
+            # 1. To get some initial data for scaling in the averager
+            # 2. To get the initial frame IDs, so we can work out how to synchronise everyone
+            # send everyone the frame ID and work out what we should do next
+            maxfid = max([0 if fid is None else fid for fid in fids])
+            all_maxfid = comm.allreduce(maxfid, MPI.MAX)
+            info.fid0 = all_maxfid
+            print(f'rank={rank} maxfid={maxfid} allmaxfid={all_maxfid}')
+        else:
+            transposer.send(averaged)
+            
+        averager.update_scales()
         averager.reset()
         t_start = MPI.Wtime()
 
 class FilterbankSink:
     def __init__(self, prefix, beamid, vis_source, values):
         fname = os.path.join(values.outdir, f'{prefix}_b{beamid:02d}.fil')
+        pos = vis_source.skycoord(beamid)
         hdr = {'nbits':32,
-               'nchans':vis_source.nchans,
+               'nchans':vis_source.nchan,
                'nifs':vis_source.npol,
-               'src_raj':vis_source.ra,
-               'src_dej':vis_source.dec,
-               'tstart':vis_source.tstart,
-               'tsamp':vis_source.tsamp,
+               'src_raj':pos.ra.deg,
+               'src_dej':pos.dec.deg,
+               'tstart':vis_source.tstart.utc.mjd,
+               'tsamp':vis_source.inttime,
                'fch1':vis_source.fch1,
-               'foff':vis_source.foff}
+               'foff':vis_source.foff,
+               'source_name':vis_source.target
+        }
 
         self.fout = sigproc.SigprocFile(fname, 'wb', hdr)
 
@@ -221,7 +305,7 @@ class FilterbankSink:
         self.fout.fin.close()
         
         
-def proc_beam(beamid, vis_source, values):
+def proc_beam(beamid, values):
     nrx = values.nrx
     nbeam = values.nbeams
     nt = values.nt
@@ -231,15 +315,23 @@ def proc_beam(beamid, vis_source, values):
 
     assert numprocs == nrx + nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
 
+    # OK - I need to gather all the headers from the data recivers
+    # Beams don't kow headers, so we just send nothings
+    all_hdrs = comm.allgather([''])
+    info = MpiObsInfo(all_hdrs, values)
+    vis_source = info
+    if rank == 0:
+        print(f'ObsInfo {info}')
+        
     transposer = TransposeReceiver(beamid, vis_source, values)
-    cas_filterbank = None
-    ics_filterbank = None
-    vis = None
     os.makedirs(values.outdir, exist_ok=True)
 
+    # Find first frame ID
+    firstfid = comm.allreduce(0, op=MPI.MAX)
+    info.fid0 = firstfid
+    
     cas_filterbank = FilterbankSink('cas', beamid, vis_source, values)
     ics_filterbank = FilterbankSink('ics', beamid, vis_source, values)
-
     
     while True:
         beam_data = transposer.recv()
@@ -295,20 +387,6 @@ def dump_rankfile(values, fpga_per_rx=3):
                     fout.write(s)
                     rank += 1
                     rxrank += 1
-
-
-class DummyVisSource:
-    def __init__(self, values):
-        self.nchans = values.nrx*values.nfpga_per_rx*NCHAN
-        self.nt = values.nt
-        self.npol = 1
-        self.ra = 255.00
-        self.dec = -30.00
-        self.tstart = 888.88
-        self.tsamp = 1.7e-3
-        self.fch1 = 743.5
-        self.foff = 0.166
-        # beams first, then rx
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -339,13 +417,11 @@ def _main():
 
     values.nrx = ncards*len(values.fpga)//values.nfpga_per_rx
     values.nt = 64
-    
-    vis_source = DummyVisSource(values)
 
     if rank < values.nbeams:
-        proc_beam(rank, vis_source, values)
+        proc_beam(rank, values)
     else:
-        proc_rx(rank - values.nbeams, vis_source, values)
+        proc_rx(rank - values.nbeams, values)
 
     comm.Barrier()
     print(f'Rank {rank}/{numprocs} complete')

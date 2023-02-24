@@ -11,6 +11,7 @@ import logging
 from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
 from numba.types import List
 from craco.utils import get_target_beam
+from typing import List
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ def frame_id_iter(i, fid0):
 
     frame_id = fid0
     fidoff = np.uint64(NSAMP_PER_FRAME)
-    assert isinstance(fid0, np.uint64)
+    assert isinstance(fid0, np.uint64), f'FID0 is the wrong type {fid0} {type(fid0)}'
     currblock = None
     last_frameid = frame_id
     last_bat = 0
@@ -65,24 +66,26 @@ def frame_id_iter(i, fid0):
 
 
 class CcapMerger:
-    def __init__(self, fnames):
-        self.fnames = fnames
+    def __init__(self, fnames, headers=None):
+        ''' Need to give it file names or headers
+        '''
         self.ccap = []
-        for f in self.fnames:
-            try:
-                cc = CardcapFile(f)
-                self.ccap.append(cc)
-            except:
-                log.exception('Error opening file %s', f)
-                raise
+        self.fnames = fnames
+        if self.fnames is not None:
+            for f in self.fnames:
+                try:
+                    cc = CardcapFile(f)
+                    self.ccap.append(cc)
+                except:
+                    log.exception('Error opening file %s', f)
+                    raise
+        else:
+            assert headers is not None
+            self.ccap = [CardcapFile.from_header_string(hdr) for hdr in headers]
 
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
-        frame_ids = [c.frame_id0  if not c.isempty else None for c in self.ccap]
-        bats = [c.bat0 if not c.isempty else None for c in self.ccap]
-        log.debug('Frame IDs: %s of %s= %s', len(frame_ids), nfiles, frame_ids)
-        log.debug('bats %s', bats)
 
         for ic, c in enumerate(self.ccap):
             assert len(c.fpgas) == nfpga, 'Differing numbers of fpgas in the files'
@@ -92,13 +95,35 @@ class CcapMerger:
             
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
         self.fidxs = fidxs
-        self.frame_id0 = min([fid for fid in frame_ids if fid is not None])
         self.tscrunch = self.ccap[0].tscrunch
         self.nbeam = self.ccap[0].nbeam
         self.nbl = self.ccap[0].mainhdr['NBL']
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
+
+    @classmethod
+    def from_headers(cls, headers: List[str]):
+        '''
+        Creates a merger file from a list of headers
+        Some properties won't be available because they need to see the data
+        '''
+        return CcapMerger(None, headers)
+
+    @property
+    def frame_ids(self):
+        fids  = [c.frame_id0  if not c.isempty else None for c in self.ccap]
+        return fids
+
+    @property
+    def frame_id0(self):
+        return min([fid for fid in self.frame_ids if fid is not None])
+
+    @property
+    def bats(self):
+        b = [c.bat0 if not c.isempty else None for c in self.ccap]
+        return b
+
 
     @property
     def beams(self):
@@ -196,6 +221,10 @@ class CcapMerger:
     @property
     def dtype(self):
         return self.ccap[0].dtype
+
+    @property
+    def target(self):
+        return self.gethdr('TARGET')
 
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]

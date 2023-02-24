@@ -162,7 +162,7 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None):
+    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None, rescale_update_blocks=1):
         nbl = nant*(nant+1)//2
         self.nbl = nbl
         self.nant = nant
@@ -174,6 +174,7 @@ class Averager:
         self.output = np.zeros(nbeam, dtype=self.dtype)
         self.rescale_stats = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
         self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
+
         # set default scale to 1
         # OMG - I the fact that dummy_packet has to come in tells you that
         # thisis all wrong. I need to do some tidying up
@@ -201,20 +202,20 @@ class Averager:
 
         :see: Welfords algorithm https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
         '''
+        assert self.count != 0, 'Nothing to update!'
         mean = self.rescale_stats[...,0]
         m2 = self.rescale_stats[...,1]
         variance = m2 / self.count
-        sample_variance = m2 / (self.count - 1)
+        #sample_variance = m2 / (self.count - 1)
 
         # not sure if I should use variance, or sample variance, let's use sample variance
         stdev = np.sqrt(variance)
-
         offset = -mean
         scale = 1/stdev
+        scale[stdev == 0] = 0
 
         self.rescale_scales[...,0] = offset
         self.rescale_scales[...,1] = scale
-
 
         # reset stats
         self.rescale_stats[:] = 0

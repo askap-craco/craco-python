@@ -58,10 +58,10 @@ def _main():
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
     pol='--pol-sum'
-    #pol = '--dual-pol'
+    pol = '--dual-pol'
 
-    #tscrunch='--tscrunch 64'
-    tscrunch = '--tscrunch 1'
+    tscrunch='--tscrunch 64'
+    #tscrunch = '--tscrunch 1'
 
     spi='--samples-per-integration 32'
 
@@ -73,10 +73,9 @@ def _main():
     #card = '-a 5-7'
     #block = '-b 3'
 
-    
-    max_ncards = '--max-ncards 30'
+    max_ncards = '--max-ncards 36'
 
-    num_msgs = '-N 1000'
+    num_msgs = '-N 1000000'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     
