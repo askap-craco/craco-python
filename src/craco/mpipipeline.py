@@ -256,9 +256,10 @@ def proc_rx(cardidx, values):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         if ibuf == 0:
-            # The first buffer is used and discarded for 2 reasons.
+            # The first buffer is used and discarded for a few reasons
             # 1. To get some initial data for scaling in the averager
             # 2. To get the initial frame IDs, so we can work out how to synchronise everyone
+            # 3. To guess which cards should be ignored for the entire duration becaue they're dead at the beginning
             # send everyone the frame ID and work out what we should do next
             maxfid = max([0 if fid is None else fid for fid in fids])
             all_maxfid = comm.allreduce(maxfid, MPI.MAX)

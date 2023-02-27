@@ -32,6 +32,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -58,7 +59,7 @@ def _main():
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
     pol='--pol-sum'
-    pol = '--dual-pol'
+    #pol = '--dual-pol'
 
     tscrunch='--tscrunch 64'
     #tscrunch = '--tscrunch 1'
@@ -69,11 +70,11 @@ def _main():
     beam = ''
 
     card  = '-a 1-12'
-    block = '-b 2-4'
+    block = '-b 2-7'
     #card = '-a 5-7'
     #block = '-b 3'
 
-    max_ncards = '--max-ncards 36'
+    max_ncards = '--max-ncards 72'
 
     num_msgs = '-N 1000000'
     num_cmsgs = '--num-cmsgs 1'
@@ -86,22 +87,30 @@ def _main():
     atexit.register(exit_function)
     # subprocess.run doesn't work - if you kill with sigterm you get 'terminated' written to stdout - no exception, exit function isn't run.
     #
-    proc = subprocess.Popen(cmd, shell=True)
+    if values.show_output:
+        logfile = None
+    else:
+        logfile = open(os.path.join(scandir, 'run.log'), 'w')
+    
+    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT)
     finish = False
 
-    def signal_handler(signal, frame):
-        log.info(f'Got signal {signal}')
+    def signal_handler(sig, frame):
+        log.info(f'{__file__} got signal {sig}. Killing {proc.pid}')
         finish = True
+        proc.send_signal(signal.SIGTERM)
 
-#    signal.signal(signal.SIGTERM, signal_handler)
-#    signal.signal(signal.SIGHUP, signal_handler)
-#    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
     
     try:
         while not finish:
             time.sleep(1)
-            if proc.returncode is not None:
+            log.debug('Process %s returncode is %s', proc.pid, proc.returncode)
+            if proc.poll() is not None:
                 log.info('Process self-terminated with return code %s', proc.returncode)
+                finish = True
             
     except KeyboardInterrupt:
         log.info('Savescan received KeyboardInterrupt/SIGINT - terminating subprocess')
@@ -109,6 +118,8 @@ def _main():
         log.info('Terminating process')
         proc.terminate()
         proc.wait()
+        if logfile is not None:
+            logfile.close()
 
     log.info(f'Process completed with returncode {proc.returncode}')
     exit_function()

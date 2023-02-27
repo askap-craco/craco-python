@@ -28,6 +28,9 @@ cmd="mpirun -rf $rankfile   -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST $co
 echo $cmd
 $cmd
 
+echo $0 $cmd is FINISHED
+exit 0
+
 
 
 

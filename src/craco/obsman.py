@@ -7,7 +7,7 @@ Copyright (C) CSIRO 2022
 import os
 import sys
 import logging
-from epics import PV
+from epics import PV, caget
 from subprocess import Popen, TimeoutExpired
 import time
 import signal
@@ -32,8 +32,8 @@ class Obsman:
 
         # Bit of a race condition here, but we'll do it
         # add_callback might have beaten us to it,
-        self.scan_changed(self.scan_pv.pvname, self.scan_pv.get())
-        self.callback_id = self.scan_pv.add_callback(self.scan_changed)
+        self.scan_changed(self.target_pv.pvname, self.target_pv.get())
+        self.callback_id = self.target_pv.add_callback(self.scan_changed)
 
         atexit.register(self.atexit_handler)
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -64,10 +64,9 @@ class Obsman:
             self.start_process(scanid)
         
     def scan_changed(self, pvname=None, value=None, char_value=None, **kw):
-        assert pvname == self.scan_pv.pvname
-        new_scanid = value
+        new_scanid = self.scan_pv.get()
         sbid = self.sbid_pv.get()
-        target = self.target_pv.get()
+        target = self.target_pv.get() # this doesnt refresh for some reason
         match = None
         if self.values.target_regex is not None:
             match = re.search(self.values.target_regex, target)
@@ -75,7 +74,7 @@ class Obsman:
         else:
             target_ok = True
 
-        log.info(f'Scan_changed pv={pvname} newscan={value} currscan={self.curr_scanid} SB{sbid}')
+        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
@@ -110,8 +109,8 @@ class Obsman:
             pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
             timeout = self.values.timeout
             log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
+            proc.send_signal(signal.SIGINT)
             os.killpg(pgid, signal.SIGINT)
-            #proc.send_signal(signal.SIGINT)
             #proc.terminate()
             try:
                 proc.wait(timeout)
@@ -128,9 +127,10 @@ class Obsman:
 
     def poll_process(self):
         if self.process is not None:
-            log.debug('Process pid=%s running with return code %s', self.process.pid, self.process.returncode)
-            if self.process.returncode is not None:
-                log.info('Process terminated prematurely. Cleaning up')
+            retcode = self.process.poll()
+            log.debug('Process pid=%s running with return code %s', self.process.pid, retcode)
+            if retcode is not None:
+                log.info('Process terminated with return code %s. Cleaning up', retcode)
                 self.terminate_process()
 
     def shutdown(self):
