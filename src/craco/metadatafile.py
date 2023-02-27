@@ -121,6 +121,8 @@ class MetadataFile:
         :beam: Beam number for source directions
         
         '''
+
+        assert 0<= beam < 36, f'Invalid beam {beam}'
         sources = OrderedDict()
         for d in self.data:
             name = d['target_name']

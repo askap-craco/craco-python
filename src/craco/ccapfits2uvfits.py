@@ -85,7 +85,7 @@ def _main():
     uvout_beams = []
 
     if values.beam is None or values.beam == -1:
-        beams = [b for b in range(1, NBEAM+1)]
+        beams = [b for b in range(0, NBEAM)]
     elif values.beam == -2:
         targname = merge.gethdr('TARGET')
         beams = [get_target_beam(targname)]
