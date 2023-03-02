@@ -9,6 +9,8 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
+os.environ['NUMBA_NUM_THREADS'] = '4'
+
 from craco.cardcap import NCHAN, NFPGA
 from numba import jit,njit,prange
 import numba

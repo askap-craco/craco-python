@@ -81,6 +81,8 @@ class CcapMerger:
                     raise
         else:
             assert headers is not None
+            assert len(headers) > 0, 'Empty list for headers'
+            assert len(headers[0]) > 0, 'Empty header'
             self.ccap = [CardcapFile.from_header_string(hdr) for hdr in headers]
 
         nfpga = len(self.ccap[0].fpgas)
@@ -236,7 +238,7 @@ class CcapMerger:
         '''
         Returns an iterator that returns arrays of blocks of data but without converting them 
         into a masked array
-        Yields a tuple containing (packets, fids)
+        Yields a tuple containing ((fid, packets,) fids)
         Packets are the packets from each input
         fids is a tuple of frame_ids, one from each input
         '''

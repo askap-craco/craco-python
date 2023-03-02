@@ -61,26 +61,32 @@ def _main():
     pol='--pol-sum'
     #pol = '--dual-pol'
 
-    tscrunch='--tscrunch 64'
+    tscrunch='--tscrunch 128'
     #tscrunch = '--tscrunch 1'
 
-    spi='--samples-per-integration 32'
+    spi='--samples-per-integration 16'
 
     beam='--beam 0'
     beam = ''
 
     card  = '-a 1-12'
     block = '-b 2-7'
+    fpga = ''
+    fpga_mask = ''
+    
+    #fpga = '-k 2,4,6'
+    #fpga_mask = '--fpga-mask 42'
+    #fpga = '-f 1-6'
     #card = '-a 5-7'
     #block = '-b 3'
 
-    max_ncards = '--max-ncards 72'
+    max_ncards = '--max-ncards 70'
 
     num_msgs = '-N 1000000'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     
-    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {block} {max_ncards}'
+    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
 
     log.info(f'Running command {cmd}')
 

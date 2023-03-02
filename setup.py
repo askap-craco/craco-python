@@ -86,7 +86,8 @@ if __name__ == '__main__':
                                 'calibration=craco.calibration:_main',
                                 'dusb=craco.dusb:_main',
                                 'prepsb=craco.prepsb:_main',
-                                'prthd=craco.prthd:_main'
+                                'prthd=craco.prthd:_main',
+                                'plotpcap=craco.plotpcap:_main'
                                 
             ],
         },

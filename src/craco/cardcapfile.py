@@ -150,6 +150,10 @@ class CardcapFile:
             self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
 
     @classmethod
+    def from_header(cls, hdr):
+        return CardcapFile(None, hdr)
+
+    @classmethod
     def from_header_string(cls, hdrstring:str):
         '''
         Creates a cardcap file from the given header string

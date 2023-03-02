@@ -3,7 +3,8 @@
 myfits=$1
 vis=$myfits.mir
 
-echo Calibrating $myfits into $vis
+
+echo Calibrating $myfits into $vis in directory `pwd`
 
 if [[ ! -e $myfits.mir ]] ; then
     fits in=$myfits out=$myfits.mir op=uvin
