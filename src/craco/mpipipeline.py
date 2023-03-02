@@ -184,13 +184,16 @@ def get_transpose_dtype(values):
 
 ## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
 
-class Transposer:
+class DtypeTransposer:
     def __init__(self, cardidx, vis_source, values):
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
         self.nbeam = values.nbeams
         self.nrx = values.nrx
         self.dtype = get_transpose_dtype(values)
         self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(self.dtype)
+        self.msgsize = self.dtype.itemsize
+        self.nmsgs = 1
+        log.info('Transposing %s with type=%s  size=%s NMSG=%s', self.dtype, self.mpi_dtype, self.msgsize, self.nmsgs)
         
         self.cardidx = cardidx
         self.vis_source = vis_source
@@ -202,21 +205,88 @@ class Transposer:
         self.rx_displacements = np.zeros(numprocs, np.int32)
 
     def all2all(self, dtx):
-        s_msg = [dtx, (np2array(self.tx_counts), np2array(self.tx_displacements)), self.mpi_dtype]
-        r_msg = [self.drx, (np2array(self.rx_counts), np2array(self.rx_displacements)), self.mpi_dtype]
-        #print(f'all2all Rank {rank}/{numprocs} {self.dtype}={self.dtype.itemsize}bytes {self.mpi_dtype} TX:{self.tx_counts} {self.tx_displacements} RX:{self.rx_counts}-{self.rx_displacements}')
+        t_barrier = MPI.Wtime()
+        comm.Barrier()
         t_start = MPI.Wtime()
+        s_msg = [dtx,
+                 (np2array(self.tx_counts),
+                  np2array(self.tx_displacements)),
+                 self.mpi_dtype]
+            
+        r_msg = [self.drx,
+                 (np2array(self.rx_counts),
+                  np2array(self.rx_displacements)),
+                 self.mpi_dtype]
         comm.Alltoallv(s_msg, r_msg)
         t_end = MPI.Wtime()
         latency = (t_end - t_start)*1e3
+            
         if rank == 0:
-            print(f'RANK0 Latency = {latency}ms')
+            print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
+
+        #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
+        return self.drx
+
+
+class ByteTransposer:
+    def __init__(self, cardidx, vis_source, values):
+        # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
+        self.nbeam = values.nbeams
+        self.nrx = values.nrx
+        self.dtype = get_transpose_dtype(values)
+        self.mpi_dtype = MPI.BYTE
+                 
+        #self.msgsize = self.dtype.itemsize
+        if values.transpose_msg_bytes > 0:
+            self.msgsize = min(values.transpose_msg_bytes, self.dtype.itemsize)
+        else:
+            self.msgsize = self.dtype.itemsize
+                 
+        self.displacement = self.dtype.itemsize
+        self.nmsgs = (self.dtype.itemsize) // self.msgsize
+
+        log.info('Transposing %s with type=%s  size=%s NMSG=%s', self.dtype, self.mpi_dtype, self.msgsize, self.nmsgs)
+        
+        self.cardidx = cardidx
+        self.vis_source = vis_source
+        self.values = values
+        
+        self.tx_counts = np.zeros(numprocs, np.int32)
+        self.tx_displacements = np.zeros(numprocs, np.int32)
+        self.rx_counts = np.zeros(numprocs, np.int32)
+        self.rx_displacements = np.zeros(numprocs, np.int32)
+
+    def all2all(self, dtx):
+        nmsgs = self.nmsgs
+        t_barrier = MPI.Wtime()
+        #comm.Barrier()
+        t_start = MPI.Wtime()
+        for imsg in range(nmsgs):
+            msgsize = self.msgsize # TODO: Handle final block
+            s_msg = [dtx.view(np.byte),
+                     (np2array(self.tx_counts*msgsize),
+                      np2array(self.tx_displacements*self.displacement + imsg*msgsize)),
+                     self.mpi_dtype]
+            
+            r_msg = [self.drx.view(np.byte),
+                     (np2array(self.rx_counts*msgsize),
+                      np2array(self.rx_displacements*self.displacement + imsg*msgsize)),
+                     self.mpi_dtype]
+            #print('SMSG', s_msg[1:])
+            #print('RMSG', r_msg[1:])
+            comm.Alltoallv(s_msg, r_msg)
+            
+        t_end = MPI.Wtime()
+        latency = (t_end - t_start)*1e3
+            
+        if rank == 0:
+            print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
 
         #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
 
         return self.drx
 
-class TransposeSender(Transposer):
+class TransposeSender(ByteTransposer):
     def __init__(self, cardidx, vis_source, values):
         super().__init__(cardidx, vis_source, values)
         nbeam = self.nbeam
@@ -228,7 +298,7 @@ class TransposeSender(Transposer):
         assert len(dtx) == self.nbeam
         return self.all2all(dtx)
 
-class TransposeReceiver(Transposer):
+class TransposeReceiver(ByteTransposer):
     def __init__(self, cardidx, vis_source, values):
         super().__init__(cardidx, vis_source, values)
         nbeam = self.nbeam
@@ -286,6 +356,7 @@ def proc_rx(pipe_info):
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
         averaged = averager.accumulate_packets(packets)
+        averaged = averager.output
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
@@ -310,7 +381,8 @@ def proc_rx(pipe_info):
             print(f'rank={rank} maxfid={maxfid} allmaxfid={all_maxfid}')
         else:
             transposer.send(averaged)
-            
+
+        # trying to debug latency
         #averager.update_scales()
         #averager.reset()
         t_start = MPI.Wtime()
@@ -341,9 +413,9 @@ class FilterbankSink:
 
         assert beam_data.dtype == np.float32, 'WE set nbits=32 for this filterbank, so if it isnt we need to do some work'
         dout = np.transpose(beam_data, [1, 0, 2])
-        if rank == 0:
-            print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
-        dout.tofile(self.fout.fin)
+#        if rank == 0:
+            #print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
+        #dout.tofile(self.fout.fin)
 
     def close(self):
         self.fout.fin.close()
@@ -443,6 +515,7 @@ def _main():
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
+    parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

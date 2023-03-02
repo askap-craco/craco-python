@@ -61,13 +61,13 @@ def _main():
     pol='--pol-sum'
     #pol = '--dual-pol'
 
-    tscrunch='--tscrunch 128'
-    #tscrunch = '--tscrunch 1'
+    #tscrunch='--tscrunch 64'
+    tscrunch = '--tscrunch 1'
 
-    spi='--samples-per-integration 16'
+    spi='--samples-per-integration 32'
 
     beam='--beam 0'
-    beam = ''
+    #beam = ''
 
     card  = '-a 1-12'
     block = '-b 2-7'
@@ -81,6 +81,7 @@ def _main():
     #block = '-b 3'
 
     max_ncards = '--max-ncards 70'
+    #max_ncards = ''
 
     num_msgs = '-N 1000000'
     num_cmsgs = '--num-cmsgs 1'

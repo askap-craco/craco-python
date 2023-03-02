@@ -328,8 +328,7 @@ class FpgaCapturer:
         rx.pollRequests()
         ncompletions = rx.get_numCompletionsFound()
         
-        print(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Slept for {sleep_ns/1e6}ms. Waited {wait_ns/1e6}ms for ncompletions={ncompletions}')
-
+        #print(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Slept for {sleep_ns/1e6}ms. Waited {wait_ns/1e6}ms for ncompletions={ncompletions}')
         #nmissing = rx.get_numMissingFound()
         completions = rx.get_workCompletions()
         self.curr_packet_time = time.process_time()
@@ -828,7 +827,7 @@ class MpiCardcapController:
             my_values.block = my_block
             my_values.fpga = my_fpga
 
-            devices = ['mlx5_0', 'mlx5_1']
+            devices = values.devices.split(',')
             #devices =['mlx5_0','mlx5_0']
             if len(my_fpga) == 1:
                 devidx = my_fpga[0] % len(devices)
@@ -836,7 +835,6 @@ class MpiCardcapController:
             else:
                 devidx = my_card % len(devices)
 
-            devidx = 0
             my_values.device = devices[devidx]
 
             if values.outfile is None:
@@ -921,6 +919,7 @@ def add_arguments(parser):
     parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=strrange) 
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=strrange)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
+    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_0,mlx5_1')
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ak')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
