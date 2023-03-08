@@ -61,7 +61,7 @@ def soln2array(soln, baseline_order, npol = 2):
         s1 = soln[a1-1,:,:]
         s2 = soln[a2-1,:,:]
         p = s1*np.conj(s2)
-        print(solnarray.shape, p.shape)
+        #print(solnarray.shape, p.shape)
         solnarray[ibl,...] = p[:]
         mask[ibl,...] = p.mask[:]
 
