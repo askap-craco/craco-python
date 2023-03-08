@@ -139,6 +139,10 @@ def _main():
             out_sourceidx = 1 # FITS convention is the first value is 1
              
             # blk shape is (nchan, nbeam, nint, nbl, npol, 2)
+            if blk.shape[2] != 1:
+                warnings.warn(f'Averaging automagically by {blk.shape[2]} Timestamps maybe wrong by {blk.shape[2]/2} many samples')
+                blk = blk.mean(axis=2, keepdims=True)
+                
             assert blk.shape[2] == 1, f'Cant handle nint != 1 yet {blk.shape} {blk.shape[2]}'
             
             for ibeam, (beam, uvout) in enumerate(uvout_beams):

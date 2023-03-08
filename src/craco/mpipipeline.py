@@ -10,7 +10,7 @@ import sys
 import logging
 from array import array
 from craco import cardcap
-from craco.cardcap import NCHAN, NFPGA
+from craco.cardcap import NCHAN, NFPGA, NSAMP_PER_FRAME
 import craco.card_averager
 from craco.card_averager import Averager
 from craco.cardcapmerger import CcapMerger
@@ -42,7 +42,25 @@ CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can al
 
 class MpiPipelineInfo:
     def __init__(self, values):
-        nbeams = values.nbeams
+
+        if values.max_ncards <= 0:
+            ncards = len(values.block)*len(values.card)
+        else:
+            ncards = values.max_ncards
+
+        nrx = ncards*len(values.fpga)//values.nfpga_per_rx
+        self.nrx = nrx
+        self.ncards = ncards
+
+            # yuck. This is just yuk.
+        if values.beam is None:
+            values.nbeams = 36
+        else:
+            assert 0<= values.beam < 36, f'Invalid beam {values.beam}'
+            values.nbeams = 1
+
+        
+        self.nbeams = values.nbeams
         self.world_comm = MPI.COMM_WORLD
         self.world_rank = comm.Get_rank()
         self.values = values
@@ -52,7 +70,7 @@ class MpiPipelineInfo:
 
     @property
     def is_beam_processor(self):
-        bproc = self.world_rank < self.values.nbeams
+        bproc = self.world_rank < self.nbeams
         return bproc
 
     @property
@@ -68,7 +86,7 @@ class MpiPipelineInfo:
     def cardid(self):
         values = self.values
         assert self.is_rx_processor, 'Requested cardID of non-card processor'
-        theid = self.world_rank - values.nbeams
+        theid = self.world_rank - self.nbeams
         return theid
 
 class MpiObsInfo:
@@ -76,9 +94,12 @@ class MpiObsInfo:
     Gets headers from everyone and tells everyone what they need to know
     uses lots of other classes in a hacky way to interpret the headers, and merge of the headers
     '''
-    def __init__(self, hdrs, values):
+    def __init__(self, hdrs, pipe_info):
         '''
         '''
+        self.pipe_info = pipe_info
+        values = pipe_info.values
+        self.values = values
         # make megers for all the receiers
         # just assume beams will have returned ['']
         self.card_mergers = []
@@ -106,7 +127,6 @@ class MpiObsInfo:
         # will do the right thing. So we're just going to check channels at a card level
 
         card_freqs = np.array([m.fch1 for m in self.card_mergers])
-        print('CARD FREQS', card_freqs)
         if len(self.card_mergers) > 1:
             card_freqdiff = card_freqs[1:] - card_freqs[:-1]
             card_foff = np.abs(card_freqdiff[0] - card_freqdiff)
@@ -115,17 +135,38 @@ class MpiObsInfo:
             
         self.__fid0 = None # this gets sent with some transposes later
 
+
+    @property
+    def nbeams(self):
+        return self.pipe_info.nbeams
+
+    @property
+    def nt(self):
+        return self.pipe_info.nt
+
+    @property
+    def nrx(self):
+        return self.pipe_info.nrx
+    
     @property
     def target(self):
         return self.main_merger.target
 
+    @property
+    def vis_fscrunch(self):
+        return self.values.vis_fscrunch
+
+    @property
+    def vis_tscrunch(self):
+        return self.values.vis_tscrunch
+        
     @property
     def fid0(self):
         return self.__fid0
 
     @fid0.setter
     def fid0(self, fid):
-        self.__fid0 = fid
+        self.__fid0 = np.uint64(fid)
 
     @property
     def tstart(self):
@@ -134,8 +175,11 @@ class MpiObsInfo:
         We assume we start on the frame after fid0
         '''
         assert self.__fid0 is not None, 'First frame ID must be set before we can calculate tstart'
-        fid_first = self.fid0 + 2048
+        fid_first = self.fid_of_block(0)
         return self.main_merger.ccap[0].time_of_frame_id(fid_first)
+
+    def fid_of_block(self, iblk):
+        return self.fid0 + np.uint64(iblk + 1)*np.uint64(NSAMP_PER_FRAME)
 
     @property
     def nchan(self):
@@ -163,6 +207,13 @@ class MpiObsInfo:
     def inttime(self):
         return self.main_merger.inttime
 
+    @property
+    def nt(self):
+        '''
+        Return number of samples per frame
+        '''
+        return self.main_merger.nt_per_frame
+
     def __str__(self):
         m = self.main_merger
         s = f'fch1={m.fch1} foff={m.foff} nchan={m.nchan} nant={m.nant} inttime={m.inttime}'
@@ -176,7 +227,7 @@ def get_transpose_dtype(values):
     nc = NCHAN*NFPGA
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
-    npol = 1 if values.pol_sum else 2
+    npol = values.npol
     rdtype = np.float32
     cdtyep = np.complex64
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
@@ -229,12 +280,13 @@ class DtypeTransposer:
 
 
 class ByteTransposer:
-    def __init__(self, cardidx, vis_source, values):
+    def __init__(self, info):
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
-        self.nbeam = values.nbeams
-        self.nrx = values.nrx
-        self.dtype = get_transpose_dtype(values)
+        self.nbeam = info.nbeams
+        self.nrx = info.nrx
+        self.dtype = get_transpose_dtype(info)
         self.mpi_dtype = MPI.BYTE
+        values = info.values
                  
         #self.msgsize = self.dtype.itemsize
         if values.transpose_msg_bytes > 0:
@@ -247,10 +299,7 @@ class ByteTransposer:
 
         log.info('Transposing %s with type=%s  size=%s NMSG=%s', self.dtype, self.mpi_dtype, self.msgsize, self.nmsgs)
         
-        self.cardidx = cardidx
-        self.vis_source = vis_source
-        self.values = values
-        
+        self.values = info.values
         self.tx_counts = np.zeros(numprocs, np.int32)
         self.tx_displacements = np.zeros(numprocs, np.int32)
         self.rx_counts = np.zeros(numprocs, np.int32)
@@ -287,8 +336,8 @@ class ByteTransposer:
         return self.drx
 
 class TransposeSender(ByteTransposer):
-    def __init__(self, cardidx, vis_source, values):
-        super().__init__(cardidx, vis_source, values)
+    def __init__(self, info):
+        super().__init__(info)
         nbeam = self.nbeam
         self.tx_counts[:nbeam] = 1
         self.tx_displacements[:nbeam] = np.arange(nbeam, dtype=np.int32)
@@ -299,8 +348,8 @@ class TransposeSender(ByteTransposer):
         return self.all2all(dtx)
 
 class TransposeReceiver(ByteTransposer):
-    def __init__(self, cardidx, vis_source, values):
-        super().__init__(cardidx, vis_source, values)
+    def __init__(self, info):
+        super().__init__(info)
         nbeam = self.nbeam
         nrx = self.nrx
         self.rx_counts[nbeam:] = 1 # receive same amount from every tx
@@ -317,40 +366,46 @@ def proc_rx(pipe_info):
     Process 1 card per beam
     1 card = 6 FGPAs
     '''
-    cardidx = pipe_info.cardid
-    values = pipe_info.values
-    nrx = values.nrx
-    nbeam = values.nbeams
-    nt = values.nt
-    nant = 30
-    nc = NCHAN*NFPGA
-    npol = 1 if values.pol_sum else 2
-
-    assert numprocs == nrx + nbeam
     ccap = open_source(pipe_info)
 
     # tell all ranks about the headers
     all_hdrs = comm.allgather(ccap.fpga_headers)
     
-    info = MpiObsInfo(all_hdrs, values)
-        
+    info = MpiObsInfo(all_hdrs, pipe_info)
+    nbeam = pipe_info.nbeams
+    cardidx = pipe_info.cardid
+    values = pipe_info.values
+    nrx = info.nrx
+    nt = info.nt
+    nant = 30
+    nc = NCHAN*NFPGA
+    npol = 1 if values.pol_sum else 2
+    assert numprocs == nrx + nbeam
+
     dummy_packet = np.zeros((ccap.merger.npackets_per_frame), dtype=ccap.merger.dtype)
-    averager = Averager(nbeam, nant, nc, nt, npol, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet)
-    transposer = TransposeSender(cardidx, info, values)
+    rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/')
+    averager = Averager(nbeam, nant, nc, nt, npol, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.exclude_ants, rescale_output_path=rsout)
+    transposer = TransposeSender(info)
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
     t_start = MPI.Wtime()
 
-    log.debug('Dummy packet shape %s dtype=%s', dummy_packet.shape, dummy_packet.dtype)
-    # Run dummy packet into averager to make it compile
-    dummy_packets = [(0, dummy_packet) for pkt in range(NFPGA)]
-    # run dummy data through to make it go fast early
-    averager.accumulate_packets(dummy_packets)
-    averager.reset()
-    
-    for ibuf, (packets, fids) in enumerate(ccap.packet_iter()):
+    log.debug('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
+
+    # get initial data to setup scaling and find starting FID
+    packets, fids = next(ccap.packet_iter())
+    averaged = averager.accumulate_packets(packets)
+    averaged = averager.output
+    maxfid = max([0 if fid is None else fid for fid in fids])
+    all_maxfid = comm.allreduce(maxfid, MPI.MAX)
+    info.fid0 = all_maxfid
+    start_fid = info.fid_of_block(0)
+    log.info(f'rank={rank} maxfid={maxfid} allmaxfid={all_maxfid} myfid={maxfid} {type(maxfid)} {type(all_maxfid)} {start_fid} {type(start_fid)}')
+
+
+    for ibuf, (packets, fids) in enumerate(ccap.packet_iter(start_fid)):
         now = MPI.Wtime()
         read_time = now - t_start
         # so we have to put a dummy value in and add a separate flags array
@@ -359,6 +414,12 @@ def proc_rx(pipe_info):
         averaged = averager.output
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
+        expected_fid = info.fid_of_block(ibuf)
+        for ifpga, (pkt, fid) in enumerate(zip(packets, fids)):
+            if pkt is not None:
+                diff = int(expected_fid) - int(fid)
+                assert diff==0, f'Invalid fid. Expected {expected_fid} but got {fid} diff={diff} for rank={rank} ibuf={ibuf} card={cardidx} ifpga={ifpga} start_fid={start_fid} all_maxfid={all_maxfid} maxfid={maxfid}'
+            
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
         if avg_time*1e3 > 50:
             log.warning('Averaging time for %s was too long: %s ms', cardidx, avg_time*1e3)
@@ -369,22 +430,8 @@ def proc_rx(pipe_info):
             averaged['cas'].flat = np.arange(averaged['cas'].size)
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
-        if ibuf == 0:
-            # The first buffer is used and discarded for a few reasons
-            # 1. To get some initial data for scaling in the averager
-            # 2. To get the initial frame IDs, so we can work out how to synchronise everyone
-            # 3. To guess which cards should be ignored for the entire duration becaue they're dead at the beginning
-            # send everyone the frame ID and work out what we should do next
-            maxfid = max([0 if fid is None else fid for fid in fids])
-            all_maxfid = comm.allreduce(maxfid, MPI.MAX)
-            info.fid0 = all_maxfid
-            print(f'rank={rank} maxfid={maxfid} allmaxfid={all_maxfid}')
-        else:
-            transposer.send(averaged)
-
-        # trying to debug latency
-        #averager.update_scales()
-        #averager.reset()
+        transposer.send(averaged)
+            
         t_start = MPI.Wtime()
 
 class FilterbankSink:
@@ -415,18 +462,21 @@ class FilterbankSink:
         dout = np.transpose(beam_data, [1, 0, 2])
 #        if rank == 0:
             #print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
-        #dout.tofile(self.fout.fin)
+        dout.tofile(self.fout.fin)
 
     def close(self):
         self.fout.fin.close()
         
         
 def proc_beam(pipe_info):
+    all_hdrs = comm.allgather([''])
+    info = MpiObsInfo(all_hdrs, pipe_info)
+
+    nbeam = pipe_info.nbeams
     values = pipe_info.values
     beamid = pipe_info.beamid
-    nrx = values.nrx
-    nbeam = values.nbeams
-    nt = values.nt
+    nrx = info.nrx
+    nt = info.nt
     nant = 30
     nc = NCHAN*NFPGA
     npol = 1 if values.pol_sum else 2
@@ -435,12 +485,10 @@ def proc_beam(pipe_info):
 
     # OK - I need to gather all the headers from the data recivers
     # Beams don't kow headers, so we just send nothings
-    all_hdrs = comm.allgather([''])
-    info = MpiObsInfo(all_hdrs, values)
     if rank == 0:
         print(f'ObsInfo {info}')
         
-    transposer = TransposeReceiver(beamid, info, values)
+    transposer = TransposeReceiver(info)
     os.makedirs(values.outdir, exist_ok=True)
 
     # Find first frame ID
@@ -452,23 +500,25 @@ def proc_beam(pipe_info):
     
     while True:
         beam_data = transposer.recv()
-        #@print(f'Rank {rank}/{numprocs} got beam data {len(beam_data)}')
         cas_filterbank.write(beam_data['cas'])
         ics_filterbank.write(beam_data['ics'])
-        #vis.write(beam_data['vis'])
 
 
 def dump_rankfile(values, fpga_per_rx=3):
     from craco import mpiutil
     hosts = mpiutil.parse_hostfile(values.hostfile)
     log.debug("Hosts %s", hosts)
-    nrx = len(values.block)*len(values.card)*len(values.fpga)
+    total_cards = len(values.block)*len(values.card)
+    
+    if values.max_ncards != 0:
+        total_cards = min(total_cards, values.max_ncards)
+
+    nrx = total_cards*len(values.fpga) // fpga_per_rx
     nbeams = values.nbeams
     nranks = nrx + nbeams
-    total_cards = len(values.block)*len(values.card)
-    ncards_per_host = (total_cards + len(hosts))//len(hosts)
-    nrx_per_host = ncards_per_host*6//fpga_per_rx
-    nbeams_per_host = (nbeams + len(hosts))//len(hosts)
+    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts)
+    nrx_per_host = ncards_per_host
+    nbeams_per_host = (nbeams + len(hosts) - 1)//len(hosts)
     log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
@@ -507,15 +557,16 @@ def dump_rankfile(values, fpga_per_rx=3):
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    from craft.cmdline import strrange
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     cardcap.add_arguments(parser)
-    parser.add_argument('--nbeams', type=int, help='Number of beams', default=36)
     parser.add_argument('--nfpga-per-rx', type=int, default=6, help='Number of FPGAS received by a single RX process')
     parser.add_argument('--vis-fscrunch', type=int, default=6, help='Amount to frequency average visibilities before transpose')
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
+    parser.add_argument('--exclude-ants', help='Antenna numbers to exclude e.g. 1,2,3,35-36', type=strrange, default='')
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -523,20 +574,12 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-        
-    if values.dump_rankfile:
-        dump_rankfile(values, values.nfpga_per_rx)
-        sys.exit(0)
-
-    if values.max_ncards <= 0:
-        ncards = len(values.block)*len(values.card)
-    else:
-        ncards = values.max_ncards
-
-    values.nrx = ncards*len(values.fpga)//values.nfpga_per_rx
-    values.nt = 64
 
     pipe_info = MpiPipelineInfo(values)
+
+    if values.dump_rankfile:
+        dump_rankfile(pipe_info.values, values.nfpga_per_rx)
+        sys.exit(0)
 
     if pipe_info.is_beam_processor:
         proc_beam(pipe_info)

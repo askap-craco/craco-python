@@ -327,6 +327,13 @@ class CardcapFile:
         return ntpkt
 
     @property
+    def nt_per_frame(self):
+        '''
+        Returns the total number of time integrations per frame
+        '''
+        return self.ntpkt_per_frame*self.nint_per_packet
+    
+    @property
     def npackets_per_frame(self):
         '''
         Number of packets per beamformer frame (110ms)
@@ -416,7 +423,6 @@ class CardcapFile:
         else:
             nbeam_out = 1
 
-
         if len(self) > 1: # work around bug
             with open(self.fname) as f:
                 iframe = 0
@@ -436,7 +442,18 @@ class CardcapFile:
                     else: # read 4 channels worth of ntpkts
                         packets = np.empty(NCHAN*self.ntpkt_per_frame, dtype=self.dtype) # 1 beam
                         for chan in range(NCHAN):
-                            ibc = beamchan2ibc(beam, chan)
+                            # Fluffing fluffhole of fluffiness - dammit.
+                            # If the input data has only 1 beam, it's all laid out neatly in
+                            # beam order
+                            # if there are 36  then it's the crazy FPGA ordering.
+                            # Fluff.
+                            # Just a quick change. What could possssibly go rong.
+                            if self.nbeam == 1:
+                                ibc = chan
+                            else:
+                                assert self.nbeam == 36, 'need 36 beams for this puppy - have {self.nbeam}'
+                                ibc = beamchan2ibc(beam, chan)
+                                
                             pkt_offset = iframe*packets_per_frame + ibc*self.ntpkt_per_frame
                             byte_offset = self.hdr_nbytes + pkt_offset*packet_size_bytes
                             f.seek(byte_offset)

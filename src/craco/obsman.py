@@ -32,8 +32,10 @@ class Obsman:
 
         # Bit of a race condition here, but we'll do it
         # add_callback might have beaten us to it,
-        self.scan_changed(self.target_pv.pvname, self.target_pv.get())
-        self.callback_id = self.target_pv.add_callback(self.scan_changed)
+        #self.scan_changed(self.target_pv.pvname, self.target_pv.get())
+        #self.callback_id = self.target_pv.add_callback(self.scan_changed)
+        self.scan_changed(self.scan_pv.pvname, self.scan_pv.get())
+        self.callback_id = self.scan_pv.add_callback(self.scan_changed)
 
         atexit.register(self.atexit_handler)
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -64,6 +66,7 @@ class Obsman:
             self.start_process(scanid)
         
     def scan_changed(self, pvname=None, value=None, char_value=None, **kw):
+        time.sleep(1) # wait a bit to see if PVs update. #sigh
         new_scanid = self.scan_pv.get()
         sbid = self.sbid_pv.get()
         target = self.target_pv.get() # this doesnt refresh for some reason

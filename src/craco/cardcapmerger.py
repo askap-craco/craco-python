@@ -49,7 +49,7 @@ def frame_id_iter(i, fid0):
         curr_bat = currblock['bat'][0]
         curr_frameid = currblock['frame_id'][0]
 
-        assert curr_frameid >= frame_id, 'Block should have a timestamp now or in the future'
+        #assert curr_frameid >= frame_id, f'Block should have a timestamp now or in the future. curr_frameid={curr_frameid} frame_id={frame_id}'
 
         if curr_frameid == frame_id:
             b = currblock
@@ -58,9 +58,12 @@ def frame_id_iter(i, fid0):
             log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
-        yield curr_frameid, b
-        
-        frame_id += fidoff
+        if curr_frameid >= fid0:
+            assert b is None or (curr_frameid == frame_id), f'Logic error. Block should be none or Frame IDs should be equal. curr_frameid={curr_frameid} frameid={frame_id} block is None?{b is None}'
+            
+            yield frame_id, b
+            frame_id += fidoff
+            
         last_frameid = curr_frameid
         last_bat = curr_bat
 
@@ -213,6 +216,10 @@ class CcapMerger:
         return self.ccap[0].nint_per_packet
 
     @property
+    def nt_per_frame(self):
+        return self.ccap[0].nt_per_frame
+
+    @property
     def tscrunch_bug(self):
         return self.ccap[0].tscrunch_bug
 
@@ -234,15 +241,19 @@ class CcapMerger:
     def fid_to_mjd(self, fid):
         return self.ccap[0].time_of_frame_id(fid)
 
-    def packet_iter(self, frac_finished_threshold=0.9, beam=None):
+    def packet_iter(self, frac_finished_threshold=0.9, beam=None, start_fid=None):
         '''
         Returns an iterator that returns arrays of blocks of data but without converting them 
         into a masked array
         Yields a tuple containing ((fid, packets,) fids)
         Packets are the packets from each input
         fids is a tuple of frame_ids, one from each input
+        :start_fid:  starting frame ID to get data for
         '''
-        iters = [frame_id_iter(c.frame_iter(beam), self.frame_id0) for c in self.ccap]
+        if start_fid is None:
+            start_fid = self.frame_id0
+            
+        iters = [frame_id_iter(c.frame_iter(beam), start_fid) for c in self.ccap]
         #packets = List() # TODO: Make NUMBA happy with List rather than  array
 
         assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
@@ -295,7 +306,7 @@ class CcapMerger:
         dout = np.zeros(shape, dtype=np.int16)
         mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
         newshape = (self.nchan, nbeam, nint_total, self.nbl, self.npol, 2)
-        log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
+        log.debug('Initial dout shape=%s final shape=%s beam=%s nbeam=%s', shape, newshape, beam, nbeam)
         outfid = None
         
         for ip, (fid, p) in enumerate(packets):
@@ -309,8 +320,6 @@ class CcapMerger:
             else: # mask is already false = valid data
                 outfid = fid
                 if nbeam == 1: # Data order is just (4, 1, nint_per_frame)
-                    #print('initial shape', p.shape, blk.shape)
-                    #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
                     p.shape = (NCHAN, 1, self.ntpkt_per_frame)
 
                     if self.tscrunch_bug:
@@ -320,7 +329,7 @@ class CcapMerger:
                         dout[ip,:] = p['data']
                 else:
                     # This reshapes for teh beams 0-31 first, then beams 32-35 next
-                    assert self.nbeam == 36
+                    assert nbeam == 36
                     p.shape = (NCHAN*nbeam, self.ntpkt_per_frame)
                                     
                     blk1 = p[:32*4, :] 

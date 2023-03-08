@@ -31,11 +31,19 @@ extra_args="--devices mlx5_1"
 
 mpipipeline --hostfile $hostfile --dump-rankfile $rankfile $extra_args $@
 
+retval=$?
+if [ $retval -ne 0 ]; then
+    echo "MPIPipelien returned $retval"
+    exit $?
+fi
+
+
+
 
 # use OB1 and TCP
 tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0 --mca orte_base_help_aggregate 0"
 
-
+# USE UCX
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
 
 commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST"
