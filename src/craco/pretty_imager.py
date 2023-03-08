@@ -7,16 +7,27 @@ from craco import preprocess
 from craft.craco import bl2array
 import matplotlib.pyplot as plt
 
-def plot_block(block):
+def plot_block(block, title = None):
+    if type(block) == dict:
+        myblock = bl2array(block)
+    else:
+        myblock = block
+
+    if myblock.ndim == 4:
+        #Pol axis exists
+        myblock = myblock.copy().mean(axis=-2)
+
     f, ax = plt.subplots(2, 2)
-    ax[0, 0].imshow(np.abs(block.sum(axis=0).mean(axis=-2)).squeeze(), aspect='auto')
+    ax[0, 0].imshow(np.abs(myblock.sum(axis=0)).squeeze(), aspect='auto')
     ax[0, 0].set_title("CAS")
-    ax[0, 1].imshow(np.abs(block.real.sum(axis=0).mean(axis=-2)).squeeze(), aspect='auto')
+    ax[0, 1].imshow(np.abs(myblock.real.sum(axis=0)).squeeze(), aspect='auto')
     ax[0, 1].set_title("Real part")
-    ax[1, 0].imshow(block[3].mean(axis=-2).real, aspect='auto')
+    ax[1, 0].imshow(myblock[3].real, aspect='auto')
     ax[1, 0].set_title("Basline 3 Real part")
-    ax[1, 1].imshow(block[3].mean(axis=-2).imag, aspect='auto')
+    ax[1, 1].imshow(myblock[3].imag, aspect='auto')
     ax[1, 1].set_title("Basline 3 Imag part")
+    if title:
+        plt.title(title)
     plt.show()
 
 def temp_main():
@@ -33,27 +44,43 @@ def temp_main():
     gridder_obj = FdmtGridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
 
-    
-    calibrator = preprocess.Calibrate(block_dtype=np.ma.core.MaskedArray, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
-    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=np.ma.core.MaskedArray, baseline_order=py_plan.baseline_order)
+    brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_pccc=478)
+
+    calibrator = preprocess.Calibrate(block_dtype=dict, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=dict, baseline_order=py_plan.baseline_order)
 
     images = []
     for iblock, block in enumerate(c.uvsource.time_blocks(py_plan.nt)):
-        print("Working on block", iblock)
-        block = bl2array(block)
-        plot_block(block)
-        calibrated_block = calibrator.apply_calibration(block)
-        plot_block(calibrated_block)
-        cleaned_block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(calibrated_block), False, False, False, False, True, True)
-        plot_block(cleaned_block)
-        normalised_block = preprocess.normalise(cleaned_block, target_input_rms=values.target_input_rms)
-        plot_block(normalised_block)
-        prepared_block = c.prepare(normalised_block)
-        fdmt_out = c.fdmt(prepared_block)
+        print("-------------- >  Working on block", iblock, "block_type=", type(block))
+        #block = bl2array(block)
+        plot_block(block, title="The raw input block")
+        block = calibrator.apply_calibration(block)
+        #plot_block(block)
+        #block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
+        
+        plot_block(block, title="The calibrated block")
+        block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
+        #for ii, item in block.items():
+        #    print(f"The shape of {ii}th baseline is {item.shape}")
+        block = preprocess.average_pols(block, keepdims=False)
+        
+        plot_block(block, title="Fully pre-processed block")
+
+        block = brute_force_dedipserser.dedisperse(iblock, block)
+        plot_block(block, title="Plotting the dedispersed block")
+
+        print("Running c.prepare(block)")
+        block = c.prepare(block)
+        print("Running c.fdmt(block)")
+        fdmt_out = c.fdmt(block)
+        print("Now running the gridder and imager")
         for idm in range(1):
             for t in range(c.plan.nt //2):
+                print(f"Starting the gridder for t = {t}")
                 gridout = gridder_obj(idm, t, fdmt_out)
+                print(f"Starting the imager for t = {t}")
                 imgout = imager_obj(np.fft.fftshift(gridout)).astype(np.complex64)
+                print("Done")
                 plt.figure()
                 plt.imshow(imgout.real, aspect='auto', interpolation="None")
                 plt.title(f"isamp {2*t}")
