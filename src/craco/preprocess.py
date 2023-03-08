@@ -1,7 +1,7 @@
 from . import calibration
 from iqrm import iqrm_mask
 import numpy as np
-from craft.craco import bl2ant
+from craft.craco import bl2ant, bl2array
 
 def normalise(block, target_input_rms = 1):
     '''
@@ -23,10 +23,10 @@ def normalise(block, target_input_rms = 1):
     if type(block) == dict:
         new_block = {}
         for ibl, bldata in block.items():
-            print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
+            #print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
             existing_rms = bldata.std(axis=-1) / np.sqrt(2)
             new_block[ibl] = (bldata - bldata.mean(axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
-            print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
+            #print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         existing_rms = block.std(axis=-1) / np.sqrt(2)   
         new_block = (block - block.mean(axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
@@ -118,9 +118,9 @@ class Calibrate:
         assert block_type == self.block_dtype, f"You Liar!, {block_type}, {self.block_dtype}"
 
         if block_type == dict:
-            print(f"Baseline order is: {self.baseline_order}")
+            #print(f"Baseline order is: {self.baseline_order}")
             for ibl, blid in enumerate(self.baseline_order):
-                print(f"ibl {ibl}, blid={blid}, npol= {nPol}, bldata.shape = {block[blid].shape}, gains_array.shape = {self.gains_array.shape, self.gains_pol_avged_array.shape}")
+                #print(f"ibl {ibl}, blid={blid}, npol= {nPol}, bldata.shape = {block[blid].shape}, gains_array.shape = {self.gains_array.shape, self.gains_pol_avged_array.shape}")
                 if nPol == 2:
                     block[blid] = self.gains_array[ibl, ...] * block[blid] 
                 elif nPol ==1:
@@ -130,7 +130,7 @@ class Calibrate:
                 else:
                     raise ValueError(f"Expected nPol 0, 1, or 2, but got {nPol}")
                 
-                print(f"~~~~~~~~~~ 'apply_calibration() says' The shape of block[{blid}] is {block[blid].shape}")
+                #print(f"~~~~~~~~~~ 'apply_calibration() says' The shape of block[{blid}] is {block[blid].shape}")
                 
                 if self.keep_masks or (not block_isMasked and not self.sol_isMasked):
                     pass
@@ -187,13 +187,13 @@ class RFI_cleaner:
     def get_time_mask(self, baseline_data, threshold = 5.0):
         #Take the mean along the pol axis and rms along freq axis
         if self.pol_axis_exists:
-            print("Shape of baseline_data given to me is=  ",baseline_data.shape)
+            #print("Shape of baseline_data given to me is=  ",baseline_data.shape)
             rms = baseline_data.mean(axis=1).std(axis=0).squeeze()
         else:
-            print("Shape of baseline_data given to me is=  ~~~~~~",baseline_data.shape)
+            #print("Shape of baseline_data given to me is=  ~~~~~~",baseline_data.shape)
             rms = baseline_data.std(axis=0).squeeze()
 
-        print("LEN(RMS)  =  ", len(rms))
+        #print("LEN(RMS)  =  ", len(rms))
         mask, votes = iqrm_mask(rms, radius = len(rms)/ 10, threshold=threshold)
         return mask
 
@@ -214,7 +214,7 @@ class RFI_cleaner:
         return autocorr_masks
 
     def clean_bl_using_autocorr_mask(self, ibl, baseline_data, autocorr_masks, freq, time):
-        print("Cleaning autocorr for ibl", ibl, "the ant is going to be ", bl2ant(self.baseline_order[ibl]))
+        #print("Cleaning autocorr for ibl", ibl, "the ant is going to be ", bl2ant(self.baseline_order[ibl]))
         if len(autocorr_masks) == 0:
             return baseline_data
         ant1, ant2 = bl2ant(self.baseline_order[ibl])
@@ -272,7 +272,7 @@ class RFI_cleaner:
         if maf or mat:
             autocorr_masks = self.get_IQRM_autocorr_masks(block, maf, mat)
 
-            print("autocorr masks are", autocorr_masks)
+            #print("autocorr masks are", autocorr_masks)
         
         if mcast or mcasf:
             cas_sum = np.zeros_like(block[0])
@@ -294,9 +294,9 @@ class RFI_cleaner:
                        continue
 
                     if mct:
-                        print("Shape of baseline_data = ", baseline_data.shape)
+                        #print("Shape of baseline_data = ", baseline_data.shape)
                         bl_time_mask = self.get_time_mask(baseline_data)
-                        print("Shape of time_mask = ", bl_time_mask.shape)
+                        #print("Shape of time_mask = ", bl_time_mask.shape)
 
                         if self.isMasked:
                             baseline_data.data[..., bl_time_mask] = 0
@@ -350,3 +350,78 @@ class RFI_cleaner:
                 block[..., cas_masks['t']] = 0
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
+
+
+
+def get_dm_delays(dm_samps, freqs):
+    fmin = np.min(freqs)
+    fmax = np.max(freqs)
+    delay = dm_samps * (1 / fmin**2 - 1 / freqs**2)  / (1 / fmin**2 - 1 / fmax**2)
+    delay_samps = np.round(delay).astype(int)
+    return delay_samps
+
+def get_dm_samps(freqs, dm_pccc, tsamp):
+    '''
+    freqs in Hz
+    tsamp in s
+    '''
+    fmax = np.max(freqs) * 1e-9
+    fmin = np.min(freqs) * 1e-9
+    delays_s = 4.15 * 1e-3 * dm_pccc * (1 / fmin**2 - 1 / fmax**2)
+    
+    delays_samps = np.round(delays_s / tsamp).astype(int)
+    #dm_samps = np.max(delays_samps) - np.min(delays_samps)
+    dm_samps = delays_samps
+    print(f"Delays_s are", delays_s, delays_samps, dm_samps)
+    return dm_samps
+
+class Dedisp:
+    def __init__(self, freqs, tsamp, baseline_order, dm_samps = None, dm_pccc = None):
+        self.fch1 = freqs[0]
+        self.foff = np.abs(freqs[1] - freqs[0])
+        self.freqs = freqs
+        self.baseline_order = baseline_order
+        if dm_samps is None:
+            if dm_pccc is None:
+                raise ValueError("You need to specify either dm_samps or dm_pccc")
+            dm_samps = get_dm_samps(freqs, dm_pccc, tsamp)
+
+        self.delays_samps = get_dm_delays(dm_samps, self.freqs)
+        print(f"The computed delays_samps are: {self.delays_samps}")
+        self.dm = dm_samps
+        self.dm_history = None
+
+    def dedisperse(self, iblock, inblock):
+
+        if type(inblock) == dict:
+            block = bl2array(inblock)
+        elif type(inblock) == np.ndarray:
+            block = inblock
+        else:
+            raise TypeError("Expected either np.ndarray or dict")
+
+        if iblock == 0:
+            history_shape = list(block.shape)
+            history_shape[-1] = self.dm
+            history_shape = tuple(history_shape)
+
+            self.dm_history = np.zeros(history_shape, dtype=block.dtype)
+            print(f"~~~~~~~~~~~~~~~~~~~~~~~~>>>>>>>>>>>>>>{type(self.dm_history)}")
+
+        attached_block = np.concatenate([self.dm_history, block], axis=-1)
+        for ichan, chan in enumerate(attached_block):
+            attached_block[ichan] = np.roll(chan, self.delays_samps[ichan])
+
+        self.dm_history = block[..., -self.dm:]
+
+        if type(inblock) == dict:
+            for ibl, blid in enumerate(self.baseline_order):
+                #print(ibl,blid, inblock[blid].shape, attached_block[ibl, ..., self.dm:].shape)
+                print(inblock[blid].mask)
+                inblock[blid] = attached_block[ibl, ..., self.dm:]
+                print(f"Type of the output vis array is -- {type(inblock[blid])}")
+                print(inblock[blid].mask)
+            return inblock
+
+        return attached_block[..., self.dm:]
+        
