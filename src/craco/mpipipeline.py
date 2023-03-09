@@ -20,6 +20,7 @@ from astropy.coordinates import SkyCoord
 import numba
 import glob
 import craft.sigproc as sigproc
+from craft.parset import Parset
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +153,9 @@ class MpiObsInfo:
     def target(self):
         return self.main_merger.target
 
+    def fid_to_mjd(self, fid):
+        return self.main_merger.fid_to_mjd(fid)
+
     @property
     def vis_fscrunch(self):
         return self.values.vis_fscrunch
@@ -194,6 +198,10 @@ class MpiObsInfo:
         return self.main_merger.fch1
 
     @property
+    def fcent(self):
+        return self.main_merger.fcent
+
+    @property
     def foff(self):
         return self.main_merger.foff
 
@@ -214,6 +222,10 @@ class MpiObsInfo:
         '''
         return self.main_merger.nt_per_frame
 
+    @property
+    def nant(self):
+        return self.main_merger.nant
+
     def __str__(self):
         m = self.main_merger
         s = f'fch1={m.fch1} foff={m.foff} nchan={m.nchan} nant={m.nant} inttime={m.inttime}'
@@ -223,7 +235,7 @@ class MpiObsInfo:
 def get_transpose_dtype(values):
     nbeam = values.nbeams
     nt = values.nt
-    nant = 30
+    nant = values.nant
     nc = NCHAN*NFPGA
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
@@ -377,7 +389,7 @@ def proc_rx(pipe_info):
     values = pipe_info.values
     nrx = info.nrx
     nt = info.nt
-    nant = 30
+    nant = info.nant
     nc = NCHAN*NFPGA
     npol = 1 if values.pol_sum else 2
     assert numprocs == nrx + nbeam
@@ -431,8 +443,11 @@ def proc_rx(pipe_info):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
-            
         t_start = MPI.Wtime()
+        if ibuf == values.num_msgs -1:
+            break
+        #    raise ValueError('Stopped')
+
 
 class FilterbankSink:
     def __init__(self, prefix, beamid, vis_source, values):
@@ -466,7 +481,122 @@ class FilterbankSink:
 
     def close(self):
         self.fout.fin.close()
+
+
+class UvFitsFileSink:
+    def __init__(self, beamno, obs_info):
+        from craco.metadatafile import MetadataFile # Stupid seren doesn't have libopenblas on all nodes yet
+        from craco.ccapfits2uvfits import get_antennas
+        from craft.corruvfits import CorrUvFitsFile
+        import scipy
+        self.c = scipy.constants.c
+
+        self.beamno = beamno
+        self.obs_info = obs_info
+        self.blockno = 0
+        values = obs_info.values
+        if values.fcm is None or values.metadata is None:
+            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified', values.fcm, values.metadata)
+            self.uvout = None
+            return
         
+        fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
+        self.fileout = fileout
+        fcm = Parset.from_file(values.fcm)
+        antennas = get_antennas(fcm)
+        log.info('FCM %s contained %d antennas', values.fcm, len(antennas))
+        info = obs_info
+        fcent = info.fcent
+        foff = info.foff * values.vis_fscrunch
+        assert info.nchan % values.vis_fscrunch == 0, f'Fscrunch needs to divide nchan {info.nchan} {values.vis_fscrunch}'
+        nchan = info.nchan // values.vis_fscrunch
+        self.npol = 1 # card averager always sums polarisations
+        npol = self.npol
+        tstart = info.tstart.value + info.inttime/3600./24.
+        self.total_nchan = nchan
+        self.md = MetadataFile(values.metadata)
+        self.source_list = self.md.sources(self.beamno).values()
+        source_list = self.source_list
+        log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
+
+        self.uvout = CorrUvFitsFile(fileout,
+                                    fcent,
+                                    foff,
+                                    nchan,
+                                    npol,
+                                    tstart,
+                                    source_list,
+                                    antennas)
+        
+        # create extra tables so we can fix it later on. if the file is not closed properly
+        self.uvout.fq_table().writeto(fileout+".fq_table", overwrite=True)
+        self.uvout.an_table(self.uvout.antennas).writeto(fileout+'.an_table', overwrite=True)
+        self.uvout.su_table(self.uvout.sources).writeto(fileout+'.su_table', overwrite=True)
+        self.uvout.hdr.totextfile(fileout+'.header', overwrite=True)
+
+        print(self.uvout.dtype, self.uvout.dtype.itemsize)
+        with open(fileout+'.groupsize', 'w') as fout:
+            fout.write(str(self.uvout.dtype.itemsize) + '\n')
+            
+
+    def write(self, vis_data):
+        '''
+        vis_data has len(nrx) and shape inner shape
+        vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
+        or 
+        vishape = (nbl, vis_nc, vis_nt) if np.complex64
+        '''
+        if self.uvout is None:
+            return
+        
+        info = self.obs_info
+        md = self.md
+        fid_start = info.fid_of_block(self.blockno)
+        nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+        # TODO: Check timestamp convention for for FID and mjd.
+        # I think this is right
+        fid_mid = fid_start + info.nt // 2
+        print('*'*10, fid_start, fid_mid, info)
+        mjd = info.fid_to_mjd(fid_mid)
+        sourceidx = md.source_index_at_time(mjd.value)
+        sourcename = md.source_name_at_time(mjd.value)
+        uvw = md.uvw_at_time(mjd.value)[:, self.beamno, :] /self.c # UVW in seconds
+        antflags = md.flags_at_time(mjd.value)
+        print(f'Input data shape {vis_data.shape}')
+        dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
+        log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
+        weights = np.ones((vis_nc, self.npol), dtype=np.float32)
+        nant = info.nant
+        inttime = info.inttime
+
+
+        # UV Fits files really like being in time order
+        for itime in range(vis_nt):
+            blidx = 0
+            for ia1 in range(nant):
+                for ia2 in range(ia1, nant):
+                    uvwdiff = uvw[ia1, :] = uvw[ia2, :]
+                    # TODO: channel-dependent weights - somehow
+                    dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
+                    
+                    if antflags[ia1] or antflags[ia2]:
+                        weights[:] = 0
+                        dblk[:] = 0 # set output to zeros too, just so we can't cheat
+                    else:
+                        weights[:] = 1
+                        
+                    self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, sourceidx)
+                    blidx += 1
+        
+        self.uvout.fout.flush()
+        print(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
+        self.blockno += 1
+
+
+    def close(self):
+        print(f'Closing file {self.uvout}')
+        if self.uvout is not None:
+            self.uvout.close()
         
 def proc_beam(pipe_info):
     all_hdrs = comm.allgather([''])
@@ -477,7 +607,7 @@ def proc_beam(pipe_info):
     beamid = pipe_info.beamid
     nrx = info.nrx
     nt = info.nt
-    nant = 30
+    nant = info.nant
     nc = NCHAN*NFPGA
     npol = 1 if values.pol_sum else 2
 
@@ -497,11 +627,19 @@ def proc_beam(pipe_info):
     
     cas_filterbank = FilterbankSink('cas', beamid, info, values)
     ics_filterbank = FilterbankSink('ics', beamid, info, values)
-    
-    while True:
-        beam_data = transposer.recv()
-        cas_filterbank.write(beam_data['cas'])
-        ics_filterbank.write(beam_data['ics'])
+    vis_file = UvFitsFileSink(beamid, info)
+
+    try:
+        while True:
+            beam_data = transposer.recv()
+            cas_filterbank.write(beam_data['cas'])
+            ics_filterbank.write(beam_data['ics'])
+            vis_file.write(beam_data['vis'])
+    finally:
+        print(f'Closing beam files for {beamid}')
+        cas_filterbank.close()
+        ics_filterbank.close()
+        vis_file.close()
 
 
 def dump_rankfile(values, fpga_per_rx=3):
@@ -560,6 +698,8 @@ def _main():
     from craft.cmdline import strrange
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     cardcap.add_arguments(parser)
+    parser.add_argument('--fcm', help='Path to FCM file for antenna positions')
+    parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
     parser.add_argument('--nfpga-per-rx', type=int, default=6, help='Number of FPGAS received by a single RX process')
     parser.add_argument('--vis-fscrunch', type=int, default=6, help='Amount to frequency average visibilities before transpose')
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')

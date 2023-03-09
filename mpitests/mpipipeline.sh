@@ -52,7 +52,7 @@ commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST"
 
 echo "UCX_NET_DEVICES=$UCX_NET_DEVICES UCX_TLS=$UCX_TLS"
 
-cmd="mpirun $commonargs $ucxargs -rf $rankfile `which mpipipeline` --mpi $extra_args $@"
+cmd="mpirun $commonargs $ucxargs -rf $rankfile `which python` -m mpi4py `which mpipipeline` --mpi $extra_args $@"
 echo $cmd
 $cmd
 

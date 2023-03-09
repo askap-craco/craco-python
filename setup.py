@@ -88,7 +88,8 @@ if __name__ == '__main__':
                                 'prepsb=craco.prepsb:_main',
                                 'prthd=craco.prthd:_main',
                                 'plotpcap=craco.plotpcap:_main',
-                                'metadatasaver=craco.obsman.metadatasaver:_main'
+                                'metadatasaver=craco.obsman.metadatasaver:_main',
+                                'fixuvfits=craco.fixuvfits:_main'
                                 
             ],
         },
