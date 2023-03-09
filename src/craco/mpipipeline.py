@@ -445,8 +445,7 @@ def proc_rx(pipe_info):
         transposer.send(averaged)
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
-            break
-        #    raise ValueError('Stopped')
+            raise ValueError('Stopped')
 
 
 class FilterbankSink:
@@ -565,7 +564,7 @@ class UvFitsFileSink:
         print(f'Input data shape {vis_data.shape}')
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
-        weights = np.ones((vis_nc, self.npol), dtype=np.float32)
+        weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
         inttime = info.inttime
 
