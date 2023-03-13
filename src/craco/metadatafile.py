@@ -15,6 +15,7 @@ from astropy.time import Time
 from collections import OrderedDict
 from astropy.coordinates import SkyCoord
 from astropy import units as u
+import pylab
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +176,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('--plotuv', help='Plot UVW for given beam', type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -189,7 +191,47 @@ def _main():
         for b in range(36):
             for name, data in mf.sources(b).items():
                 print('beam', b, name, data['skycoord'].to_string('hmsdms'), data['scan_times'][0][0].iso, data['scan_times'][0][1].iso)
-        
+
+        fig, axs = pylab.subplots(4,1, sharex=True)
+        if values.plotuv is not None:
+            beam = values.plotuv
+            mjds = mf.time_floats
+            uvws = mf.uvw_at_time(mjds) # (time, nant, nbeam, 3)
+            nant = uvws.shape[1]
+            bluvws = []
+
+            for iant1 in range(nant):
+                for iant2 in range(iant1+1,nant):
+                    bluvws.append(uvws[:,iant1,:,:] - uvws[:,iant2,:,:])
+
+            bluvws = np.array(bluvws)
+            uvws.shape
+            for i,lbl in enumerate(('U','V','W')):
+                axs[i].plot(uvws[:,:,beam, i])
+                axs[i].set_ylabel(lbl)
+
+            flags = mf.flags_at_time(mjds)
+            axs[3].plot(flags)
+            axs[3].set_ylabel('Flagged == 1')
+            axs[3].set_xlabel('Metadata dump')
+            
+
+            print(bluvws.shape)
+            fig2,axs = pylab.subplots(1,2)
+            for ibl in range(bluvws.shape[0]):
+                axs[0].plot(bluvws[ibl,:,beam,0], bluvws[ibl,:,beam,1],'o')
+                for i in range(3):
+                    axs[1].plot(bluvws[ibl,:,beam,i])
+
+            axs[0].set_xlabel('UU')
+            axs[0].set_ylabel('VV')
+            axs[1].set_ylabel('UU,VV,WW')
+            axs[1].set_xlabel('Sample')
+
+    
+            pylab.show()
+            
+            
     
 
 if __name__ == '__main__':

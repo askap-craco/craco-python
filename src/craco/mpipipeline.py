@@ -572,9 +572,10 @@ class UvFitsFileSink:
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             blidx = 0
+            mjd = info.fid_to_mjd(fid_start + itime)
             for ia1 in range(nant):
                 for ia2 in range(ia1, nant):
-                    uvwdiff = uvw[ia1, :] = uvw[ia2, :]
+                    uvwdiff = uvw[ia1, :] - uvw[ia2, :]
                     # TODO: channel-dependent weights - somehow
                     dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
                     
@@ -653,7 +654,8 @@ def dump_rankfile(values, fpga_per_rx=3):
     nrx = total_cards*len(values.fpga) // fpga_per_rx
     nbeams = values.nbeams
     nranks = nrx + nbeams
-    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts)
+    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts) if values.ncards_per_host is None else values.ncards_per_host
+        
     nrx_per_host = ncards_per_host
     nbeams_per_host = (nbeams + len(hosts) - 1)//len(hosts)
     log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
@@ -702,6 +704,7 @@ def _main():
     parser.add_argument('--nfpga-per-rx', type=int, default=6, help='Number of FPGAS received by a single RX process')
     parser.add_argument('--vis-fscrunch', type=int, default=6, help='Amount to frequency average visibilities before transpose')
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
+    parser.add_argument('--ncards-per-host', type=int, default=None, help='Number of cards to process per host, helpful to match previous cardcap')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
