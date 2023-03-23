@@ -442,7 +442,7 @@ class CardcapFile:
                         # assert packets['channel_number'][0] == 0, f"Expected first channel to be zero. It was {packets['channel_number'][0]}"
                         
                     else: # read 4 channels worth of ntpkts
-                        packets = np.empty(NCHAN*self.ntpkt_per_frame, dtype=self.dtype) # 1 beam
+                        packets = np.empty((NCHAN, self.ntpkt_per_frame), dtype=self.dtype) # 1 beam
                         for chan in range(NCHAN):
                             # Fluffing fluffhole of fluffiness - dammit.
                             # If the input data has only 1 beam, it's all laid out neatly in
@@ -468,10 +468,10 @@ class CardcapFile:
                             #assert packets['channel_number'][0] == chan, f"Expected first beam to be {chan}. It was {packets['channel_number'][0]}"
                             
                             # TODO: Work out how to read inplace rather than copying to improve performance
-                            packets[chan*n:(chan+1)*n] = inpackets
+                            packets[chan, :] = inpackets
                             
 
-                    fid = packets[0]['frame_id']
+                    fid = packets[0,0]['frame_id']
                     yield fid, self.__fix__(packets)
                     iframe += 1
                     

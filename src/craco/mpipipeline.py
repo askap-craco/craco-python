@@ -4,6 +4,13 @@ Runs MPI pipeline for CRACO.
 
 Copyright (C) CSIRO 2022
 """
+# MPI IS fussy about being loaded with rc.threads = False - go figure.
+
+import mpi4py.rc
+mpi4py.rc.threads = False
+from mpi4py import MPI
+import mpi4py.util.dtlib
+
 import numpy as np
 import os
 import sys
@@ -26,10 +33,6 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-import mpi4py.rc
-mpi4py.rc.threads = False
-from mpi4py import MPI
-import mpi4py.util.dtlib
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -402,8 +405,9 @@ def proc_rx(pipe_info):
     npol_in = info.npol
     assert numprocs == nrx + nbeam
 
-    dummy_packet = np.zeros((ccap.merger.npackets_per_frame), dtype=ccap.merger.dtype)
+    dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
     rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/')
+    rsout = None
     averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.exclude_ants, rescale_output_path=rsout)
     transposer = TransposeSender(info)
 
@@ -414,6 +418,7 @@ def proc_rx(pipe_info):
 
     log.debug('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
+    comm.Barrier()
     fid0 = ccap.start()
 
     # send fid0 to all beams
@@ -421,6 +426,13 @@ def proc_rx(pipe_info):
 
     pktiter = ccap.packet_iter()
     packets, fids = next(pktiter)
+    assert dummy_packet.shape == packets[0][1].shape, 'Dummy packet shape doesnt match real packet'
+    log.debug('packets %s %s %s %s %s %s %s', len(packets),type(packets),type(packets[0]), type(packets[0][0]), type(packets[0][1]), packets[0][1].shape, packets[0][1].dtype)
+    # packets is list a list of 6 entires - 1 per FPGA
+    # each entry contains a tuple of (fid, data)
+    # if nbeam == 1 from file the the data shape = (128)
+    # if nbeam == 36 data shape = (144,32)
+    # Maybe should fix that
 
     averaged = averager.accumulate_packets(packets)
     averaged = averager.output
@@ -428,7 +440,7 @@ def proc_rx(pipe_info):
     
     start_fid = info.fid_of_block(1)
     log.info(f'rank={rank} fid0={fid0} {start_fid} {type(start_fid)}')
-
+    best_avg_time = 1e6
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         now = MPI.Wtime()
@@ -440,14 +452,15 @@ def proc_rx(pipe_info):
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         expected_fid = info.fid_of_block(ibuf) 
-        for ifpga, (pkt, fid) in enumerate(zip(packets, fids)):
-            if pkt is not None:
-                diff = int(expected_fid) - int(fid)
-                assert diff==0, f'Invalid fid. Expected {expected_fid} but got {fid} diff={diff} for rank={rank} ibuf={ibuf} card={cardidx} ifpga={ifpga} start_fid={start_fid}'
-            
+        #for ifpga, (pkt, fid) in enumerate(zip(packets, fids)):
+        #    if pkt is not None:
+        #        diff = int(expected_fid) - int(fid)
+        #        assert diff==0, f'Invalid fid. Expected {expected_fid} but got {fid} diff={diff} for rank={rank} ibuf={ibuf} card={cardidx} ifpga={ifpga} start_fid={start_fid}'
+
+        best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
-        if avg_time*1e3 > 50:
-            log.warning('Averaging time for %s was too long: %s ms', cardidx, avg_time*1e3)
+        if avg_time*1e3 > 110:
+            log.warning('Averaging time for cardidx=%s ibuf=%s was too long: %s ms best=%s', cardidx,ibuf, avg_time*1e3, best_avg_time*1e3)
             
         test_mode = False
         if test_mode:
@@ -636,6 +649,7 @@ def proc_beam(pipe_info):
 
     # Find first frame ID
     fid0 = 0
+    comm.Barrier() # Wait for the start
     fid0 = comm.bcast(fid0, root=pipe_info.rx_processor_rank0)
     info.fid0 = fid0
     
@@ -702,7 +716,8 @@ def dump_rankfile(values, fpga_per_rx=3):
                     # Put different FPGAs on differnt cores
                     evenfpga = fpga % 2 == 0
                     core = rxrank % 10
-                    slot = 1
+                    core = '0-9' # let them be anywhere - need at least 3 cores / card
+                    slot = 1 # where the network cards are
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)
                     rank += 1

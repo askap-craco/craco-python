@@ -123,14 +123,18 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-@njit                    
+@njit(parallel=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6
     npkt = len(beam_data[0])
     nbeam, nc, nbl, npol, _ = rescale_scales.shape
     nc_per_fpga = 4
-    npkt_per_accum = npkt // (nbeam * nc_per_fpga)
+    #npkt_per_accum = npkt // (nbeam * nc_per_fpga)
+    dshape = beam_data[0].shape
+    assert len(dshape) == 2 # expected (nmsgs, npkt_per_accum)
+    nmsgs = dshape[0]
+    npkt_per_accum = dshape[1]
     nt = output[0]['cas'].shape[0] # assume this is the same as ICS
     for beam in prange(nbeam):
         for fpga in range(nfpga):
@@ -155,15 +159,10 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 else:
                     didx = chan
 
-                #assert didx < 4*36
+
                 ichan = chan*nfpga + fpga
-                #ichan = get_channel_of( chan, nc_per_fpga, fpga, nfpga)
-                startidx = didx*npkt_per_accum
-                endidx = startidx + npkt_per_accum
-                #print(beam, fpga, chan, didx, len(beam_data), data.shape, len(data),  npkt_per_accum, startidx,endidx)
-                #assert endidx <= len(data)
-                
-                bd = data[startidx:endidx]
+
+                bd = data[didx,:]
                 do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask,vis_fscrunch, vis_tscrunch)
                 
             count[fpga] += nt # only gets incremented if isvalid == True
@@ -307,7 +306,9 @@ class Averager:
     def accumulate_all(self, beam_data, valid):
         '''
         Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
+        :param: beam_data is numba List with the expected data
         '''
+        
         accumulate_all(self.output,
                        self.rescale_scales,
                        self.rescale_stats,

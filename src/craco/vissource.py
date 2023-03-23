@@ -17,6 +17,7 @@ from craco.cardcapfile import NSAMP_PER_FRAME
 from craco import cardcap
 from craco.cardcapmerger import CcapMerger, frame_id_iter
 import astropy.io.fits.header as header
+from mpi4py import MPI
 
 log = logging.getLogger(__name__)
 
@@ -143,8 +144,7 @@ class CardCapNetworkSource:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
-                print(f'{self.block}/{self.card} got FIDS {fids}')
-                yield (packets, fids)
+                yield (fpga_data, fids)
             except StopIteration:
                 break
 
