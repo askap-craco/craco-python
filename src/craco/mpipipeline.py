@@ -685,15 +685,14 @@ def dump_rankfile(values, fpga_per_rx=3):
     ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts) if values.ncards_per_host is None else values.ncards_per_host
         
     nrx_per_host = ncards_per_host
-    nbeams_per_host = (nbeams + len(hosts) - 1)//len(hosts)
+    nbeams_per_host = nbeams //len(hosts)
     log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
     with open(values.dump_rankfile, 'w') as fout:
         # add all the beam processes
         for beam in range(nbeams):
-            hostidx = rank // nbeams_per_host
-            hostrank = rank % nbeams_per_host
+            hostidx = beam % len(hosts)
             host = hosts[hostidx]
             slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
             core='5-6'
