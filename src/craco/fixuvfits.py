@@ -14,6 +14,9 @@ log = logging.getLogger(__name__)
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 def fix_length(fname):
+    '''
+    Appends zeros to the end of a fits file to make it a multiple of 2880 bytes
+    '''
     filesize = os.path.getsize(fname)
     with open(fname, 'ab') as fout:
         n_extra_bytes = 2880 - filesize % 2880

@@ -308,7 +308,7 @@ class FpgaCapturer:
         rx.issueRequests()
         log.debug(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
 
-    def get_data(self):
+    def get_data(self, wait=True):
         '''
         Returns an iterator for all the completions
         Iterator is (frame_id, data) pairs
@@ -319,7 +319,8 @@ class FpgaCapturer:
         start_sleep_ns = time.time_ns()
         #time.sleep(1)
         stop_sleep_ns = time.time_ns()
-        rx.waitRequestsCompletion()
+        if wait:
+            rx.waitRequestsCompletion()
 
         finish_wait_ns = time.time_ns()
         sleep_ns = stop_sleep_ns - start_sleep_ns
@@ -739,16 +740,14 @@ def dump_rankfile(values):
     hosts = sorted(set(mpiutil.parse_hostfile(values.hostfile)))
     log.debug("Hosts %s", hosts)
     total_cards = len(values.block)*len(values.card)
-    if values.max_ncards != 0:
+    if values.max_ncards != None:
         total_cards = min(total_cards, values.max_ncards)
 
     nranks = total_cards*len(values.fpga)
-
-        
-    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts)
+    ncards_per_host = (total_cards)//len(hosts)
     #nranks_per_host = (nranks + len(hosts)) // len(hosts)
     nranks_per_host = ncards_per_host*6
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
+    log.info(f'Spreading {nranks} ranks over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
 
     assert nranks_per_host * len(hosts) >= nranks
     #from IPython import embed
@@ -760,7 +759,7 @@ def dump_rankfile(values):
         for block in values.block:
             for card in values.card:
                 cardno += 1
-                if values.max_ncards != 0 and cardno >= values.max_ncards + 1:
+                if values.max_ncards != None and cardno >= values.max_ncards + 1:
                     break
                 
                 for fpga in values.fpga:
@@ -855,6 +854,9 @@ class MpiCardcapController:
         self.ctrl = ctrl
 
     def configure_and_start(self):
+        '''
+        :returns: The BAT that should be when the thing starts
+        '''
         rank = self.rank
         values = self.values
         comm = self.comm
@@ -862,6 +864,7 @@ class MpiCardcapController:
         ctrl = self.ctrl
 
         comm.Barrier()
+        start_bat = None
 
         if rank == 0:
             ccap.configure()
@@ -870,14 +873,21 @@ class MpiCardcapController:
             #assert len(values.block) == 1, 'Cant start like that currently'
 
             # Enable only the cards we want.
-            ctrl.enable_events_for_blocks_cards(values.block, values.card)
+            ctrl.enable_events_for_blocks_cards(values.block, values.card, values.max_ncards)
             # Normally do start() here but it would re-enable everything,
             # so just start this block
             #ctrl.start_block(blk)
             #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
-            ccap.start()
+            ctrl.start()
+            start_bat = ctrl.get_start_bat()
+            log.info('Start bat is 0x%x=%d', start_bat, start_bat)
+
+        self.start_bat = comm.bcast(start_bat, root=0)
+
 
         comm.Barrier()
+
+        return self.start_bat
         
 
     def do_writing(self):
@@ -912,7 +922,7 @@ def add_arguments(parser):
     parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=2)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
-    parser.add_argument('-N', '--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
+    parser.add_argument('-N', '--num-msgs', help='Total number of messages to download before quitting', default=100, type=int)
     parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=True) # need this to be true as lots of code expects it now. We'll probably keep it. the overhead isnt high I don't think
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
@@ -932,7 +942,7 @@ def add_arguments(parser):
     parser.add_argument('--flush-on-beam', action='store_true', help='Flush a packet per beam, rather than per beamformer frame', default=False)
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
-    parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=0)
+    parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=None)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')

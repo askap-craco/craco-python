@@ -39,15 +39,15 @@ def frame_id_iter(i, fid0):
     currblock = None
     last_frameid = frame_id
     last_bat = 0
+    curr_frameid = np.uint64(0)
     while True:
-        if currblock is None or currblock['frame_id'].flat[0] < frame_id:
+        if curr_frameid < frame_id:
             try:
-                currblock = next(i)
+                curr_frameid, currblock = next(i)
             except StopIteration:
                 break
 
         curr_bat = currblock['bat'][0]
-        curr_frameid = currblock['frame_id'][0]
 
         #assert curr_frameid >= frame_id, f'Block should have a timestamp now or in the future. curr_frameid={curr_frameid} frame_id={frame_id}'
 
@@ -88,6 +88,10 @@ class CcapMerger:
             assert len(headers[0]) > 0, 'Empty header'
             self.ccap = [CardcapFile.from_header_string(hdr) for hdr in headers]
 
+        isempty = np.array([cc.isempty for cc in self.ccap])
+        if np.all(isempty) and self.fnames is not None:
+            raise ValueError(f'All data is empty for {fnames}')
+        
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))

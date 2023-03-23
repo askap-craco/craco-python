@@ -351,6 +351,8 @@ class CardcapFile:
         Although - if its' empty, NAXIS2 will be 1
         Even though it's empty. That is a bug.
         '''
+        if self.fname is None:
+            return 0
         nax2 = self.mainhdr['NAXIS2']
         if nax2 == 1: # Bug - file not properly close and its empty
             nbytes = os.path.getsize(self.fname)
@@ -469,7 +471,8 @@ class CardcapFile:
                             packets[chan*n:(chan+1)*n] = inpackets
                             
 
-                    yield self.__fix__(packets)
+                    fid = packets[0]['frame_id']
+                    yield fid, self.__fix__(packets)
                     iframe += 1
                     
 
@@ -493,6 +496,7 @@ class CardcapFile:
                         break
                 
                     log.debug('yielding packets shape=%s data shape=%s, npackets=%s len(packets)=%s', packets.shape, packets['data'].shape, npackets, len(packets))
+                    fid = packets[0]['frame_id']
 
                     yield self.__fix__(packets)
     

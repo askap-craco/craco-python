@@ -206,6 +206,9 @@ class Averager:
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
 
+        if exclude_ants is None:
+            exclude_ants = []
+
         self.exclude_ants = set(map(int, exclude_ants))
         self.antenna_mask = np.array([False if (iant+1) in exclude_ants else True for iant in range(nant)])
         log.info('There are %s valid antennas in mask=%s. Excluding=%s',

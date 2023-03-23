@@ -5,14 +5,15 @@
 #rankfile=host11_fpga6_rankfile.txt # seren-10 disk is dead
 #rankfile=host1_fpga12_rankfile.txt
 #rankfile=host1_fpga36_rankfile.txt
-rankfile=$1
-shift
+#rankfile=$1
+#shift
 
 rankfile=mpicardcap.rank
 hostfile=mpi_seren.txt
 
 # save the rankfile
 cardcap --hostfile $hostfile --dump-rankfile $rankfile $@
+
 echo "Created rankfile $rankfile"
 ifaces=enp216s0,enp175s0
 

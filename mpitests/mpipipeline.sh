@@ -33,7 +33,7 @@ mpipipeline --hostfile $hostfile --dump-rankfile $rankfile $extra_args $@
 
 retval=$?
 if [ $retval -ne 0 ]; then
-    echo "MPIPipelien returned $retval"
+    echo "MPIPipeline returned $retval"
     exit $?
 fi
 

@@ -16,13 +16,17 @@ class EpicsSubsystem:
         assert self.cache is not None
         # self._ctx = Context()
 
-    def read(self, pvname: str, timeout:float = 5.0):
+    def read(self, pvname: str, timeout:float = 5.0, cache=True):
         """
         read from an EPICS PV
         """
         key = f"{self._prefix}{pvname}"
 
-        value = self.cache.get(key, None)
+        if cache:
+            value = self.cache.get(key, None)
+        else:
+            value = None
+            
         if value is None:
             value = caget(key, timeout=timeout)
             if value is None:

@@ -83,11 +83,11 @@ def _main():
     max_ncards = '--max-ncards 70'
     #max_ncards = ''
 
-    num_msgs = '-N 1000000'
+    num_msgs = '-N 10000'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     
-    cmd = f'{cmdname} mpi_seren.txt -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
+    cmd = f'{cmdname} -e --prefix ak {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
 
     log.info(f'Running command {cmd}')
 
