@@ -79,7 +79,7 @@ def _main():
     #fpga_mask = '--fpga-mask 42'
     #fpga = '-f 1-6'
     #max_ncards = '--max-ncards 70'
-    max_ncards = '--max-ncards 10'
+    max_ncards = '--max-ncards 20'
 
     num_msgs = '-N 10000'
     num_cmsgs = '--num-cmsgs 1'
