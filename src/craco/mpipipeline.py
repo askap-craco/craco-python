@@ -294,9 +294,11 @@ class DtypeTransposer:
         comm.Alltoallv(s_msg, r_msg)
         t_end = MPI.Wtime()
         latency = (t_end - t_start)*1e3
+
+        self.last_latency = latency
             
-        if rank == 0:
-            print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
+        #if rank == 0:
+        #    print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
 
         #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
         return self.drx
@@ -350,9 +352,10 @@ class ByteTransposer:
             
         t_end = MPI.Wtime()
         latency = (t_end - t_start)*1e3
+        self.last_latency = latency
             
-        if rank == 0:
-            print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
+        #if rank == 0:
+        #print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
 
         #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
 
@@ -418,7 +421,10 @@ def proc_rx(pipe_info):
 
     log.debug('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
-    comm.Barrier()
+    # Do dummy transpose to warm up and make connections
+    log.info('Sending dummy transpose for warmup')
+    transposer.send(averager.output)
+    
     fid0 = ccap.start()
 
     # send fid0 to all beams
@@ -448,7 +454,6 @@ def proc_rx(pipe_info):
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
         averaged = averager.accumulate_packets(packets)
-        averaged = averager.output
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         expected_fid = info.fid_of_block(ibuf) 
@@ -469,6 +474,9 @@ def proc_rx(pipe_info):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
+        if cardidx == 0:
+            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d',transposer.last_latency, avg_time*1e3, averager.last_nvalid)
+
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
@@ -643,13 +651,15 @@ def proc_beam(pipe_info):
     # Beams don't kow headers, so we just send nothings
     if rank == 0:
         print(f'ObsInfo {info}')
-        
-    transposer = TransposeReceiver(info)
+
     os.makedirs(values.outdir, exist_ok=True)
 
+    transposer = TransposeReceiver(info)
     # Find first frame ID
+    log.info('Recieving dummy transpose for warmup')
+    transposer.recv()
+
     fid0 = 0
-    comm.Barrier() # Wait for the start
     fid0 = comm.bcast(fid0, root=pipe_info.rx_processor_rank0)
     info.fid0 = fid0
     
@@ -695,7 +705,7 @@ def dump_rankfile(values, fpga_per_rx=3):
             hostidx = beam % len(hosts)
             host = hosts[hostidx]
             slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
-            core='5-6'
+            core='1-2'
             s = f'rank {rank}={host} slot={slot}:{core} # Beam {beam}\n'
             fout.write(s)
             rank += 1
@@ -714,8 +724,9 @@ def dump_rankfile(values, fpga_per_rx=3):
                     slot = 1 # fixed because both cards are on NUMA=1
                     # Put different FPGAs on differnt cores
                     evenfpga = fpga % 2 == 0
-                    core = rxrank % 10
-                    core = '0-9' # let them be anywhere - need at least 3 cores / card
+                    ncores = 10
+                    icore = (hostrank % 5)*2
+                    core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
                     slot = 1 # where the network cards are
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)

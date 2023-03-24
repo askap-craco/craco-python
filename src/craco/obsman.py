@@ -7,7 +7,7 @@ Copyright (C) CSIRO 2022
 import os
 import sys
 import logging
-from epics import PV, caget
+from epics import PV, caget,caput
 from subprocess import Popen, TimeoutExpired
 import time
 import signal
@@ -123,7 +123,9 @@ class Obsman:
 
             proc.wait()
             retcode = proc.returncode
-            log.info('Process dead with return code %s', retcode)
+            log.info('Process dead with return code %s. Stopping packets just in case', retcode)
+            caput('ak:cracoStop', 1)
+            
             # assert retcode is not None
             self.process = None
             self.curr_scanid = None

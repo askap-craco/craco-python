@@ -9,7 +9,9 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-os.environ['NUMBA_NUM_THREADS'] = '4'
+os.environ['NUMBA_NUM_THREADS'] = '1'
+os.environ['NUMBA_ENABLE_AVX'] = '1'
+
 
 from craco.cardcap import NCHAN, NFPGA
 from numba import jit,njit,prange
@@ -75,6 +77,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                     v = bd[samp2, ibl, pol, :]
                     v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
                     v_imag= np.float32(v[1])
+                    '''
                     # For ICS: Don't subtract before applying square  and square root.
                     vsqr = v_real*v_real + v_imag*v_imag
                     va = np.sqrt(vsqr)
@@ -103,7 +106,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                             ics[t,ichan] += va_scaled
                         else:
                             cas[t,ichan] += va_scaled
-
+                    '''
                     vis[ibl, ochan, otime] += complex(v_real, v_imag)
                     
                 a2 += 1
@@ -297,6 +300,7 @@ class Averager:
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
         valid = np.array([pkt[1] is not None for pkt in packets], dtype=bool)
+        self.last_nvalid = valid.sum()
         data = List()
         [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
         self.reset()

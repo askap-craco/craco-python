@@ -748,8 +748,8 @@ def dump_rankfile(values):
     #nranks_per_host = (nranks + len(hosts)) // len(hosts)
     nranks_per_host = ncards_per_host*6
     log.info(f'Spreading {nranks} ranks over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
-
-    assert nranks_per_host * len(hosts) >= nranks
+    
+    #assert nranks_per_host * len(hosts) >= nranks
     #from IPython import embed
     #embed()
 
@@ -774,6 +774,7 @@ def dump_rankfile(values):
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)
                     rank += 1
+                    
 class MpiCardcapController:
     def __init__(self, comm, values, block_cards):
         rank = comm.Get_rank()

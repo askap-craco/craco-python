@@ -70,19 +70,16 @@ def _main():
     #beam='--beam 0'
     beam = ''
 
-    card  = '-a 1-6'
-    block = '-b 2'
+    card  = '-a 1-12'
+    block = '-b 2-5'
     fpga = ''
     fpga_mask = ''
     
     #fpga = '-k 2,4,6'
     #fpga_mask = '--fpga-mask 42'
     #fpga = '-f 1-6'
-    #card = '-a 5-7'
-    #block = '-b 3'
-
     #max_ncards = '--max-ncards 70'
-    max_ncards = ''
+    max_ncards = '--max-ncards 10'
 
     num_msgs = '-N 10000'
     num_cmsgs = '--num-cmsgs 1'
