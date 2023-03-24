@@ -308,12 +308,28 @@ class FpgaCapturer:
         rx.issueRequests()
         log.debug(f"Requests issued Enqueued={rx.numWorkRequestsEnqueued} missing={rx.numWorkRequestsMissing} total={rx.numTotalMessages} qloading={rx.currentQueueLoading} min={rx.minWorkRequestEnqueue} region={rx.regionIndex}")
 
-    def get_data(self):
+    def get_data(self, wait=True):
+        '''
+        Returns an iterator for all the completions
+        Iterator is (frame_id, data) pairs
+        '''
         rx = self.rx
         msg_size = self.ccap.msg_size
-        rx.waitRequestsCompletion()
+
+        start_sleep_ns = time.time_ns()
+        #time.sleep(1)
+        stop_sleep_ns = time.time_ns()
+        if wait:
+            rx.waitRequestsCompletion()
+
+        finish_wait_ns = time.time_ns()
+        sleep_ns = stop_sleep_ns - start_sleep_ns
+        wait_ns = finish_wait_ns - stop_sleep_ns
+
         rx.pollRequests()
         ncompletions = rx.get_numCompletionsFound()
+        
+        #print(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Slept for {sleep_ns/1e6}ms. Waited {wait_ns/1e6}ms for ncompletions={ncompletions}')
         #nmissing = rx.get_numMissingFound()
         completions = rx.get_workCompletions()
         self.curr_packet_time = time.process_time()
@@ -325,7 +341,7 @@ class FpgaCapturer:
         #print(f'\rCompletions={ncompletions} {len(completions)}')
         beam = self.ccap.values.beam
         if ncompletions > self.max_ncompletions:
-            log.critical(f'{self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
+            log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
             self.max_ncompletions = ncompletions
             
         d = None # in case something quits before it's set. We return None so we don't get an unboundLocalError
@@ -377,12 +393,11 @@ class FpgaCapturer:
             self.total_completions += 1
             self.total_bytes += nbytes
 
-
             if self.ccap.values.workaround_craco63:
                 d['data'] = np.roll(d['data'], shift=-1, axis=0)
 
             if self.ccap.values.tscrunch != 1:
-                # BUG: When tscrunch is 1, we average over the packest, but not inside the packet, by accident.
+                # BUG: When tscrunch != and polsum, we average over the packest, but not inside the packet, by accident.
                 # THis will need to be fixed, but no time now. It's Xmas!
                 # OK this is slow, but it works
                 dout = np.empty(d.shape[0], dtype=d.dtype)
@@ -396,14 +411,26 @@ class FpgaCapturer:
                 mask = d['beam_number'] == beam 
                 d = d[mask]
 
-        return d
+            yield fid, d
 
     def write_data(self, w):
-        d = self.get_data()
-        if w is not None and d is not None:
-            w.write(d) # write to fitsfile
+        for fid, d in self.get_data(): # loop through completions
+            if w is not None and d is not None:
+                w.write(d) # write to fitsfile
 
         self.issue_requests()
+
+    def packet_iterator(self):
+        nblk = 0
+        while nblk < self.values.num_msgs:
+            for fid, d in self.get_data(): # loop through completions
+                yield fid, d
+                nblk += 1
+                if nblk >= self.values.num_msgs:
+                    break
+
+            self.issue_requests()
+
 
     def __del__(self):
         log.info(f'Deleting RX for card {self.ccap.values.card}  FPGA {self.fpga}')
@@ -629,7 +656,7 @@ class CardCapturer:
         except KeyboardInterrupt as e:
             print(f'Closing due to ctrl-C')
         finally:
-            self.stop(wait=False)
+            #self.stop(wait=False)
             self.finish_time = time.process_time()
 
             self.report_stats()
@@ -638,6 +665,7 @@ class CardCapturer:
                 
             self.fitsout = None
             #ctrl.write(f'acx:s{shelf:02d}:evtf:craco:enable', 0, wait=False)
+            self.stop()
                 
 
     def start(self):
@@ -711,21 +739,29 @@ def dump_rankfile(values):
     from craco import mpiutil
     hosts = sorted(set(mpiutil.parse_hostfile(values.hostfile)))
     log.debug("Hosts %s", hosts)
-    nranks = len(values.block)*len(values.card)*len(values.fpga)
     total_cards = len(values.block)*len(values.card)
-    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts)
+    if values.max_ncards != None:
+        total_cards = min(total_cards, values.max_ncards)
+
+    nranks = total_cards*len(values.fpga)
+    ncards_per_host = (total_cards)//len(hosts)
     #nranks_per_host = (nranks + len(hosts)) // len(hosts)
     nranks_per_host = ncards_per_host*6
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
-
-    assert nranks_per_host * len(hosts) >= nranks
-    from IPython import embed
+    log.info(f'Spreading {nranks} ranks over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
+    
+    #assert nranks_per_host * len(hosts) >= nranks
+    #from IPython import embed
     #embed()
 
     rank = 0
+    cardno = 0
     with open(values.dump_rankfile, 'w') as fout:
         for block in values.block:
             for card in values.card:
+                cardno += 1
+                if values.max_ncards != None and cardno >= values.max_ncards + 1:
+                    break
+                
                 for fpga in values.fpga:
                     hostidx = rank // nranks_per_host
                     hostrank = rank % nranks_per_host
@@ -738,7 +774,147 @@ def dump_rankfile(values):
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)
                     rank += 1
+                    
+class MpiCardcapController:
+    def __init__(self, comm, values, block_cards):
+        rank = comm.Get_rank()
+        numprocs = comm.Get_size()
+        self.comm = comm
+        self.rank = rank
+        self.values = values
+        
+        primary = rank == 0
 
+        # Before we start, we need to stop everything so nothign gets confused
+        if rank == 0:
+            ctrl = CracoEpics(values.prefix+':')
+            ctrl.stop()
+        else:
+            ctrl = None
+
+        self.ctrl = ctrl
+            
+        comm.Barrier()
+
+        # only rank 0 gets EPICS data - otherwise lots of processes drown EPICS
+        pvcache = None
+        if rank == 0:
+            # cache the values by reading
+            syncbat = ctrl.read('F_syncReset:startBat_O')
+            ctrl.read('md2:targetName_O')
+            ctrl.read('md2:scanId_O')
+            ctrl.read('md2:schedulingblockId_O')
+            ctrl.read('F_options:altFirmwareDir_O')
+
+            for shelf in values.block:
+                dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
+                iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+                for card in values.card:
+                    ctrl.get_channel_frequencies(shelf, card)
+
+            pvcache = ctrl.cache
+            log.debug(f'Cache contains {len(pvcache)} entries {pvcache}')
+
+        # broadcast the cache to everyone
+
+        pvcache = comm.bcast(pvcache, root=0)
+        self.block_cards = block_cards
+
+        if rank < len(block_cards):
+            my_block, my_card, my_fpga =  block_cards[rank]
+            my_values = copy.deepcopy(values)
+            my_values.card = my_card
+            my_values.block = my_block
+            my_values.fpga = my_fpga
+
+            devices = values.devices.split(',')
+            #devices =['mlx5_0','mlx5_0']
+            if len(my_fpga) == 1:
+                devidx = my_fpga[0] % len(devices)
+                #devidx = my_card % len(devices)
+            else:
+                devidx = my_card % len(devices)
+
+            my_values.device = devices[devidx]
+
+            if values.outfile is None:
+                my_values.outfile = None
+            else:
+                my_values.outfile = values.outfile.replace('.fits','')
+                fpga_names = ''.join([f'{f:d}' for f in my_fpga])
+                my_values.outfile += f'_b{my_block:02d}_c{my_card:02d}+f{fpga_names}.fits'
+                
+            log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloaing card={my_values.card} block {my_values.block} fpga={my_values.fpga} to {my_values.outfile}')
+            ccap = CardCapturer(my_values, primary, pvcache)
+        else:
+            log.info(f'Launched too may processes for me to do anything useful. Rank {rank} goin to sleep to get out of the way')
+            my_values = None
+            ccap = None
+
+        self.ccap = ccap
+        self.ctrl = ctrl
+
+    def configure_and_start(self):
+        '''
+        :returns: The BAT that should be when the thing starts
+        '''
+        rank = self.rank
+        values = self.values
+        comm = self.comm
+        ccap = self.ccap
+        ctrl = self.ctrl
+
+        comm.Barrier()
+        start_bat = None
+
+        if rank == 0:
+            ccap.configure()
+            # disable all cards, and enable only the ones we want
+            #blk = values.block[0]
+            #assert len(values.block) == 1, 'Cant start like that currently'
+
+            # Enable only the cards we want.
+            ctrl.enable_events_for_blocks_cards(values.block, values.card, values.max_ncards)
+            # Normally do start() here but it would re-enable everything,
+            # so just start this block
+            #ctrl.start_block(blk)
+            #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
+            ctrl.start()
+            start_bat = ctrl.get_start_bat()
+            log.info('Start bat is 0x%x=%d', start_bat, start_bat)
+
+        self.start_bat = comm.bcast(start_bat, root=0)
+
+
+        comm.Barrier()
+
+        return self.start_bat
+        
+
+    def do_writing(self):
+        if self.rank < len(self.block_cards):
+            self.ccap.do_writing()
+
+    def stop(self):
+        ccap = self.ccap
+        comm = self.comm
+        rank = self.rank
+
+        comm.Barrier()
+        
+        if rank == 0:
+            ccap.stop()
+
+        ncomplete = -1 if ccap is None else ccap.total_completions[0]
+        completions = comm.gather(ncomplete)
+
+        nmissing = -1 if ccap is None else ccap.total_missing[0]
+        nmissing = comm.gather(nmissing)
+
+        if rank == 0:
+            log.info('Total completions=%s missing=%s', completions[:len(block_cards)], nmissing[:len(block_cards)])
+        
+    
 
 def add_arguments(parser):
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
@@ -747,14 +923,15 @@ def add_arguments(parser):
     parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=2)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
-    parser.add_argument('--num-msgs', help='Total number of messages to download before quitting', default=-1, type=int)
-    parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=False)
+    parser.add_argument('-N', '--num-msgs', help='Total number of messages to download before quitting', default=100, type=int)
+    parser.add_argument('-e','--debug-header', help='Enable debug header', action='store_true', default=True) # need this to be true as lots of code expects it now. We'll probably keep it. the overhead isnt high I don't think
     parser.add_argument('--prompt', help='Prompt for PSN/QPN/GID from e.g. rdma-data-transport/recieve -s', action='store_true', default=False)
     parser.add_argument('-f', '--outfile', help='Data output file')
     parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=strrange) 
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=strrange)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
-    parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ma')
+    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_0,mlx5_1')
+    parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ak')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
     parser.add_argument('--lsb-position', help='Set LSB position in CRACO quantiser (0-11)', type=int, default=11)
@@ -766,6 +943,7 @@ def add_arguments(parser):
     parser.add_argument('--flush-on-beam', action='store_true', help='Flush a packet per beam, rather than per beamformer frame', default=False)
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
+    parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=None)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -793,109 +971,27 @@ def _main():
         mpi4py.rc.threads = False
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
-        rank = comm.Get_rank()
         numprocs = comm.Get_size()
 
+        # Assign 1 FPGA to every rank
         block_cards  = []
         procid = 0
+        cardno = 0
         for blk in values.block:
             for crd in values.card:
+                cardno += 1
                 for fpga in values.fpga:
-                    block_cards.append((blk, crd, fpga))
+                    block_cards.append((blk, crd, [fpga]))
                     procid += 1
                     if procid > numprocs:
                         break
 
-        primary = rank == 0
 
-        # Before we start, we need to stop everything so nothign gets confused
-        if rank == 0:
-            ctrl = CracoEpics(values.prefix+':')
-            ctrl.stop()
-            
-        comm.Barrier()
-
-        # only rank 0 gets EPICS data - otherwise lots of processes drown EPICS
-        pvcache = None
-        if rank == 0:
-            # cache the values by reading
-            syncbat = ctrl.read('F_syncReset:startBat_O')
-            ctrl.read('md2:targetName_O')
-            ctrl.read('md2:scanId_O')
-            ctrl.read('md2:schedulingblockId_O')
-            ctrl.read('F_options:altFirmwareDir_O')
-
-            for shelf in values.block:
-                dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
-                iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
-                for card in values.card:
-                    ctrl.get_channel_frequencies(shelf, card)
-
-            pvcache = ctrl.cache
-            log.debug(f'Cache contains {len(pvcache)} entries {pvcache}')
-
-        # broadcast the cache to everyone
-
-        pvcache = comm.bcast(pvcache, root=0)
-
-        if rank < len(block_cards):
-            my_block, my_card, my_fpga =  block_cards[rank]
-            my_values = copy.deepcopy(values)
-            my_values.card = my_card
-            my_values.block = my_block
-            my_values.fpga = [my_fpga]
-
-            devices = ['mlx5_0', 'mlx5_1']
-            #devices =['mlx5_0','mlx5_0']
-            devidx = my_fpga % 2
-            my_values.device = devices[devidx]
-
-            if values.outfile is None:
-                my_values.outfile = None
-            else:
-                my_values.outfile = values.outfile.replace('.fits','')
-                my_values.outfile += f'_b{my_block:02d}_c{my_card:02d}+f{my_fpga:d}.fits'
-                
-            log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloaing card={my_values.card} block {my_values.block} fpga={my_values.fpga} to {my_values.outfile}')
-            ccap = CardCapturer(my_values, primary, pvcache)
-        else:
-            log.info(f'Launched too may processes for me to do anything useful. Rank {rank} goin to sleep to get out of the way')
-            my_values = None
-            ccap = None
-
+        controller = MpiCardcapController(comm, values,block_cards)
+        controller.configure_and_start()
+        controller.do_writing()
+        controller.stop()
         
-        if rank == 0:
-            ccap.configure()
-            # disable all cards, and enable only the ones we want
-            #blk = values.block[0]
-            #assert len(values.block) == 1, 'Cant start like that currently'
-
-            # Enable only the cards we want.
-            ctrl.enable_events_for_blocks_cards(values.block, values.card)
-            # Normally do start() here but it would re-enable everything,
-            # so just start this block
-            #ctrl.start_block(blk)
-            #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
-            ccap.start()
-
-        comm.Barrier()
-
-        if rank < len(block_cards):
-            ccap.do_writing()
-
-        comm.Barrier()
-        
-        if rank == 0:
-            ccap.stop()
-
-        ncomplete = -1 if ccap is None else ccap.total_completions[0]
-        completions = comm.gather(ncomplete)
-
-        nmissing = -1 if ccap is None else ccap.total_missing[0]
-        nmissing = comm.gather(nmissing)
-
-        if rank == 0:
-            log.info('Total completions=%s missing=%s', completions[:len(block_cards)], nmissing[:len(block_cards)])
             
     else: # not mpi
         primary = True
@@ -908,6 +1004,7 @@ def _main():
         ccap.configure()
         ccap.start()
         ccap.do_writing()
+        
 
 
 

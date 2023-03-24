@@ -11,6 +11,7 @@ import logging
 from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
 from numba.types import List
 from craco.utils import get_target_beam
+from typing import List
 
 log = logging.getLogger(__name__)
 
@@ -34,21 +35,21 @@ def frame_id_iter(i, fid0):
 
     frame_id = fid0
     fidoff = np.uint64(NSAMP_PER_FRAME)
-    assert isinstance(fid0, np.uint64)
+    assert isinstance(fid0, np.uint64), f'FID0 is the wrong type {fid0} {type(fid0)}'
     currblock = None
     last_frameid = frame_id
     last_bat = 0
+    curr_frameid = np.uint64(0)
     while True:
-        if currblock is None or currblock['frame_id'].flat[0] < frame_id:
+        if curr_frameid < frame_id:
             try:
-                currblock = next(i)
+                curr_frameid, currblock = next(i)
             except StopIteration:
                 break
 
         curr_bat = currblock['bat'][0]
-        curr_frameid = currblock['frame_id'][0]
 
-        assert curr_frameid >= frame_id, 'Block should have a timestamp now or in the future'
+        #assert curr_frameid >= frame_id, f'Block should have a timestamp now or in the future. curr_frameid={curr_frameid} frame_id={frame_id}'
 
         if curr_frameid == frame_id:
             b = currblock
@@ -57,32 +58,43 @@ def frame_id_iter(i, fid0):
             log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
             b = None
 
-        yield curr_frameid, b
-        
-        frame_id += fidoff
+        if curr_frameid >= fid0:
+            assert b is None or (curr_frameid == frame_id), f'Logic error. Block should be none or Frame IDs should be equal. curr_frameid={curr_frameid} frameid={frame_id} block is None?{b is None}'
+            
+            yield frame_id, b
+            frame_id += fidoff
+            
         last_frameid = curr_frameid
         last_bat = curr_bat
 
 
 class CcapMerger:
-    def __init__(self, fnames):
-        self.fnames = fnames
+    def __init__(self, fnames, headers=None):
+        ''' Need to give it file names or headers
+        '''
         self.ccap = []
-        for f in self.fnames:
-            try:
-                cc = CardcapFile(f)
-                self.ccap.append(cc)
-            except:
-                log.exception('Error opening file %s', f)
-                raise
+        self.fnames = fnames
+        if self.fnames is not None:
+            for f in self.fnames:
+                try:
+                    cc = CardcapFile(f)
+                    self.ccap.append(cc)
+                except:
+                    log.exception('Error opening file %s', f)
+                    raise
+        else:
+            assert headers is not None
+            assert len(headers) > 0, 'Empty list for headers'
+            assert len(headers[0]) > 0, 'Empty header'
+            self.ccap = [CardcapFile.from_header_string(hdr) for hdr in headers]
 
+        isempty = np.array([cc.isempty for cc in self.ccap])
+        if np.all(isempty) and self.fnames is not None:
+            raise ValueError(f'All data is empty for {fnames}')
+        
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
-        frame_ids = [c.frame_id0  if not c.isempty else None for c in self.ccap]
-        bats = [c.bat0 if not c.isempty else None for c in self.ccap]
-        log.debug('Frame IDs: %s of %s= %s', len(frame_ids), nfiles, frame_ids)
-        log.debug('bats %s', bats)
 
         for ic, c in enumerate(self.ccap):
             assert len(c.fpgas) == nfpga, 'Differing numbers of fpgas in the files'
@@ -92,13 +104,35 @@ class CcapMerger:
             
         fidxs = np.argsort(all_freqs.flat).reshape(nfiles, nfpga, NCHAN)
         self.fidxs = fidxs
-        self.frame_id0 = min([fid for fid in frame_ids if fid is not None])
-        self.tscrunch = self.ccap[0].mainhdr['TSCRUNCH']
+        self.tscrunch = self.ccap[0].tscrunch
         self.nbeam = self.ccap[0].nbeam
         self.nbl = self.ccap[0].mainhdr['NBL']
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
+
+    @classmethod
+    def from_headers(cls, headers: List[str]):
+        '''
+        Creates a merger file from a list of headers
+        Some properties won't be available because they need to see the data
+        '''
+        return CcapMerger(None, headers)
+
+    @property
+    def frame_ids(self):
+        fids  = [c.frame_id0  if not c.isempty else None for c in self.ccap]
+        return fids
+
+    @property
+    def frame_id0(self):
+        return min([fid for fid in self.frame_ids if fid is not None])
+
+    @property
+    def bats(self):
+        b = [c.bat0 if not c.isempty else None for c in self.ccap]
+        return b
+
 
     @property
     def beams(self):
@@ -170,7 +204,7 @@ class CcapMerger:
 
     @property
     def inttime(self):
-        t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].mainhdr['TSCRUNCH']
+        t = self.ccap[0].mainhdr['TSAMP']*self.ccap[0].tscrunch
         return t
 
     @property
@@ -186,8 +220,24 @@ class CcapMerger:
         return self.ccap[0].nint_per_packet
 
     @property
+    def nt_per_frame(self):
+        return self.ccap[0].nt_per_frame
+
+    @property
     def tscrunch_bug(self):
         return self.ccap[0].tscrunch_bug
+
+    @property
+    def npackets_per_frame(self):
+        return self.ccap[0].npackets_per_frame
+
+    @property
+    def dtype(self):
+        return self.ccap[0].dtype
+
+    @property
+    def target(self):
+        return self.gethdr('TARGET')
 
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]
@@ -195,12 +245,19 @@ class CcapMerger:
     def fid_to_mjd(self, fid):
         return self.ccap[0].time_of_frame_id(fid)
 
-    def packet_iter(self, frac_finished_threshold=0.9, beam=None):
+    def packet_iter(self, frac_finished_threshold=0.9, beam=None, start_fid=None):
         '''
         Returns an iterator that returns arrays of blocks of data but without converting them 
         into a masked array
+        Yields a tuple containing ((fid, packets,) fids)
+        Packets are the packets from each input
+        fids is a tuple of frame_ids, one from each input
+        :start_fid:  starting frame ID to get data for
         '''
-        iters = [frame_id_iter(c.frame_iter(beam), self.frame_id0) for c in self.ccap]
+        if start_fid is None:
+            start_fid = self.frame_id0
+            
+        iters = [frame_id_iter(c.frame_iter(beam), start_fid) for c in self.ccap]
         #packets = List() # TODO: Make NUMBA happy with List rather than  array
 
         assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
@@ -253,7 +310,7 @@ class CcapMerger:
         dout = np.zeros(shape, dtype=np.int16)
         mask = np.zeros(shape, dtype=np.bool) # default is False which means not masked - i.e is valid
         newshape = (self.nchan, nbeam, nint_total, self.nbl, self.npol, 2)
-        log.debug('Initial dout shape=%s final shape=%s', shape, newshape)
+        log.debug('Initial dout shape=%s final shape=%s beam=%s nbeam=%s', shape, newshape, beam, nbeam)
         outfid = None
         
         for ip, (fid, p) in enumerate(packets):
@@ -267,8 +324,6 @@ class CcapMerger:
             else: # mask is already false = valid data
                 outfid = fid
                 if nbeam == 1: # Data order is just (4, 1, nint_per_frame)
-                    #print('initial shape', p.shape, blk.shape)
-                    #blk.shape = (NCHAN, 1, self.ntpkt_per_frame, self.nint_per_packet, self.nbl, self.npol, 2)
                     p.shape = (NCHAN, 1, self.ntpkt_per_frame)
 
                     if self.tscrunch_bug:
@@ -278,8 +333,10 @@ class CcapMerger:
                         dout[ip,:] = p['data']
                 else:
                     # This reshapes for teh beams 0-31 first, then beams 32-35 next
-                    assert self.nbeam == 36
-                    blk1 = p[:32*4] 
+                    assert nbeam == 36
+                    p.shape = (NCHAN*nbeam, self.ntpkt_per_frame)
+                                    
+                    blk1 = p[:32*4, :] 
                     blk1.shape = (NCHAN,32, self.ntpkt_per_frame) # first 32 beams
                     blk2 = p[32*4:]
                     blk2.shape = (NCHAN,4, self.ntpkt_per_frame) # final 4 beams

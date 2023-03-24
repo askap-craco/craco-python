@@ -14,6 +14,7 @@ from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
 from craft.craco import printstats
+from craft import sigproc
 
 from craft import uvfits
 from craft import craco
@@ -396,49 +397,28 @@ class Pipeline:
         uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
         self.uv_out  = np.zeros(uv_shape, dtype=np.complex64)
         self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
+        self.cal_solution = calibration.CalibrationSolution(self.plan)
 
-        if hasattr(plan.values, 'calibration') and plan.values.calibration:
-            calfile = plan.values.calibration
-            gains = calibration.load_gains(calfile)
-            log.info('Loaded calibration gains %s from calfile %s', gains.shape, plan.values.calibration)
-            self.set_calibration_gains(gains)
-        else:
-            self.set_calibration_gains(None)
+    @property
+    def solarray(self):
+        return self.cal_solution.solarray
 
-    def set_calibration_gains(self, gains):
+    @property
+    def num_input_cells(self):
         '''
-        Set the calibration to the given set of gains
-        Sets internal calibration arrays and counts valid (noflagged) data for subsequent scaling calculations
-        if calfile is None sets the gains asn solution array to None and assumes the number of input cells is plan.nf*plan.nbl
-        '''
-        if gains is None:
-            shape = (self.plan.maxant, self.plan.nf, 2)
-            mask = np.zeros(shape, dtype=bool)
-            self.gains = np.ma.masked_array(np.ones(shape, dtype=np.complex64), mask=mask)
-        else:
-            self.gains = gains
+        Returns the total number of cells added together in the grid
+        if we have a calibration array, it's the number of good values in the mask
+        Otheerwise, it's the product of nbl, and nf from the plan
+        Note: solution array may be dual polarisation, in which case this returns the single polarisation size
 
-        self.solarray = calibration.gains2solarray(self.plan, self.gains)
-        self.__ninput_cells = self.num_input_cells
-        ntotal = self.plan.nf * self.plan.nbl
-        pcflag = (ntotal - self.__ninput_cells) / ntotal*100.
-        snincrease = np.sqrt(self.__ninput_cells)
-        log.info('Loaded calibration with %s/%s valid input cells=%0.1f%% flagged. S/N increase is %s',
-                      self.__ninput_cells, ntotal, pcflag, snincrease)
-        return self
+        '''
+        return self.cal_solution.num_input_cells
 
     def set_channel_flags(self, chanrange, flagval: bool):
         '''
-        Set the channel flags to the given flagval.
-        chanrange: list of channel numbers that can be used in numpy index
-        flagval: boolean. True = flagged
+        sets the channel flags. this is done by updating the calibraiton solution
         '''
-        g = self.gains.copy() # todo: is this necessary?
-        
-        # OMFG - if you do g[:,chanrange,:].mask if chanrange if a list of inxeds, it doesn't work, but if it's a slice it does work. But if you do g.mask[:,chanrange,:] it works for both
-        g.mask[:,chanrange,:] = flagval 
-        
-        return self.set_calibration_gains(g)
+        return self.cal_solution.set_channel_flags(chanrange, flagval)
     
     def copy_mainbuf(p):
         '''
@@ -625,8 +605,10 @@ class Pipeline:
             log.info('Finished clearing pipeline')
 
     def calibrate_input(self, input_flat_raw):
-        # Apply calibration solutions -  Multiply by solution aray
-        # Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
+        '''
+        Apply calibration solutions -  Multiply by solution aray
+         Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
+        '''
 
         if self.solarray is not None:
             # If data is already polsummed, then average the solutions before multiplying
@@ -665,24 +647,6 @@ class Pipeline:
 
         return input_flat
 
-    @property
-    def num_input_cells(self):
-        '''
-        Returns the total number of cells added together in the grid
-        if we have a calibration array, it's the number of good values in the mask
-        Otheerwise, it's the product of nbl, and nf from the plan
-        Note: solution array may be dual polarisation, in which case this returns the single polarisation size
-
-        '''
-        if self.solarray is None:
-            nsum = self.plan.nbl * self.plan.nf 
-        else:
-            assert 1 <= self.solarray.shape[2] <= 2
-            single_sol_array = self.solarray[:,:,0,:] # single pol solution array
-
-            nsum = single_sol_array.size - sum(single_sol_array.mask) # number of unmasked values
-
-        return nsum
 
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
@@ -694,7 +658,7 @@ class Pipeline:
         :returns: (signal_gain, noise_gain)
         '''
 
-        nsum = self.__ninput_cells # 
+        nsum = self.num_input_cells
         fft_scale = calc_fft_scale(fft_shift1, fft_shift2)
         signal_gain = nsum*fft_scale
         noise_gain = np.sqrt(nsum)*fft_scale
@@ -831,6 +795,7 @@ def get_parser():
     
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
+    parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
     # These three are not used in PipelinePlan ...
@@ -854,6 +819,7 @@ def get_parser():
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna number')
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
+    parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
     parser.set_defaults(subtract  = True)
     parser.set_defaults(verbose   = False)
@@ -922,6 +888,7 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     log.info(f'Values={values}')
+
     assert values.max_ndm == NDM_MAX
 
     mode   = get_mode()
@@ -933,8 +900,26 @@ def _main():
         log.info(ip.get_name())
 
     # Create a plan
-    f = uvfits.open(values.uv)
+    f = uvfits.open(values.uv, skip_blocks=values.skip_blocks)
     plan = PipelinePlan(f, values)
+
+    hdr = {'nbits':32,
+           'nchans':plan.nf,
+           'nifs':1,
+           'src_raj_deg':plan.phase_center.ra.deg,
+           'src_dej_deg':plan.phase_center.dec.deg,
+           'tstart':plan.tstart.utc.mjd,
+           'tsamp':plan.tsamp_s.value,
+           'fch1':plan.fmin/1e6,
+           'foff':plan.foff/1e6,
+           #'source_name':'UNKNOWN'
+    }
+
+    if values.phase_center_filterbank is None:
+        pc_filterbank = None
+    else:
+        pc_filterbank = sigproc.SigprocFile(values.phase_center_filterbank, 'wb', hdr)
+
 
     # Create a pipeline
     alloc_device_only = values.dump_mainbufs is not None or \
@@ -977,6 +962,11 @@ def _main():
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
 
+        if pc_filterbank is not None:
+            d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
+            log.info('Phase center stats %s', printstats(d))
+            d.tofile(pc_filterbank.fin)
+
         p.copy_input(input_flat_cal, values, calibrate=False) # take the input into the device
         
         if do_dump(values.dump_uvdata, iblk):
@@ -990,10 +980,13 @@ def _main():
         total_candidates += len(candidates)
         for c in candidates:
             candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
+        candout.flush()
 
         if values.print_dm0_stats:
             bc = p.boxcar_history.copy_from_device().nparr
-            print('DM0 image stats', printstats(bc[0,...]), f'shape={bc.shape}')
+            s = 'DM0 image stats' + printstats(bc[0,...]) + f'shape={bc.shape}'
+            print(s)
+            log.info(s)
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
@@ -1022,6 +1015,9 @@ def _main():
     candout.flush()    
     candout.close()
     logging.info('Wrote %s candidates to %s', total_candidates, values.cand_file)
+
+    if pc_filterbank is not None:
+        pc_filterbank.fin.close()
 
                      
 if __name__ == '__main__':

@@ -79,12 +79,19 @@ if __name__ == '__main__':
                                 'plot_cand=craco.plot_cand:_main',
                                 'switchconnections=craco.switchconnections:_main',
                                 'mpipipeline=craco.mpipipeline:_main',
+                                'mpi_transpose_test=craco.mpi_transpose_test:_main',
                                 'test_card_averager=craco.test_card_averager:_main',
                                 'obsman=craco.obsman:_main',
                                 'savescan=craco.savescan:_main',
                                 'calibration=craco.calibration:_main',
                                 'dusb=craco.dusb:_main',
-                                'prepsb=craco.prepsb:_main'
+                                'prepsb=craco.prepsb:_main',
+                                'prthd=craco.prthd:_main',
+                                'plotpcap=craco.plotpcap:_main',
+                                'metadatasaver=craco.obsman.metadatasaver:_main',
+                                'fixuvfits=craco.fixuvfits:_main',
+                                'pltrescale=craco.pltrescale:_main'
+                                
             ],
         },
         classifiers=['Development Status :: 3 - Alpha',

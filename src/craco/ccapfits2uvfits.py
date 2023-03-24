@@ -85,7 +85,7 @@ def _main():
     uvout_beams = []
 
     if values.beam is None or values.beam == -1:
-        beams = [b for b in range(1, NBEAM+1)]
+        beams = [b for b in range(0, NBEAM)]
     elif values.beam == -2:
         targname = merge.gethdr('TARGET')
         beams = [get_target_beam(targname)]
@@ -139,13 +139,17 @@ def _main():
             out_sourceidx = 1 # FITS convention is the first value is 1
              
             # blk shape is (nchan, nbeam, nint, nbl, npol, 2)
+            if blk.shape[2] != 1:
+                warnings.warn(f'Averaging automagically by {blk.shape[2]} Timestamps maybe wrong by {blk.shape[2]/2} many samples')
+                blk = blk.mean(axis=2, keepdims=True)
+                
             assert blk.shape[2] == 1, f'Cant handle nint != 1 yet {blk.shape} {blk.shape[2]}'
             
             for ibeam, (beam, uvout) in enumerate(uvout_beams):
                 blidx = 0
                 for ia1 in range(nant):
                     for ia2 in range(ia1, nant):
-                        uvwdiff = uvw[ia1,ibeam,:] - uvw[ia2,ibeam,:] 
+                        uvwdiff = uvw[ia1,beam,:] - uvw[ia2,beam,:] 
                         dblk = blk[:, ibeam,0,blidx,:,:]
                         wblk = weights[:, ibeam, 0, blidx, :, 0] # real and imaginary part should have same flag
                         if antflags[ia1] or antflags[ia2]:

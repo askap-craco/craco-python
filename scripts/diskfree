@@ -4,3 +4,6 @@
 # sometimes du can't see them because they're not mounted
 ls /data/seren*/big/ > /dev/null
 df -h /data/seren*/big
+
+ls /data/seren*/fast/ > /dev/null
+df -h /data/seren*/fast

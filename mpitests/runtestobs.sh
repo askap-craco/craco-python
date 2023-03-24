@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ccap="./mpicardcap.sh host12_fpga6_rankfile.txt  -e --block 7 --prefix ak"
+ccap="./mpicardcap.sh   -e --block 2 --prefix ak -N 100"
 
 CARDCAP_DIR=$1
 
@@ -8,7 +8,7 @@ if [[ ! -e $CARDCAP_DIR ]] ; then
     mkdir -p $CARDCAP_DIR
 fi
 
-nmsg=100
+nmsg=10
 target=target
 cards=1-12
 
@@ -28,7 +28,10 @@ for spi in 16 32 64 ; do
 		    fi
 
 		    
-		    $ccap --samples-per-integration $spi $polcmd --beam $beam -a $cards -k $fpga --num-msgs $nmsg -f $CARDCAP_DIR/cap_spi${spi}_bm${beam}_a${cards}_k${fpga}_$pol/$target.fits
+		    cmd="$ccap --samples-per-integration $spi $polcmd --beam $beam -a $cards -k $fpga --num-msgs $nmsg -f $CARDCAP_DIR/cap_spi${spi}_bm${beam}_a${cards}_k${fpga}_$pol/$target.fits"
+		    echo $cmd
+		    $cmd
+		    
 		done
 	    done
 	done

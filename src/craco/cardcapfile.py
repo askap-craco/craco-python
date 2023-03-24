@@ -11,8 +11,9 @@ import logging
 import warnings
 from astropy.time import Time
 from astropy.io import fits
-import ast
+from  astropy.io.fits.header import Header
 from craco.utils import beamchan2ibc
+import ast
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     Whether sum_pols is true or false, a single packet always contiains 2xnbl entries. This is how
     John's firmware works.
 
-    if su m_pols is True, npol=1, nint=2
+    if sum_pols is True, npol=1, nint=2
     if sum_pols is False, npol=2, nint=1
     
     '''
@@ -77,30 +78,94 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     
     return np.dtype(dtype)
 
+def get_indexes(nant):
+    '''
+    Returns a set of array indexs that can be used to index into baseline arrays
+    assumign the way the correlator orders everythign (baseically, sensibly)
+    One day if you have a more complex configuration than just antennas, this might
+    need to be made more sophisticated.
+
+    Returns 4-typple containing (products, revproducts, auto_products, cross_products
+    where
+    products: Array length=nbl, contains (a1, a2) where a1 is antenna1 and a2 is antenna2 (1 based)
+    revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
+    auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
+    cross_products: length=nbl array of which indices contain cross correlations
+    '''
+    
+    products = []
+    revproducts = {}
+    auto_products = []
+    cross_products = []
+    idx = 0
+    for a1 in range(1, nant+1):
+        for a2 in range(a1, nant+1):
+            products.append((a1,a2))
+            revproducts[(a1,a2)] = idx
+            if a1 == a2:
+                auto_products.append(idx)
+            else:
+                cross_products.append(idx)
+            
+            idx += 1
+              
+    products = np.array(products, dtype=[('a1',np.int16), ('a2', np.int16)])
+
+    return (products, revproducts, auto_products, cross_products)
+
+
 
 class CardcapFile:
-    def __init__(self, fname, workaround_craco63=False):
+    def __init__(self, fname, mainhdr=None, workaround_craco63=False):
+        '''
+        Supply the file name, or else mainhdr as a pyfits Header
+        If you don't supply a file, some values won't work
+        '''
         self.fname = fname
-        hdr1  = fits.getheader(fname)
-        mainhdr = fits.getheader(fname, 1)
+        if fname is not None:
+            hdr1  = fits.getheader(fname)
+            mainhdr = fits.getheader(fname, 1)
+        else:
+            assert mainhdr is not None
+            hdr1 = Header()
+
+        self.hdr1 = hdr1
         hdr_nbytes = len(str(hdr1)) + len(str(mainhdr))
         self.nbl = mainhdr.get('NBL', 465)
         self.debughdr = int(mainhdr.get('DEBUGHDR')) == 1
         self.polsum = int(mainhdr.get('POLSUM')) == 1
         self.dtype = get_single_packet_dtype(self.nbl, self.debughdr, self.polsum)
-
-        self.hdr1 = hdr1
         self.mainhdr = mainhdr
         self.hdr_nbytes = hdr_nbytes
         self.workaround_craco63 = workaround_craco63
-        if self.mainhdr['NTOUTPFM'] == 0:
+        if self.mainhdr.get('NTOUTPFM', None) == 0:
             warnings.warn(f'File {fname} has tscrunch/polsum bug. Will tscrunch final integrations')
             self.tscrunch_bug = True
         else:
             self.tscrunch_bug = False
-            
-        self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
 
+        if fname is None:
+            self.pkt0 = None
+        else:
+            self.pkt0 = self.load_packets(count=1) # load inital packet to get bat and frame IDx
+
+    @classmethod
+    def from_header(cls, hdr):
+        return CardcapFile(None, hdr)
+
+    @classmethod
+    def from_header_string(cls, hdrstring:str):
+        '''
+        Creates a cardcap file from the given header string
+        maindhr is set as a FITS header.
+        Use this to get a hold of various properties in the file
+        e.g. nant, indexes etc
+        If the file doesn't exist on  your system, then reading data won't work 
+        and you won't be able to get start times etc.
+        '''
+        mainhdr = Header.fromstring(hdrstring)
+        return CardcapFile(None, mainhdr)
+        
     @property
     def indexes(self):
         '''
@@ -117,6 +182,17 @@ class CardcapFile:
         '''
         return self.mainhdr['NANT']
 
+    @property
+    def target(self):
+        return self.mainhdr['TARGET']
+
+    @property
+    def sbid(self):
+        return self.mainhdr['SBID']
+
+    @property
+    def scanid(self):
+        return self.mainhdr['SCANID']
 
     @property
     def card_frequencies(self):
@@ -238,13 +314,34 @@ class CardcapFile:
         return len(self) == 0
 
     @property
+    def tscrunch(self):
+        return self.mainhdr.get('TSCRUNCH', 1)
+
+    @property
     def ntpkt_per_frame(self):
         if self.tscrunch_bug:
             ntpkt = 1
         else:
-            ntpkt = self.mainhdr['NTPKFM'] // self.mainhdr['TSCRUNCH']
+            ntpkt = self.mainhdr['NTPKFM'] // self.tscrunch
 
         return ntpkt
+
+    @property
+    def nt_per_frame(self):
+        '''
+        Returns the total number of time integrations per frame
+        '''
+        return self.ntpkt_per_frame*self.nint_per_packet
+    
+    @property
+    def npackets_per_frame(self):
+        '''
+        Number of packets per beamformer frame (110ms)
+        is NCHAN * the numebr of beams recorded * number of time packets
+        Don't forget: If npol=1 then you get 2 integrations per packet
+        '''
+        npkt = NCHAN*self.nbeam*self.ntpkt_per_frame
+        return npkt
 
 
     def __len__(self):
@@ -254,6 +351,8 @@ class CardcapFile:
         Although - if its' empty, NAXIS2 will be 1
         Even though it's empty. That is a bug.
         '''
+        if self.fname is None:
+            return 0
         nax2 = self.mainhdr['NAXIS2']
         if nax2 == 1: # Bug - file not properly close and its empty
             nbytes = os.path.getsize(self.fname)
@@ -318,14 +417,13 @@ class CardcapFile:
             if beam not in self.beams:
                 raise ValueError(f'Requested beam {beam} is not in cardcap file. Which does contain beams={self.beams}')
 
-        packets_per_frame = NCHAN*self.nbeam*self.ntpkt_per_frame
+        packets_per_frame = self.npackets_per_frame
         packet_size_bytes = self.dtype.itemsize
 
         if beam is None or beam == -1:
             nbeam_out = NBEAM
         else:
             nbeam_out = 1
-
 
         if len(self) > 1: # work around bug
             with open(self.fname) as f:
@@ -344,9 +442,20 @@ class CardcapFile:
                         # assert packets['channel_number'][0] == 0, f"Expected first channel to be zero. It was {packets['channel_number'][0]}"
                         
                     else: # read 4 channels worth of ntpkts
-                        packets = np.empty(NCHAN*self.ntpkt_per_frame, dtype=self.dtype) # 1 beam
+                        packets = np.empty((NCHAN, self.ntpkt_per_frame), dtype=self.dtype) # 1 beam
                         for chan in range(NCHAN):
-                            ibc = beamchan2ibc(beam, chan)
+                            # Fluffing fluffhole of fluffiness - dammit.
+                            # If the input data has only 1 beam, it's all laid out neatly in
+                            # beam order
+                            # if there are 36  then it's the crazy FPGA ordering.
+                            # Fluff.
+                            # Just a quick change. What could possssibly go rong.
+                            if self.nbeam == 1:
+                                ibc = chan
+                            else:
+                                assert self.nbeam == 36, 'need 36 beams for this puppy - have {self.nbeam}'
+                                ibc = beamchan2ibc(beam, chan)
+                                
                             pkt_offset = iframe*packets_per_frame + ibc*self.ntpkt_per_frame
                             byte_offset = self.hdr_nbytes + pkt_offset*packet_size_bytes
                             f.seek(byte_offset)
@@ -359,10 +468,11 @@ class CardcapFile:
                             #assert packets['channel_number'][0] == chan, f"Expected first beam to be {chan}. It was {packets['channel_number'][0]}"
                             
                             # TODO: Work out how to read inplace rather than copying to improve performance
-                            packets[chan*n:(chan+1)*n] = inpackets
+                            packets[chan, :] = inpackets
                             
 
-                    yield self.__fix__(packets)
+                    fid = packets[0,0]['frame_id']
+                    yield fid, self.__fix__(packets)
                     iframe += 1
                     
 
@@ -386,6 +496,7 @@ class CardcapFile:
                         break
                 
                     log.debug('yielding packets shape=%s data shape=%s, npackets=%s len(packets)=%s', packets.shape, packets['data'].shape, npackets, len(packets))
+                    fid = packets[0]['frame_id']
 
                     yield self.__fix__(packets)
     

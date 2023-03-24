@@ -13,6 +13,9 @@ import gzip
 import json
 from astropy.time import Time
 from collections import OrderedDict
+from astropy.coordinates import SkyCoord
+from astropy import units as u
+import pylab
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +34,10 @@ def get_uvw(ants):
         uvw[iant,:,:] = u
         
     return uvw
+
+def ts2time(ts):
+    return Time(ts/1e6/3600/24, format='mjd', scale='tai')
+
 
 class MetadataFile:
     def __init__(self, fname):
@@ -114,6 +121,7 @@ class MetadataFile:
         dec: degrees
         epoch: 'J2000'
         name: string
+        skycoord: Astropy SkyCoord with that stuff filled in
 
         Assumes that the first time it sees anew source name, teh value in the beam direciton
         is the phase center
@@ -121,16 +129,33 @@ class MetadataFile:
         :beam: Beam number for source directions
         
         '''
+
+        assert 0<= beam < 36, f'Invalid beam {beam}'
         sources = OrderedDict()
+        last_source_name = None
         for d in self.data:
             name = d['target_name']
+            time = ts2time(d['timestamp'])
             if name not in sources.keys():
                 data = {'name':name}
                 beamdirs = d['beams_direction']
                 data['ra'] = beamdirs[beam][0]
                 data['dec'] = beamdirs[beam][1]
                 data['epoch'] = beamdirs[beam][2]
+                data['skycoord'] = SkyCoord(ra=beamdirs[beam][0],
+                                            dec=beamdirs[beam][1],
+                                            unit='deg',
+                                            equinox=beamdirs[beam][2],
+                                            frame='icrs')
+                data['scan_times'] = []
                 sources[name] = data
+
+            if last_source_name == name:
+                data['scan_times'][-1][1] = time
+            else:
+                data['scan_times'].append([time, None])
+
+            last_source_name = name
 
         return sources
                 
@@ -151,6 +176,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('--plotuv', help='Plot UVW for given beam', type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -160,7 +186,52 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     for f in values.files:
-        print(MetadataFile(f))
+        mf = MetadataFile(f)
+        print(mf)
+        for b in range(36):
+            for name, data in mf.sources(b).items():
+                print('beam', b, name, data['skycoord'].to_string('hmsdms'), data['scan_times'][0][0].iso, data['scan_times'][0][1].iso)
+
+        fig, axs = pylab.subplots(4,1, sharex=True)
+        if values.plotuv is not None:
+            beam = values.plotuv
+            mjds = mf.time_floats
+            uvws = mf.uvw_at_time(mjds) # (time, nant, nbeam, 3)
+            nant = uvws.shape[1]
+            bluvws = []
+
+            for iant1 in range(nant):
+                for iant2 in range(iant1+1,nant):
+                    bluvws.append(uvws[:,iant1,:,:] - uvws[:,iant2,:,:])
+
+            bluvws = np.array(bluvws)
+            uvws.shape
+            for i,lbl in enumerate(('U','V','W')):
+                axs[i].plot(uvws[:,:,beam, i])
+                axs[i].set_ylabel(lbl)
+
+            flags = mf.flags_at_time(mjds)
+            axs[3].plot(flags)
+            axs[3].set_ylabel('Flagged == 1')
+            axs[3].set_xlabel('Metadata dump')
+            
+
+            print(bluvws.shape)
+            fig2,axs = pylab.subplots(1,2)
+            for ibl in range(bluvws.shape[0]):
+                axs[0].plot(bluvws[ibl,:,beam,0], bluvws[ibl,:,beam,1],'o')
+                for i in range(3):
+                    axs[1].plot(bluvws[ibl,:,beam,i])
+
+            axs[0].set_xlabel('UU')
+            axs[0].set_ylabel('VV')
+            axs[1].set_ylabel('UU,VV,WW')
+            axs[1].set_xlabel('Sample')
+
+    
+            pylab.show()
+            
+            
     
 
 if __name__ == '__main__':

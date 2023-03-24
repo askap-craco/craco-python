@@ -90,9 +90,10 @@ def _main():
     parser.add_argument('-a','--autos', help='Write  antenna autos to separate files with this postfix - if not specified it wont write autos')
     parser.add_argument('-s','--sum-autos',default='ics', help='Write sum of antenna autos with this postfix')
     parser.add_argument('-c','--crossamp', help='Write baseline amplitudes for baselines to these 1-based antenna numbers (strrange)', type=strrange)
-    parser.add_argument('-b','--sum-crossamp', default='cas', help='Write sum of baseline cross amplitude with this postfix')
+    parser.add_argument('-k','--sum-crossamp', default='cas', help='Write sum of baseline cross amplitude with this postfix')
     parser.add_argument('--flagval', default='zero', choices=('zero','mean'), help='Set flagged/missing data to (zero|mean)')
     parser.add_argument('-p','--prefix', default='', help='Add this prefix before the output filename')
+    parser.add_argument('-b','--beam', default=None, help='Beam to get. -1 means 36 beams. -2 means whatever available. Else give the beam you want', type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.add_argument('--polsum', action='store_true', help='Sum polarisations')
     parser.set_defaults(verbose=False)
@@ -133,7 +134,7 @@ def _main():
     products, revproducts, auto_products, cross_products = merger.indexes
     
         
-    for blkid, (fid, dout) in enumerate(merger.block_iter()):
+    for blkid, (fid, dout) in enumerate(merger.block_iter(beam=values.beam)):
         (nchan,nbeam,ntime,nbl,npol,_) = dout.shape
         log.debug('Got fid=%s shape=%s', fid, dout.shape)
         sampno = blkid*ntime

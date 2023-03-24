@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /data/seren-01/big/craco/
+cd $CRACO_DATA
 targets=`ls -d SB*/targets/*`
 for t in $targets ; do
     for scan in $t/* ; do

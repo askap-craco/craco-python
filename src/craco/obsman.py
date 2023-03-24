@@ -7,11 +7,12 @@ Copyright (C) CSIRO 2022
 import os
 import sys
 import logging
-from epics import PV
+from epics import PV, caget,caput
 from subprocess import Popen, TimeoutExpired
 import time
 import signal
 import atexit
+import re
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class Obsman:
     def __init__(self, values):
         self.scan_pv = PV('ak:md2:scanId_O')
         self.sbid_pv = PV('ak:md2:schedulingblockId_O')
+        self.target_pv = PV('ak:md2:targetName_O')
         self.curr_scanid = None
         self.process = None
         
@@ -30,6 +32,8 @@ class Obsman:
 
         # Bit of a race condition here, but we'll do it
         # add_callback might have beaten us to it,
+        #self.scan_changed(self.target_pv.pvname, self.target_pv.get())
+        #self.callback_id = self.target_pv.add_callback(self.scan_changed)
         self.scan_changed(self.scan_pv.pvname, self.scan_pv.get())
         self.callback_id = self.scan_pv.add_callback(self.scan_changed)
 
@@ -62,19 +66,29 @@ class Obsman:
             self.start_process(scanid)
         
     def scan_changed(self, pvname=None, value=None, char_value=None, **kw):
-        assert pvname == self.scan_pv.pvname
-        new_scanid = value
+        time.sleep(1) # wait a bit to see if PVs update. #sigh
+        new_scanid = self.scan_pv.get()
         sbid = self.sbid_pv.get()
-        log.info(f'Scan_changed pv={pvname} newscan={value} currscan={self.curr_scanid} SB{sbid}')
+        target = self.target_pv.get() # this doesnt refresh for some reason
+        match = None
+        if self.values.target_regex is not None:
+            match = re.search(self.values.target_regex, target)
+            target_ok = match is not None
+        else:
+            target_ok = True
+
+        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
             pass
         elif new_scanid == self.curr_scanid: # avoid race condition
             pass
-        else: # new valid scan number with new scan ID
+        elif target_ok: # new valid scan number with new scan ID
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
             self.start_process(new_scanid)
+        else:
+            log.info('Passing on %s as doesnt match regex %s', target, self.values.target_regex)
 
     def start_process(self, new_scanid:int):
         assert new_scanid is not None
@@ -98,8 +112,8 @@ class Obsman:
             pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
             timeout = self.values.timeout
             log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
+            proc.send_signal(signal.SIGINT)
             os.killpg(pgid, signal.SIGINT)
-            #proc.send_signal(signal.SIGINT)
             #proc.terminate()
             try:
                 proc.wait(timeout)
@@ -109,16 +123,19 @@ class Obsman:
 
             proc.wait()
             retcode = proc.returncode
-            log.info('Process dead with return code %s', retcode)
+            log.info('Process dead with return code %s. Stopping packets just in case', retcode)
+            caput('ak:cracoStop', 1)
+            
             # assert retcode is not None
             self.process = None
             self.curr_scanid = None
 
     def poll_process(self):
         if self.process is not None:
-            log.debug('Process pid=%s running with return code %s', self.process.pid, self.process.returncode)
-            if self.process.returncode is not None:
-                log.info('Process terminated prematurely. Cleaning up')
+            retcode = self.process.poll()
+            log.debug('Process pid=%s running with return code %s', self.process.pid, retcode)
+            if retcode is not None:
+                log.info('Process terminated with return code %s. Cleaning up', retcode)
                 self.terminate_process()
 
     def shutdown(self):
@@ -145,6 +162,7 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('--timeout', type=int, help='Timeout to wait after sending signal before killing process', default=30)
+    parser.add_argument('-R','--target-regex', help='Regex to apply to target name. If match then we start a scan')
     parser.add_argument(dest='cmd', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

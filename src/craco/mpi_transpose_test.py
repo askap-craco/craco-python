@@ -8,9 +8,8 @@ import numpy as np
 import os
 import sys
 import logging
-from array import array
 from craco import cardcap
-
+from craco.mpiutil import np2array
 
 
 log = logging.getLogger(__name__)
@@ -34,14 +33,6 @@ mpi_dtype=MPI.INT32_T
 #dtype=np.uint8
 #mpi_dtype=MPI.BYTE
 
-def np2array(d):
-    '''
-    This is how :https://github.com/erdc/mpi4py/blob/master/demo/osu_alltoallv.py does it
-    '''
-    assert d.dtype == np.int32
-    a =  array('i', d)
-    
-    return a
 
 def myalltoall(comm, dtx, tx_counts, tx_displacements, drx, rx_counts, rx_displacements):
     s_msg = [dtx, (np2array(tx_counts), np2array(tx_displacements)), mpi_dtype]
@@ -147,7 +138,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     cardcap.add_arguments(parser)
-    parser.add_arguments('--nbeams', type=int, help='Number of beams', default=36)
+    parser.add_argument('--nbeams', type=int, help='Number of beams', default=36)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -159,8 +150,11 @@ def _main():
         dump_rankfile(values)
         sys.exit(0)
 
+    print(values.block, values.card, values.fpga)
+    values.nrx = len(values.block)*len(values.card)*len(values.fpga)//6
+
     # beams first, then rx
-    if rank < values.nbeam:
+    if rank < values.nbeams:
         proc_beam(rank, values)
     else:
         proc_rx(rank - values.nbeam, values)
