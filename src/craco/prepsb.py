@@ -50,7 +50,7 @@ def link_node_dirs(sbname, scandir):
 
 
 def prepsb(sbname):
-    for scandir in dirs.sb_scan_dumps(sbname):
+    for scandir in dirs.data_dirs(sbname):
         #link_ccap_files(sbname, scandir) # takes ages
         link_node_dirs(sbname, scandir)
         
