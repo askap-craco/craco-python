@@ -90,7 +90,8 @@ if __name__ == '__main__':
                                 'plotpcap=craco.plotpcap:_main',
                                 'metadatasaver=craco.obsman.metadatasaver:_main',
                                 'fixuvfits=craco.fixuvfits:_main',
-                                'pltrescale=craco.pltrescale:_main'
+                                'pltrescale=craco.pltrescale:_main',
+                                'pltccap=craco.pltccap:_main'
                                 
             ],
         },
