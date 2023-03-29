@@ -316,13 +316,13 @@ class FpgaCapturer:
         rx = self.rx
         msg_size = self.ccap.msg_size
 
-        start_sleep_ns = time.time_ns()
+        start_sleep_ns = 0#time.time_ns()
         #time.sleep(1)
-        stop_sleep_ns = time.time_ns()
+        stop_sleep_ns = 0# time.time_ns()
         if wait:
             rx.waitRequestsCompletion()
 
-        finish_wait_ns = time.time_ns()
+        finish_wait_ns = 0 #time.time_ns()
         sleep_ns = stop_sleep_ns - start_sleep_ns
         wait_ns = finish_wait_ns - stop_sleep_ns
 
