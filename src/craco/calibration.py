@@ -122,6 +122,9 @@ def load_gains(fname):
         freqs = None
 
     else:
+        if fname.endswith('/'): # remove traiilng slash if prsent
+            fname = fname[:-1]
+            
         miriadsol = MiriadGainSolutions(fname)
         miriad_bp = miriadsol.bp_real + 1j*miriadsol.bp_imag
         miriad_g = miriadsol.g_real + 1j*miriadsol.g_imag

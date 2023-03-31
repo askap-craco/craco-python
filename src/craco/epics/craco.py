@@ -76,19 +76,31 @@ class Craco(EpicsSubsystem):
 
         self.write(f'acx:s{block:02d}:evtf:WF2:enable_fo1.MSKV', hex(mask), wait=True)
 
-    def enable_events_for_blocks_cards(self, blocklist, cardlist):
+    def enable_events_for_blocks_cards(self, blocklist, cardlist, maxncard=None):
         ''''
         Enable craco go events for given blocks
         cards number 1-12 inclsive
         If a card isn't in the list, it is disabled
         If the block ins't in the list it is disabled
+        If the card number numbered from 0 is < maxncard and maxncard is specified, the it only enables the lower cards
         '''
+        if maxncard is None:
+            maxncard = len(blocklist)*len(cardlist)
+
+        icard = 0
+        block_masks = []
         for block in range(2,7+1):
             mask = 0 # everyghing is disabled to start with
             for card in range(1, 12+1):
-                if block in blocklist and card in cardlist:
+                if block in blocklist and card in cardlist and icard < maxncard:
                     mask |= 1 << (card - 1)
 
+                icard += 1
+
+            block_masks.append(mask)
+
+                
+        for block, mask in zip(range(2,7+1), block_masks):
             self.write(f'acx:s{block:02d}:evtf:WF2:enable_fo1.MSKV', hex(mask), wait=True)
 
 
@@ -151,10 +163,36 @@ class Craco(EpicsSubsystem):
             block, card, f"F_craco:fpga{fpga}:writeRoceHeaders_O", headers
         )
 
+    def read_start_bat(self):
+        '''
+        Retuns the value of start bat as an int
+        '''
+        bat = int(self.read('evtf:craco:startBat', cache=False), 16)
+        return bat
+
+    def get_start_bat(self):
+        if self.start_bat is not None:
+            return self.start_bat
+        
+        for retry in range(100):
+            bat = self.read_start_bat()
+            if bat != self.previous_start_bat:
+                self.start_bat = bat
+                break
+            
+            time.sleep(0.1)
+
+        if self.start_bat is None:
+            raise ValueError('timeout getting start bat')
+
+        return self.start_bat
+
     def start(self):
         """
         start CRACO
         """
+        self.previous_start_bat = self.read_start_bat()
+        self.start_bat = None
         self.write("cracoStart", 1, timeout=10.0, wait=False)
 
     def stop(self):

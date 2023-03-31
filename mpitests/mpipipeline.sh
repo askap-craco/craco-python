@@ -5,7 +5,7 @@ hostfile=mpi_seren.txt
 
 
 # IF HCOLL IS ENABED WITH col-hcoll-enable 1 THEN IT HANGS ON MPI_FINALIZE !!!!
-use_roce=1
+use_roce=0
 enable_hcoll=0
 verbose=0
 
@@ -33,7 +33,7 @@ mpipipeline --hostfile $hostfile --dump-rankfile $rankfile $extra_args $@
 
 retval=$?
 if [ $retval -ne 0 ]; then
-    echo "MPIPipelien returned $retval"
+    echo "MPIPipeline returned $retval"
     exit $?
 fi
 

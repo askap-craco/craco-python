@@ -40,7 +40,7 @@ def _main():
                 print(f'{f} {hcard}'.strip())
 
         else:
-            s = f"{f} {len(cc)} {cc.syncbat} {cc.sbid}/{cc.scanid} {cc.target} {cc.mjd0} {cc.nant} {cc.nbeam} {cc.npol} {cc.dtype['data'].shape} {len(cc)} "
+            s = f"{f} {len(cc)} 0x{cc.syncbat:x} {cc.sbid}/{cc.scanid} {cc.target} {cc.mjd0} {cc.nant} {cc.nbeam} {cc.npol} {cc.dtype['data'].shape} {len(cc)} "
 
             try:
                 f1 = next(cc.packet_iter())
@@ -50,7 +50,7 @@ def _main():
                     first_fid = fid
                     first_bat  = bat
                     
-                s += f"{fid}  {bat} {fid-first_fid} {bat-first_bat} {hex(bat)}"
+                s += f"{fid} {fid-first_fid} {bat} {hex(bat)} {bat-first_bat} {fid % 2048}"
                     
             except StopIteration:
                 s += 'EMPTY'

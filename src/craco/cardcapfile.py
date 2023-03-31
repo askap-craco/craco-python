@@ -351,6 +351,8 @@ class CardcapFile:
         Although - if its' empty, NAXIS2 will be 1
         Even though it's empty. That is a bug.
         '''
+        if self.fname is None:
+            return 0
         nax2 = self.mainhdr['NAXIS2']
         if nax2 == 1: # Bug - file not properly close and its empty
             nbytes = os.path.getsize(self.fname)
@@ -438,9 +440,10 @@ class CardcapFile:
                         assert packets['beam_number'][0] == 0, f"Expected first beam to be zero. It was {packets['beam_number'][0]}"
                         # channel number isn't 0-4, its 0--large number, I thik
                         # assert packets['channel_number'][0] == 0, f"Expected first channel to be zero. It was {packets['channel_number'][0]}"
+                        packets.shape = (NCHAN, self.ntpkt_per_frame)
                         
                     else: # read 4 channels worth of ntpkts
-                        packets = np.empty(NCHAN*self.ntpkt_per_frame, dtype=self.dtype) # 1 beam
+                        packets = np.empty((NCHAN, self.ntpkt_per_frame), dtype=self.dtype) # 1 beam
                         for chan in range(NCHAN):
                             # Fluffing fluffhole of fluffiness - dammit.
                             # If the input data has only 1 beam, it's all laid out neatly in
@@ -466,10 +469,10 @@ class CardcapFile:
                             #assert packets['channel_number'][0] == chan, f"Expected first beam to be {chan}. It was {packets['channel_number'][0]}"
                             
                             # TODO: Work out how to read inplace rather than copying to improve performance
-                            packets[chan*n:(chan+1)*n] = inpackets
+                            packets[chan, :] = inpackets
                             
-
-                    yield self.__fix__(packets)
+                    fid = packets[0,0]['frame_id']
+                    yield fid, self.__fix__(packets)
                     iframe += 1
                     
 
@@ -493,6 +496,7 @@ class CardcapFile:
                         break
                 
                     log.debug('yielding packets shape=%s data shape=%s, npackets=%s len(packets)=%s', packets.shape, packets['data'].shape, npackets, len(packets))
+                    fid = packets[0]['frame_id']
 
                     yield self.__fix__(packets)
     

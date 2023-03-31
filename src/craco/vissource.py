@@ -13,9 +13,11 @@ import sys
 import logging
 import glob
 from craco.cardcap import NCHAN, NFPGA
+from craco.cardcapfile import NSAMP_PER_FRAME
 from craco import cardcap
-from craco.cardcapmerger import CcapMerger
+from craco.cardcapmerger import CcapMerger, frame_id_iter
 import astropy.io.fits.header as header
+from mpi4py import MPI
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +32,10 @@ class CardCapFileSource:
     '''
     Gets data from a single card - i.e. 6 FPGAs
     '''
-    def __init__(self, cardidx, values):
+    def __init__(self, pipe_info):
+        self.pipe_info = pipe_info
+        values = pipe_info.values
+        cardidx = pipe_info.cardid
         icard = cardidx % len(values.card)
         iblk = cardidx  // len(values.card)
         card = values.card[icard]
@@ -59,9 +64,16 @@ class CardCapFileSource:
         hdrs = [str(ccap.mainhdr) for ccap in self.merger.ccap]
         return hdrs
 
-    def packet_iter(self, start_fid=None):
-        return self.merger.packet_iter(start_fid=start_fid, beam=self.values.beam)
+    def start(self):
+        maxfid = np.uint64(self.merger.frame_id0)
+        fid0 = self.pipe_info.rx_comm.allreduce(maxfid, MPI.MAX)
+        self.fid0 = np.uint64(fid0)
+        return self.fid0
 
+    def packet_iter(self, start_fid=None):
+        assert self.fid0 is not None, 'Must call start()'
+        return self.merger.packet_iter(start_fid=self.fid0, beam=self.values.beam)
+    
 
 class CardCapNetworkSource:
     def __init__(self, pipe_info):
@@ -83,12 +95,12 @@ class CardCapNetworkSource:
         self.ctrl = cardcap.MpiCardcapController(pipe_info.rx_comm,
                                                   pipe_info.values,
                                                   block_cards)
-
         # make dummy merger so othe rpeople can get dtype and
         # other useful parameters
         self.merger = CcapMerger.from_headers(self.fpga_headers)
-        this_block_card = block_cards[pipe_info.rx_comm]
+        this_block_card = block_cards[pipe_info.cardid]
         self.block, self.card = this_block_card[0:2]
+        self.fid0 = None
 
 
     @property
@@ -101,24 +113,48 @@ class CardCapNetworkSource:
 
         return [str(fitshdr)]
 
+    def start(self):
+        # This will start a few seconds into the future. We'd better get our skates on
+        start_bat = self.ctrl.configure_and_start()
+        self.start_bat = start_bat # BAT for when CRACO Go event happens. Data starts on the next BF frame boundary (i.e. 2048 FIDs)
+        sync_bat = int(self.merger.gethdr('SYNCBAT'), 16)
+        fid_usec = 54 # 54 microseconds per FID = 27/32 * 64)
+        start_fid = (start_bat - sync_bat) / fid_usec
+        start_bfframe = start_fid / NSAMP_PER_FRAME
+
+        # In practice we'll probably get a few frames before this FID, but it's OK because the packet fid iterator will ignore them
+        bfframe_offset = 1
+        fid0 = np.uint64(int(np.ceil(start_bfframe + bfframe_offset))*NSAMP_PER_FRAME)
+
+        # due to a quirk in the firmware, we'll work around a bug where the first frame ID
+        # has an offset = SPI in polsum mode
+        if self.merger.npol == 1:
+            sampint = (self.merger.gethdr('SAMPINT')) # samples per integration
+            fid0 += np.uint64(sampint)
+
+        self.fid0 = fid0
+        
+        return self.fid0
+
     def packet_iter(self):
-        self.ctrl.configure_and_start()
-        iters = [cap.packet_iterator() for cap in self.ctrl.ccap.fpga_cap]
+        assert self.fid0 is not None, 'Havent called start'
+        iters = [frame_id_iter(cap.packet_iterator(), self.fid0) for cap in self.ctrl.ccap.fpga_cap]
         while True:
             try:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
-                yield (packets, fids)
+                yield (fpga_data, fids)
             except StopIteration:
                 break
+
+        self.ctrl.stop()
                 
 
 def open_source(pipe_info):
     values = pipe_info.values
-    cardidx = pipe_info.cardid
     if values.cardcap_dir is not None:
-        src = CardCapFileSource(cardidx, values)
+        src = CardCapFileSource(pipe_info)
     else:
         src = CardCapNetworkSource(pipe_info)
 

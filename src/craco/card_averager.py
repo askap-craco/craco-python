@@ -9,7 +9,12 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-os.environ['NUMBA_NUM_THREADS'] = '4'
+os.environ['NUMBA_NUM_THREADS'] = '3'
+os.environ['NUMBA_ENABLE_AVX'] = '1'
+os.environ['NUMBA_CPU_NAME'] = 'generic'
+os.environ['NUMBA_CPU_FEATURES'] = '+sse,+sse2,+avx,+avx2,+avx512f,+avx512dq'
+
+
 
 from craco.cardcap import NCHAN, NFPGA
 from numba import jit,njit,prange
@@ -24,7 +29,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 real_dtype = numba.float32
 #real_dtype = numba.int32
 
-@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
+@njit(debug=True,cache=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
                                                        'v1':real_dtype,
                                                        'vsqr':real_dtype,
                                                        'va':real_dtype,
@@ -75,6 +80,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                     v = bd[samp2, ibl, pol, :]
                     v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
                     v_imag= np.float32(v[1])
+                    '''
                     # For ICS: Don't subtract before applying square  and square root.
                     vsqr = v_real*v_real + v_imag*v_imag
                     va = np.sqrt(vsqr)
@@ -103,7 +109,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                             ics[t,ichan] += va_scaled
                         else:
                             cas[t,ichan] += va_scaled
-
+                    '''
                     vis[ibl, ochan, otime] += complex(v_real, v_imag)
                     
                 a2 += 1
@@ -123,14 +129,18 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-@njit                    
+@njit(parallel=True,cache=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6
     npkt = len(beam_data[0])
     nbeam, nc, nbl, npol, _ = rescale_scales.shape
     nc_per_fpga = 4
-    npkt_per_accum = npkt // (nbeam * nc_per_fpga)
+    #npkt_per_accum = npkt // (nbeam * nc_per_fpga)
+    dshape = beam_data[0].shape
+    assert len(dshape) == 2 # expected (nmsgs, npkt_per_accum)
+    nmsgs = dshape[0]
+    npkt_per_accum = dshape[1]
     nt = output[0]['cas'].shape[0] # assume this is the same as ICS
     for beam in prange(nbeam):
         for fpga in range(nfpga):
@@ -155,15 +165,10 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 else:
                     didx = chan
 
-                #assert didx < 4*36
+
                 ichan = chan*nfpga + fpga
-                #ichan = get_channel_of( chan, nc_per_fpga, fpga, nfpga)
-                startidx = didx*npkt_per_accum
-                endidx = startidx + npkt_per_accum
-                #print(beam, fpga, chan, didx, len(beam_data), data.shape, len(data),  npkt_per_accum, startidx,endidx)
-                #assert endidx <= len(data)
-                
-                bd = data[startidx:endidx]
+
+                bd = data[didx,:]
                 do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask,vis_fscrunch, vis_tscrunch)
                 
             count[fpga] += nt # only gets incremented if isvalid == True
@@ -205,6 +210,9 @@ class Averager:
         self.count = np.zeros(NFPGA, dtype=np.int32)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
+
+        if exclude_ants is None:
+            exclude_ants = []
 
         self.exclude_ants = set(map(int, exclude_ants))
         self.antenna_mask = np.array([False if (iant+1) in exclude_ants else True for iant in range(nant)])
@@ -295,6 +303,7 @@ class Averager:
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
         valid = np.array([pkt[1] is not None for pkt in packets], dtype=bool)
+        self.last_nvalid = valid.sum()
         data = List()
         [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
         self.reset()
@@ -304,7 +313,9 @@ class Averager:
     def accumulate_all(self, beam_data, valid):
         '''
         Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
+        :param: beam_data is numba List with the expected data
         '''
+        
         accumulate_all(self.output,
                        self.rescale_scales,
                        self.rescale_stats,
