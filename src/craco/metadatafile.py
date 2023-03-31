@@ -35,6 +35,16 @@ def get_uvw(ants):
         
     return uvw
 
+def get_azel(ants):
+    nants = len(ants.keys())
+    antnames = sorted(ants.keys())
+    azel = np.zeros((nants, 2)) # nants, 2 az,el
+    for iant,antname in enumerate(antnames):
+        u = np.array(ants[antname]['actual_azel'])[0:2]
+        azel[iant,:] = u
+        
+    return azel
+
 def ts2time(ts):
     return Time(ts/1e6/3600/24, format='mjd', scale='tai')
 
@@ -62,6 +72,8 @@ class MetadataFile:
         # microseconds since MJD in TAI frame, at the start of the correlator integration cycle.
         self.time_floats = np.array( [d['timestamp']/1e6/3600/24 for d in self.data])
         self.all_uvw = np.array([get_uvw(d['antennas']) for d in self.data])
+        self.all_azel = np.array([get_azel(d['antennas']) for d in self.data])
+
         self.antflags = np.array([[d['antennas'][a]['flagged'] for a in antnames] for d in self.data])
         self.times = Time(self.time_floats, format='mjd', scale='tai')
         self.uvw_interp = interp1d(self.times.value, self.all_uvw,  kind='linear', axis=0, bounds_error=True, copy=False)
