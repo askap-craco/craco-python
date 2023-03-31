@@ -745,6 +745,10 @@ def dump_rankfile(values):
 
     nranks = total_cards*len(values.fpga)
     ncards_per_host = (total_cards)//len(hosts)
+    if ncards_per_host == 0:
+        ncards_per_host = 1
+
+    
     #nranks_per_host = (nranks + len(hosts)) // len(hosts)
     nranks_per_host = ncards_per_host*6
     log.info(f'Spreading {nranks} ranks over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas ncards_per_host={ncards_per_host} nranks_per_host={nranks_per_host}')
@@ -763,7 +767,7 @@ def dump_rankfile(values):
                     break
                 
                 for fpga in values.fpga:
-                    hostidx = rank // nranks_per_host
+                    hostidx = (rank // nranks_per_host) % len(hosts)
                     hostrank = rank % nranks_per_host
                     host = hosts[hostidx]
                     slot = 1 # fixed because both cards are on NUMA=1

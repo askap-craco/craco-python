@@ -94,6 +94,25 @@ class DataDirs:
 
         return sb_dumps
 
+    def data_dirs(self, sb):
+        '''
+        Returns a list of all directorys in the given SB - removes topdir
+        '''
+        topdir = os.path.join(self.cracodata, sb)
+        if not os.path.isdir(topdir):
+            raise ValueError(f'SB {sb} not found in {self.cracodata}')
+
+
+        globpath = os.path.join(topdir, '*/')
+        sb_dumps = glob.glob(globpath, recursive=True)
+        log.debug('Globbing path %s had %d results', globpath, len(sb_dumps))
+
+        # strip leding bits including /
+        sb_dumps = [d[len(topdir)+1:] for d in sb_dumps]
+
+        return sb_dumps
+
+
     @property
     def sb_size_table(self, sbs=None):
         columns = ['SB']

@@ -9,8 +9,11 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-os.environ['NUMBA_NUM_THREADS'] = '1'
+os.environ['NUMBA_NUM_THREADS'] = '3'
 os.environ['NUMBA_ENABLE_AVX'] = '1'
+os.environ['NUMBA_CPU_NAME'] = 'generic'
+os.environ['NUMBA_CPU_FEATURES'] = '+sse,+sse2,+avx,+avx2,+avx512f,+avx512dq'
+
 
 
 from craco.cardcap import NCHAN, NFPGA
@@ -26,7 +29,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 real_dtype = numba.float32
 #real_dtype = numba.int32
 
-@njit(debug=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
+@njit(debug=True,cache=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
                                                        'v1':real_dtype,
                                                        'vsqr':real_dtype,
                                                        'va':real_dtype,
@@ -126,7 +129,7 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-@njit(parallel=True)
+@njit(parallel=True,cache=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6

@@ -56,22 +56,22 @@ def _main():
     target_file = os.path.join(scandir, 'ccap.fits')
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
     cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpicardcap.sh'
-    cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
+    #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
-    pol='--pol-sum'
-    #pol = '--dual-pol'
+    #pol='--pol-sum'
+    pol = '--dual-pol'
 
     #tscrunch='--tscrunch 64'
     tscrunch = '--tscrunch 1'
 
     spi='--samples-per-integration 32'
 
-    #beam='--beam 0'
-    beam = ''
+    beam='--beam 0'
+    #beam = ''
 
     card  = '-a 1-12'
-    block = '-b 2-5'
+    block = '-b 2-7'
     fpga = ''
     fpga_mask = ''
     
@@ -79,15 +79,17 @@ def _main():
     #fpga_mask = '--fpga-mask 42'
     #fpga = '-f 1-6'
     #max_ncards = '--max-ncards 70'
-    max_ncards = '--max-ncards 10'
+    max_ncards = '--max-ncards 70'
 
-    num_msgs = '-N 10000'
+    num_msgs = '-N 100'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
 
     # for mpicardcap
-    # cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
-    cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --outdir {scandir}'
+    cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
+
+    # for mpipipeline
+    #cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --outdir {scandir}'
 
 
     log.info(f'Running command {cmd}')

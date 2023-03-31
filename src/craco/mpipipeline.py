@@ -727,6 +727,7 @@ def dump_rankfile(values, fpga_per_rx=3):
                     ncores = 10
                     icore = (hostrank % 5)*2
                     core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
+                    core='0-9'
                     slot = 1 # where the network cards are
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)
