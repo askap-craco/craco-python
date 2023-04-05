@@ -3,7 +3,7 @@ import numpy as np
 from craft.craco_kernels import Prepare, Gridder, Imager ,CracoPipeline, FdmtGridder
 from craft import craco_plan
 from craft import uvfits
-from craco import preprocess, postprocess
+from craco import preprocess, postprocess, calibration
 from craft.craco import bl2array
 import matplotlib.pyplot as plt
 from Visibility_injector import inject_in_fake_data as VI
@@ -83,7 +83,7 @@ def main():
     brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm)
 
     if args.calfile:
-        calibrator = preprocess.Calibrate(block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+        calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
     
     rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
     if args.ofits:
@@ -128,8 +128,9 @@ def main():
 
             if args.dedm > 0:
                 block = brute_force_dedipserser.dedisperse(iblock, block)
-                plot_block(block, title="Plotting the dedispersed block")
+                #plot_block(block, title="Plotting the dedispersed block")
 
+            block = bl2array(block)
             gridded_block = direct_gridder(block)
             for t in range(c.plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
