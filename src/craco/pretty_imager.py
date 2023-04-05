@@ -65,7 +65,7 @@ def plot_block(block, title = None):
         f.suptitle(title)
     plt.show()
 
-def temp_main():
+def main():
     #del args
     #values = craco_plan.get_parser().parse_args()#["-u {0}".format(args.uvfits)])
     values = args
@@ -75,6 +75,7 @@ def temp_main():
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
+    block_type = dict
     c = CracoPipeline(values)
     #gridder_obj = FdmtGridder(uvsource, py_plan, values)
     direct_gridder = Gridder(uvsource, py_plan, values)
@@ -82,9 +83,9 @@ def temp_main():
     brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm)
 
     if args.calfile:
-        calibrator = preprocess.Calibrate(block_dtype=dict, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+        calibrator = preprocess.Calibrate(block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
     
-    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=dict, baseline_order=py_plan.baseline_order)
+    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
     if args.ofits:
         useful_info = {
             'DM_samps': brute_force_dedipserser.dm,
@@ -106,6 +107,12 @@ def temp_main():
     try:
         for iblock, block in enumerate(uvdata_source):
             print("Working on block", iblock)
+
+            if type(block) == dict and block_type != dict:
+                block = bl2array(block)
+
+            assert type(block) == block_type, f"On no... I need blocks to be of type {block_type}, got {type(block)}"
+
             
             #--plot_block(block, title="The raw input block")
             if args.calfile:
@@ -114,9 +121,7 @@ def temp_main():
             #block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
             #plot_block(block, title="The cleaned block")
 
-            #block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
-            #for ii, item in block.items():
-            #    print(f"The shape of {ii}th baseline is {item.shape}")
+            block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
             block = preprocess.average_pols(block, keepdims=False)
 
             #--plot_block(block, title="Fully pre-processed block")
@@ -124,7 +129,7 @@ def temp_main():
             if args.dedm > 0:
                 block = brute_force_dedipserser.dedisperse(iblock, block)
                 plot_block(block, title="Plotting the dedispersed block")
-            block = bl2array(block)
+
             gridded_block = direct_gridder(block)
             for t in range(c.plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
@@ -176,34 +181,6 @@ def temp_main():
             img_handler.close()
 
 
-
-def main():
-    values = craco_plan.get_parser().parse_args(["--uv{0}".format(args.uvfits)])
-    uvsource = uvfits.open(values.uv)
-    py_plan = craco_plan(uvsource, values)
-    
-    calibrator = preprocess.Calibrate(block_dtype=np.ma.core.MaskedArray, miriad_gains_file="Path to file", baseline_order=py_plan.baseline_order)
-    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=np.ma.core.MaskedArray, baseline_order=py_plan.baseline_order)
-    prepare = Prepare(uvsource, py_plan, values)
-    gridder = Gridder(uvsource, py_plan, values)
-    imager = Imager(uvsource, py_plan, values)
-
-    images = np.empty((py_plan.nt//2, py_plan.npix, py_plan.npix), dtype=np.float64)
-    for iblock, block in enumerate(uvsource.time_blocks(py_plan.nt)):
-        preprocessed_block = preprocess(block)
-        prepared_block = prepare(preprocessed_block)
-        gridded_block = gridder(prepared_block)
-        img = imager(gridded_block)
-        images[::2] = img.real
-        images[1::2] = img.imag
-
-        variability_image = images.std(axis=0)
-        mean_integrated_image = images.mean(axis=0)
-
-        np.save(f"images_block{iblock}", images)
-        np.save(f"variability_image{iblock}", variability_image)
-        np.save(f"mean_integrated_image{iblock}", mean_integrated_image)
-
 if __name__ == '__main__':
     parser = craco_plan.get_parser()
     parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file")
@@ -213,7 +190,7 @@ if __name__ == '__main__':
     parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
     parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
     args = parser.parse_args()
-    temp_main()
+    main()
 
     
 
