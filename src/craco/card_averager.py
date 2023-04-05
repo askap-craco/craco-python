@@ -80,7 +80,6 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                     v = bd[samp2, ibl, pol, :]
                     v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
                     v_imag= np.float32(v[1])
-                    '''
                     # For ICS: Don't subtract before applying square  and square root.
                     vsqr = v_real*v_real + v_imag*v_imag
                     va = np.sqrt(vsqr)
@@ -109,7 +108,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                             ics[t,ichan] += va_scaled
                         else:
                             cas[t,ichan] += va_scaled
-                    '''
+
                     vis[ibl, ochan, otime] += complex(v_real, v_imag)
                     
                 a2 += 1

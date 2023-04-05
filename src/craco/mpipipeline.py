@@ -409,8 +409,8 @@ def proc_rx(pipe_info):
     assert numprocs == nrx + nbeam
 
     dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
-    rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/')
-    rsout = None
+    rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/') if pipe_info.values.cardcap_dir is not None else None
+
     averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.exclude_ants, rescale_output_path=rsout)
     transposer = TransposeSender(info)
 
@@ -619,8 +619,10 @@ class UvFitsFileSink:
                         dblk[:] = 0 # set output to zeros too, just so we can't cheat
                     else:
                         weights[:] = 1
-                        
-                    self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, sourceidx)
+
+                    # fits convention has source index with starting value of 1
+                    fits_sourceidx = sourceidx + 1
+                    self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
                     blidx += 1
         
         self.uvout.fout.flush()

@@ -16,21 +16,23 @@ from craft.craftcor import MiriadGainSolutions
 from craco import plotbp
 import warnings
 from scipy.interpolate import interp1d
-
+import casatools
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-def pltcomplex(d):
+def pltcomplex(d, x=None):
     fig,ax = pylab.subplots(2,2)
     ax = ax.flatten()
+    if x is None:
+        x = np.arange(d.shape[1])
     ax[0].imshow(np.abs(d), aspect='auto')
     ax[1].imshow(np.angle(d), aspect='auto')
     ax[1].set_title('phase')
     ax[0].set_title('Abs')
-    ax[2].plot(np.abs(d).T)
-    ax[3].plot(np.degrees(np.angle(d)).T,'.')
+    ax[2].plot(x, np.abs(d).T)
+    ax[3].plot(x, np.degrees(np.angle(d)).T,'.')
     return fig,ax
     
 
@@ -109,8 +111,9 @@ def load_gains(fname):
 
     Returns (np complex array with shape (nant, nchan, npol), np.array(nchan) of frequncies in Hz)
     note: those sizes may be different than what you asked for
+    But nant = 36 always, so we know that the non-existent natennas should be flagged
     '''
-    if os.path.isfile(fname):
+    if os.path.isfile(fname) and fname.endswith('.bin'):
         bp = plotbp.Bandpass.load(fname)
         g = bp.bandpass[0]
         npol = g.shape[-1]
@@ -119,9 +122,29 @@ def load_gains(fname):
             g = g[...,[0,3]]
 
         log.info("loaded CALIBRATION bandpass solutions from %s", fname)
+
+        # Values are nan if the antenna is missing. We'll replace with zeros here and
+        # the maske array part at the bottom of tthis function will mask them out
+        g[np.isnan(g)] = 0
+
+        # get solutions from casa
+        msfile = fname.replace('.bin','.ms')
         freqs = None
 
-    else:
+        # load channel frequencies from associated casa ms spectral
+        if not os.path.isdir(msfile):
+            raise ValueError(f'MS file missing to load frequencies {msfile}')
+
+        log.info('Loading frequencies from %s', msfile)
+        tb = casatools.table()
+        tb.open(os.path.join(msfile, 'SPECTRAL_WINDOW'))
+        assert tb.nrows() == 1, f'Expected only 1 spectral window. got {tb.nrows()}'
+        freqs = tb.getcol('CHAN_FREQ')[:,0] # list of all frequencies in Hz
+        chan_width = tb.getcol('CHAN_WIDTH')
+        assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
+        tb.close()
+
+    elif os.path.isdir(fname): #probably miriad 
         if fname.endswith('/'): # remove traiilng slash if prsent
             fname = fname[:-1]
             
@@ -141,12 +164,19 @@ def load_gains(fname):
 
         log.info("loaded MIRIAD bandpass solutions from %s", fname)
         freqs = miriadsol.freqs*1e9
-
+    else:
+        raise ValueError(f'Unknown calibration file type {fname}')
+            
 
     # Mask everything that is zero
     
     #g = np.ma.masked_where(g, np.abs(g) != 0)
     g = np.ma.masked_equal(g,0) # This seems to work, even though I can't get the abs to work
+    g.set_fill_value(0+0j)
+    
+    
+    assert g.shape[0] == 36, f'First dimension of gains shoudl be nant=36. Shape was (nant, chan, npol)={g.shape}'
+    
     return (g, freqs)
 
 
@@ -263,8 +293,14 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     for f in values.files:
-        g = load_gains(f)
-        print(f'File {f} has bandpass shape {g.shape}')
+        g,freqs = load_gains(f)
+        if freqs is None:
+            f1 = 0
+            foff = 0
+        else:
+            f1 = freqs[0]
+            foff = freqs[1] - freqs[0]
+        print(f'File {f} has bandpass shape {g.shape} f1={f1/1e6:0.3f} MHz, foff={foff/1e3:0.3f}kHz')
         pltcomplex(g[...,0])
 
     pylab.show()
