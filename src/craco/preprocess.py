@@ -99,11 +99,11 @@ def average_pols(block, keepdims = True):
 
 
 
-
 class Calibrate:
-    def __init__(self, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
+    def __init__(self, plan, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
         self.gains_file = miriad_gains_file
         self.baseline_order = baseline_order
+        self.plan = plan
         self.reload_gains()
 
         if block_dtype not in [np.ndarray, np.ma.core.MaskedArray, dict]:
@@ -114,8 +114,10 @@ class Calibrate:
         
 
     def reload_gains(self):
-        self.ant_gains, _ = calibration.load_gains(self.gains_file)
-        self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
+        #self.ant_gains, _ = calibration.load_gains(self.gains_file)
+        #self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
+        calsoln_obj = calibration.CalibrationSolution(plan = self.plan, calfile=self.gains_file)
+        self.gains_array = calsoln_obj.solarray.copy()
         self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
         if type(self.gains_array) == np.ma.core.MaskedArray:
             self.sol_isMasked = True
