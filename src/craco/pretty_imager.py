@@ -11,7 +11,6 @@ import IPython
 from PIL import Image
 
 
-
 def make_PIL_images_from_array(arr, cmap=None):
 
     def normalise_image(image):
@@ -43,12 +42,6 @@ def make_PIL_images_from_array(arr, cmap=None):
     
 
 
-    
-
-
-
-
-
 def plot_block(block, title = None):
     if type(block) == dict:
         myblock = bl2array(block)
@@ -77,18 +70,20 @@ def temp_main():
     #values = craco_plan.get_parser().parse_args()#["-u {0}".format(args.uvfits)])
     values = args
     #values.uv = myfits
-    values.nt = 16
+    values.nt = args.nt
     values.ndm = 2
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
     c = CracoPipeline(values)
-    gridder_obj = FdmtGridder(uvsource, py_plan, values)
+    #gridder_obj = FdmtGridder(uvsource, py_plan, values)
+    direct_gridder = Gridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
+    brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm)
 
-    brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=10)
-
-    calibrator = preprocess.Calibrate(block_dtype=dict, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+    if args.calfile:
+        calibrator = preprocess.Calibrate(block_dtype=dict, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+    
     rfi_cleaner = preprocess.RFI_cleaner(block_dtype=dict, baseline_order=py_plan.baseline_order)
     if args.ofits:
         useful_info = {
@@ -110,10 +105,11 @@ def temp_main():
     images = []
     try:
         for iblock, block in enumerate(uvdata_source):
-            print("-------------->  Working on block", iblock, "block_type=", type(block))
-            #block = bl2array(block)
+            print("Working on block", iblock)
+            
             #--plot_block(block, title="The raw input block")
-            block = calibrator.apply_calibration(block)
+            if args.calfile:
+                block = calibrator.apply_calibration(block)
             #--plot_block(block, title="The calibrated block")
             #block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
             #plot_block(block, title="The cleaned block")
@@ -125,15 +121,24 @@ def temp_main():
 
             #--plot_block(block, title="Fully pre-processed block")
 
-            block = brute_force_dedipserser.dedisperse(iblock, block)
-            #--plot_block(block, title="Plotting the dedispersed block")
-
+            if args.dedm > 0:
+                block = brute_force_dedipserser.dedisperse(iblock, block)
+                plot_block(block, title="Plotting the dedispersed block")
+            block = bl2array(block)
+            gridded_block = direct_gridder(block)
+            for t in range(c.plan.nt // 2):
+                imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
+                if args.ofits is not None:
+                    img_handler.put_new_frames([imgout.real])
+                    img_handler.put_new_frames([imgout.imag])
+            '''
             print(f"Running c.prepare(block) on iblock: {iblock}")
             #IPython.embed()
             block = c.prepare(block)
             print("Running c.fdmt(block)")
             fdmt_out = c.fdmt(block)
             print("Now running the gridder and imager")
+            
             for idm in range(1):
                 for t in range(c.plan.nt //2):
                     print(f"Starting the gridder for t = {t}")
@@ -141,15 +146,15 @@ def temp_main():
                     print(f"Starting the imager for t = {t}")
                     imgout = imager_obj(np.fft.fftshift(gridout)).astype(np.complex64)
                     print("Done")
-                    '''
-                    plt.figure()
-                    plt.imshow(imgout.real, aspect='auto', interpolation="None")
-                    plt.title(f"isamp {iblock * py_plan.nt + 2*t}")
-                    plt.figure()
-                    plt.imshow(imgout.imag, aspect='auto', interpolation="None")
-                    plt.title(f"isamp {iblock * py_plan.nt + 2*t + 1}")
-                    plt.show()
-                    '''
+                    
+                    #plt.figure()
+                    #plt.imshow(imgout.real, aspect='auto', interpolation="None")
+                    #plt.title(f"isamp {iblock * py_plan.nt + 2*t}")
+                    #plt.figure()
+                    #plt.imshow(imgout.imag, aspect='auto', interpolation="None")
+                    #plt.title(f"isamp {iblock * py_plan.nt + 2*t + 1}")
+                    #plt.show()
+                    
                     if args.ofits is not None:
                         img_handler.put_new_frames([imgout.real])
                         img_handler.put_new_frames([imgout.imag])
@@ -157,14 +162,11 @@ def temp_main():
                     if args.ogif is not None:
                         images.append(make_PIL_images_from_array(imgout.real))
                         images.append(make_PIL_images_from_array(imgout.imag))
-                    '''
-                    if args.ogif is not None:
-                        with imageio.get_writer(args.ogif, mode='I', duration=0.1) as writer:
-                            image = imageio.im
-                    '''
+
             if args.ogif is not None:
                 print(f"Saving GIF as {args.ogif} now")
                 images[0].save(args.ogif, save_all = True, append_images = images[1:], duration=2, loop = 0)
+            '''
         
     except KeyboardInterrupt as KE:
         print("Caught keyboard interrupt -- closing the files")
@@ -206,6 +208,8 @@ if __name__ == '__main__':
     parser = craco_plan.get_parser()
     parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file")
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file")
+    parser.add_argument("-nt", type=int, help="nt for the block size (def = 64)", default=64)
+    parser.add_argument("-dedm", type=int, help="De-DM in sample units (def = 0)", default=0)
     parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
     parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
     args = parser.parse_args()
