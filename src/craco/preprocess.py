@@ -100,6 +100,7 @@ def average_pols(block, keepdims = True):
 
 
 class Calibrate:
+    #TODO remove the dependence of Calibrate on plan -- needs to propage through to the calibration.py's CalSolution class
     def __init__(self, plan, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
         self.gains_file = miriad_gains_file
         self.baseline_order = baseline_order
@@ -116,7 +117,8 @@ class Calibrate:
     def reload_gains(self):
         #self.ant_gains, _ = calibration.load_gains(self.gains_file)
         #self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
-        calsoln_obj = calibration.CalibrationSolution(plan = self.plan, calfile=self.gains_file)
+        self.plan.calibration = self.gains_file
+        calsoln_obj = calibration.CalibrationSolution(plan = self.plan)
         self.gains_array = calsoln_obj.solarray.copy()
         self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
         if type(self.gains_array) == np.ma.core.MaskedArray:
@@ -371,6 +373,17 @@ def get_dm_delays(dm_samps, freqs):
     delay_samps = np.round(delay).astype(int)
     return delay_samps
 
+def get_dm_pccc(freqs, dm_samps, tsamp):
+    '''
+    freqs in Hz
+    tsamp in s
+    '''
+    delay_s = dm_samps * tsamp
+    fmax = np.max(freqs) * 1e-9
+    fmin = np.min(freqs) * 1e-9
+    dm_pccc = delay_s / 4.15 / 1e-3 / (1 / fmin**2 - 1 / fmax**2)
+    return dm_pccc
+
 def get_dm_samps(freqs, dm_pccc, tsamp):
     '''
     freqs in Hz
@@ -401,6 +414,7 @@ class Dedisp:
         self.delays_samps = get_dm_delays(dm_samps, self.freqs)
         #print(f"The computed delays_samps are: {self.delays_samps}")
         self.dm = dm_samps
+        self.dm_pccc = get_dm_pccc(freqs, dm_samps, tsamp)
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):

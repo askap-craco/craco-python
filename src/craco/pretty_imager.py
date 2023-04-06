@@ -80,7 +80,11 @@ def main():
     #gridder_obj = FdmtGridder(uvsource, py_plan, values)
     direct_gridder = Gridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
-    brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm)
+    if args.dedm_pccc:
+        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_pccc=args.dedm_pccc)
+    elif args.dedm_samps:
+        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm_samps)
+
 
     if args.calfile:
         calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
@@ -89,6 +93,7 @@ def main():
     if args.ofits:
         useful_info = {
             'DM_samps': brute_force_dedipserser.dm,
+            'DM_pccc': brute_force_dedipserser.dm_pccc,
             'TARGET': 'FAKE',
             'BSCALE': 1.0,
             'BZERO': 0.0,
@@ -187,7 +192,9 @@ if __name__ == '__main__':
     parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file")
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file")
     parser.add_argument("-nt", type=int, help="nt for the block size (def = 64)", default=64)
-    parser.add_argument("-dedm", type=int, help="De-DM in sample units (def = 0)", default=0)
+    g = parser.add_mutually_exclusive_group(required = True)
+    g.add_argument("-dedm_pccc", type=float, help="De-DM in pc/cc (def = 0)")
+    g.add_argument("-dedm_samps", type=int, help="De-DM in sample units (def = 0)", default=0)
     parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
     parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
     args = parser.parse_args()
