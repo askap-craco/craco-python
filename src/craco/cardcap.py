@@ -408,6 +408,7 @@ class FpgaCapturer:
                 d = dout
 
             if beam is not None:
+                assert 0 <= beam < 36, f'Invalid beam {beam}'
                 mask = d['beam_number'] == beam 
                 d = d[mask]
 

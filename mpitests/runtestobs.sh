@@ -34,11 +34,25 @@ for spi in 16 32 64 ; do
 			if [[ $pol == "dp" && $spi == 16 ]] ; then # this mode doesnt work
 			    continue 
 			fi
+
+			if [[ $beam == -1 ]] ; then
+			    beamcmd=""
+			else
+			    beamcmd="--beam $beam"
+			fi
 			      
-			dout="$CARDCAP_DIR/cap_spi${spi}_bm${beam}_a${cards}_k${fpga}_${pol}_ts$ts"
-			cmd="$ccap --tscrunch $tscrunch --samples-per-integration $spi $polcmd --beam $beam -a $card -k $fpga --num-msgs $nmsg -f $dout/$target.fits"
+			dout="$CARDCAP_DIR/cap_spi${spi}_bm${beam}_a${card}_k${fpga}_${pol}_ts$ts"
+			cmd="$ccap --tscrunch $tscrunch --samples-per-integration $spi $polcmd $beamcmd -a $card -k $fpga --num-msgs $nmsg -f $dout/$target.fits"
+			if [[ -d $dout ]] ; then
+			    echo "Directory $dout already exists. Skipping"
+			    continue
+			fi
+			mkdir -p $dout
 			echo $cmd
-			#$cmd
+			
+			echo "`date` running $cmd" > $dout/run.log
+			#timeout -k 1m 1m $cmd 2>&1 | tee -a $dout/run.log
+			echo "`date` completed $cmd with return code $? pipe status ${PIPESTATUS} p0=${PIPESTATUS[0]} p1=${PIPESTATUS[1]}" >> $dout/run.log
 		    done
 		done
 	    done

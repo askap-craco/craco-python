@@ -167,7 +167,11 @@ class Craco(EpicsSubsystem):
         '''
         Retuns the value of start bat as an int
         '''
-        bat = int(self.read('evtf:craco:startBat', cache=False), 16)
+        batstr = self.read('evtf:craco:startBat', cache=False)
+        if batstr is None or len(batstr) == 0:
+            bat = 0
+        else:
+            bat = int(batstr, 16)
         return bat
 
     def get_start_bat(self):
