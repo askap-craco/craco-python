@@ -15,7 +15,8 @@ def make_PIL_images_from_array(arr, cmap=None):
 
     def normalise_image(image):
         image -= np.min(image)
-        image = image / np.max(image)
+        image_max = max([np.max(image), 1])     #To avoid dividing by zeros when image is all zeros
+        image = image / image_max
         return image
 
     if cmap is None:
@@ -89,7 +90,9 @@ def main():
     if args.calfile:
         calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
     
-    rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
+    if args.rfi:
+        rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
+
     if args.ofits:
         useful_info = {
             'DM_samps': brute_force_dedipserser.dm,
@@ -108,7 +111,8 @@ def main():
     else:
         uvdata_source = c.uvsource.time_blocks(py_plan.nt)
 
-    images = []
+    if args.ogif:
+        images = []
     try:
         for iblock, block in enumerate(uvdata_source):
             print("Working on block", iblock)
@@ -126,22 +130,31 @@ def main():
             #block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
             #plot_block(block, title="The cleaned block")
 
-            block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
+            if args.norm:
+                block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
+
             block = preprocess.average_pols(block, keepdims=False)
 
             #--plot_block(block, title="Fully pre-processed block")
 
-            if args.dedm > 0:
+            if brute_force_dedipserser.dm > 0:
                 block = brute_force_dedipserser.dedisperse(iblock, block)
                 #plot_block(block, title="Plotting the dedispersed block")
 
-            block = bl2array(block)
+            #block = bl2array(block)
             gridded_block = direct_gridder(block)
             for t in range(c.plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.ofits is not None:
                     img_handler.put_new_frames([imgout.real])
                     img_handler.put_new_frames([imgout.imag])
+                if args.ogif is not None:
+                    images.append(make_PIL_images_from_array(imgout.real))
+                    images.append(make_PIL_images_from_array(imgout.imag))
+            
+            if args.ogif is not None:
+                print(f"Saving GIF as {args.ogif} now")
+                images[0].save(args.ogif, save_all = True, append_images = images[1:], duration=2, loop = 0)
             '''
             print(f"Running c.prepare(block) on iblock: {iblock}")
             #IPython.embed()
@@ -192,7 +205,9 @@ if __name__ == '__main__':
     parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file")
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file")
     parser.add_argument("-nt", type=int, help="nt for the block size (def = 64)", default=64)
-    g = parser.add_mutually_exclusive_group(required = True)
+    parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1) [def = False]",default = False)
+    parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data [default = False]", default = False)
+    g = parser.add_mutually_exclusive_group()
     g.add_argument("-dedm_pccc", type=float, help="De-DM in pc/cc (def = 0)")
     g.add_argument("-dedm_samps", type=int, help="De-DM in sample units (def = 0)", default=0)
     parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
