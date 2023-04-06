@@ -110,14 +110,14 @@ class Calibrate:
         if block_dtype not in [np.ndarray, np.ma.core.MaskedArray, dict]:
             raise ValueError("Unknown dtype of block provided")
 
-        self.block_dtype = block_dtype
+        #self.block_dtype = block_dtype
         self.keep_masks = keep_masks
         
 
     def reload_gains(self):
         #self.ant_gains, _ = calibration.load_gains(self.gains_file)
         #self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
-        self.plan.calibration = self.gains_file
+        self.plan.values.calibration = self.gains_file
         calsoln_obj = calibration.CalibrationSolution(plan = self.plan)
         self.gains_array = calsoln_obj.solarray.copy()
         self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
@@ -128,7 +128,7 @@ class Calibrate:
 
     def apply_calibration(self, block):
         block_isMasked, nPol, block_type = get_isMasked_nPol(block)
-        assert block_type == self.block_dtype, f"You Liar!, {block_type}, {self.block_dtype}"
+        #assert block_type == self.block_dtype, f"You Liar!, {block_type}, {self.block_dtype}"
 
         if block_type == dict:
             #print(f"Baseline order is: {self.baseline_order}")
@@ -421,10 +421,10 @@ class Dedisp:
 
         if type(inblock) == dict:
             block = bl2array(inblock)
-        elif type(inblock) == np.ma.core.MaskedArray:
+        elif type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
             block = inblock
         else:
-            raise TypeError("Expected either np.ndarray or dict")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray or dict, but got {type(block)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -432,7 +432,6 @@ class Dedisp:
             history_shape = tuple(history_shape)
 
             self.dm_history = np.zeros(history_shape, dtype=block.dtype)
-            #print(f"~~~~~~~~~~~~~~~~~~~~~~~~>>>>>>>>>>>>>>{type(self.dm_history)}")
 
         attached_block = np.concatenate([self.dm_history, block], axis=-1)
         rolled_block = np.zeros_like(attached_block)
@@ -440,7 +439,7 @@ class Dedisp:
             rolled_block[:, ichan, ...] = np.roll(attached_block[:, ichan, ...], self.delays_samps[ichan])
 
         self.dm_history = attached_block[..., -self.dm:]
-        import IPython
+        #import IPython
         
         if type(inblock) == dict:
             for ibl, blid in enumerate(self.baseline_order):
@@ -452,5 +451,5 @@ class Dedisp:
             #IPython.embed()
             return inblock
 
-        return attached_block[..., self.dm:]
+        return rolled_block[..., self.dm:]
         
