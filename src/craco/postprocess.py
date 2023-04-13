@@ -10,7 +10,7 @@ dtype_to_bitpix = {np.dtype('>i2'):16,
                    np.dtype('>f8'):-64}
 
 
-def create_header_for_image_data(fname, wcs, im_shape, dtype, kwargs):
+def create_header_for_image_data(fname, wcs, im_shape, dtype, kwargs, image_data = None):
     #Make the main part of the header first that describes the image
     '''
     header = {}
@@ -22,12 +22,19 @@ def create_header_for_image_data(fname, wcs, im_shape, dtype, kwargs):
     header['NAXIS3'] = 1    #Leaving it as 1 to start with, but will be updated at the end
     header['BITPIX'] = dtype_to_bitpix.get(dtype)      
     '''
+    if image_data is None:
+        #fake_data = np.arange(im_shape[1] * im_shape[2], dtype=dtype)
+        image_data = np.zeros(im_shape, dtype=dtype)
+        '''
+        if len(im_shape) == 2:
+            fake_data = np.arange(im_shape, dtype=dtype)
+        elif len(im_shape) == 3:
+            fake_data = fake_data.reshape(1, im_shape[1], im_shape[2], dtype=dtype)
+        image_data = fake_data
+        '''
 
-    fake_data = np.arange(im_shape[0] * im_shape[1] * 1, dtype=dtype).reshape(1, im_shape[0], im_shape[1])
     header = wcs.to_header()
-    hdu = fits.PrimaryHDU(header = header, data = fake_data)
-
-
+    hdu = fits.PrimaryHDU(header = header, data = image_data)
     #Now add the other useful information to the header, which is not mandatory
     
     header = hdu.header
@@ -72,10 +79,11 @@ class ImageHandler:
         self.fname = outname
         assert dtype in dtype_to_bitpix.keys(), f"Provided dtype needs to be one of the following - {dtype_to_bitpix.keys()}"
         self.dtype = dtype
-        self.fout = open(self.fname, 'r+b')
-        self.fout.seek(self.header_len, 0)
-        #self.fout.write(bytes(self.header_str, 'utf-8'))
-        self.frames_written = 0
+        if len(self.im_shape) == 3:
+            self.fout = open(self.fname, 'r+b')
+            self.fout.seek(self.header_len, 0)
+            #self.fout.write(bytes(self.header_str, 'utf-8'))
+            self.frames_written = 0
 
     def put_new_frames(self, frames, fout = None):
         '''
@@ -83,8 +91,8 @@ class ImageHandler:
 
         frames: list of 2-D arrays (images)
         '''
-        assert [self.im_shape == frames[i].shape for i in range(len(frames))], f"Did not get the expected frame shape - {self.im_shape}"
-        assert [self.dtype == frames[i].dtype for i in range(len(frames))], f"Dtype don't match!"
+        assert [self.im_shape[1:] == frame.shape for frame in frames], f"Did not get the expected frame shape - {self.im_shape}"
+        assert [self.dtype == frame.dtype for frame in frames], f"Dtype don't match!"
 
 
         for ii, frame in enumerate(frames):
@@ -101,7 +109,8 @@ class ImageHandler:
 
     def fix_file_after_closing(self):
         fix_length(self.fname)
-        self.header['NAXIS3'] = self.frames_written
+        if len(self.im_shape) == 3:
+            self.header['NAXIS3'] = self.frames_written
         hdr_str = self.header.tostring()
         assert len(hdr_str)%2880 == 0, f"Astropy didn't make a header with the proper length while fixing the header -- len(hdr.tostring()) = len(hdr_str)"
 
