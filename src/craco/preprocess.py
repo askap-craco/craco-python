@@ -94,7 +94,7 @@ def average_pols(block, keepdims = True):
         assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
         block = block.mean(axis=2, keepdims=keepdims)
         if not keepdims:
-            block[ibl] = block[ibl].squeeze()
+            block = block.squeeze()
     return block
 
 
@@ -219,7 +219,7 @@ class RFI_cleaner:
                 continue
             
             if freq:
-                autocorr_freq_mask = self.get_freq_mask(baseline_data)
+                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=10)
                 autocorr_masks[str(a1) + 'f'] = autocorr_freq_mask 
             if time:
                 autocorr_time_mask = self.get_time_mask(baseline_data)
@@ -320,7 +320,7 @@ class RFI_cleaner:
                         crosscorr_masks[str(ibl) + 't'] = bl_time_mask
 
                     if mcf:
-                        bl_freq_mask = self.get_freq_mask(baseline_data)
+                        bl_freq_mask = self.get_freq_mask(baseline_data, threshold=5.0)
                         if self.isMasked:
                             baseline_data.data[bl_freq_mask, ...] = 0
                             baseline_data.mask[bl_freq_mask, ...] = True
@@ -335,7 +335,7 @@ class RFI_cleaner:
 
         if mcasf or mcast:
             #Finally find bad samples in the CAS
-            cas_masks['f'] = self.get_freq_mask(cas_sum)  
+            cas_masks['f'] = self.get_freq_mask(cas_sum, threshold=5)  
             if self.isMasked:
                 cas_sum.data[cas_masks['f']] = 0
                 cas_sum.mask[cas_masks['f']] = True
