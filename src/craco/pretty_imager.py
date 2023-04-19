@@ -70,6 +70,7 @@ def get_parser():
     parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file", default=None)
     parser.add_argument("-if", "--injection_params_file", type=str, help="Path to an injection params file", default=None)
     parser.add_argument("-nt", type=int, help="nt for the block size", default=64)
+    parser.add_argument("-tx", type=int, help="Average in time by a factor of tx", default=1)
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
     g = parser.add_mutually_exclusive_group()
@@ -80,6 +81,11 @@ def get_parser():
     parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
     parser.add_argument("-stats_image", action='store_true', help="Generate a mean and rms image out of the data too",default=False)
     args = parser.parse_args()
+
+    assert args.tx > 0, "Tx has to be > 0"
+    if args.tx != 1:
+        assert args.tx % 2 == 0, "I can only handle averaging by a multiple of 2 at the moment"
+
     return args
 
 
@@ -127,20 +133,21 @@ def main():
             'DM_samps': dm_samps,
             'DM_pccc': dm_pccc,
             'NCHAN': py_plan.nf,
-            'TSAMP': py_plan.tsamp_s.value,
+            'TSAMP': py_plan.tsamp_s.value * args.tx,
+            'Tx': args.tx,
             'FCH1_Hz': py_plan.freqs[0],
             'CH_BW_Hz': py_plan.foff,
             'NANT': py_plan.nant,
             'NBL': py_plan.nbl,
-            'OBS_START_MJD': py_plan.tstart.mjd,
+            'STARTMJD': py_plan.tstart.mjd,
             'TARGET': py_plan.target_name,
-            'RFI_cleaned':args.rfi,
-            'NORMALISED': args.norm,
-            'PREPROCESSING_BLOCK_TYPE': block_type,
-            'PREPROCESSING_NT': args.nt,
-            'CALFILE': args.calfile,
-            'INJECTION_PARAMS_FILE': args.injection_params_file,
-            'UVSOURCE_USED': py_plan.values.uv,
+            'RFI_cl':args.rfi,
+            'NORM': args.norm,
+            'BTYPE': block_type.__name__,
+            'NT': args.nt,
+            'CALFILE': str(args.calfile),
+            'INJFILE': str(args.injection_params_file),
+            'UV': str(py_plan.values.uv),
 
             'BSCALE': 1.0,
             'BZERO': 0.0,
@@ -148,6 +155,7 @@ def main():
             }
 
         img_handler = postprocess.ImageHandler(outname=args.ofits, wcs = py_plan.wcs, im_shape=(1, py_plan.npix, py_plan.npix), dtype=np.dtype('>f4'), useful_info = useful_info)
+        next_image = np.zeros((py_plan.npix, py_plan.npix))
 
     if args.injection_params_file:
         FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, outblock_type=dict)
@@ -212,8 +220,20 @@ def main():
                     rms_image = np.sqrt(Qi/N)
 
                 if args.ofits is not None:
-                    img_handler.put_new_frames([imgout.real])
-                    img_handler.put_new_frames([imgout.imag])
+                    if args.tx == 1:
+                        img_handler.put_new_frames([imgout.real])
+                        img_handler.put_new_frames([imgout.imag])
+                    else:
+                        img_t_index = iblock * py_plan.nt + 2*t
+                        
+                        if img_t_index > 0 and img_t_index % args.tx == 0:
+                            img_handler.put_new_frames([next_image / args.tx])
+                            next_image = np.zeros((py_plan.npix, py_plan.npix))
+                        
+                        next_image += imgout.real
+                        next_image += imgout.imag
+
+
                 if args.ogif is not None:
                     images.append(make_PIL_images_from_array(imgout.real))
                     images.append(make_PIL_images_from_array(imgout.imag))
