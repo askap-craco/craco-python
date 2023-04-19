@@ -156,6 +156,7 @@ def main():
 
         img_handler = postprocess.ImageHandler(outname=args.ofits, wcs = py_plan.wcs, im_shape=(1, py_plan.npix, py_plan.npix), dtype=np.dtype('>f4'), useful_info = useful_info)
         next_image = np.zeros((py_plan.npix, py_plan.npix))
+        img_t_index = 0
 
     if args.injection_params_file:
         FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, outblock_type=dict)
@@ -280,9 +281,12 @@ def main():
         
     except KeyboardInterrupt as KE:
         print("Caught keyboard interrupt -- closing the files")
+        if args.ofits and args.tx > 0 and img_t_index > 0 and (2*(img_t_index)) % args.tx > 0:
+            print("Appedning the partially averaged frame in the end")
+            img_handler.put_new_frames([next_image / (img_t_index % args.tx)])
         pass
     finally:
-        if args.ofits is not None:
+        if args.ofits:
             img_handler.close()
         if args.stats_image:
             
