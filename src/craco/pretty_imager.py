@@ -67,8 +67,8 @@ def plot_block(block, title = None):
 
 def get_parser():
     parser = craco_plan.get_parser()
-    parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file")
-    parser.add_argument("-if", "--injection_params_file", type=str, help="Path to an injection params file")
+    parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file", default=None)
+    parser.add_argument("-if", "--injection_params_file", type=str, help="Path to an injection params file", default=None)
     parser.add_argument("-nt", type=int, help="nt for the block size", default=64)
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
@@ -94,8 +94,11 @@ def main():
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
-    #block_type = np.ma.core.MaskedArray
-    block_type = np.ndarray
+    if args.injection_params_file:
+        block_type=np.ndarray
+    else:
+        block_type = np.ma.core.MaskedArray
+    #block_type = np.ndarray
     c = CracoPipeline(values)
     #gridder_obj = FdmtGridder(uvsource, py_plan, values)
     direct_gridder = Gridder(uvsource, py_plan, values)
@@ -123,7 +126,22 @@ def main():
         useful_info = {
             'DM_samps': dm_samps,
             'DM_pccc': dm_pccc,
-            'TARGET': 'FAKE',
+            'NCHAN': py_plan.nf,
+            'TSAMP': py_plan.tsamp_s.value,
+            'FCH1_Hz': py_plan.freqs[0],
+            'CH_BW_Hz': py_plan.foff,
+            'NANT': py_plan.nant,
+            'NBL': py_plan.nbl,
+            'OBS_START_MJD': py_plan.tstart.mjd,
+            'TARGET': py_plan.target_name,
+            'RFI_cleaned':args.rfi,
+            'NORMALISED': args.norm,
+            'PREPROCESSING_BLOCK_TYPE': block_type,
+            'PREPROCESSING_NT': args.nt,
+            'CALFILE': args.calfile,
+            'INJECTION_PARAMS_FILE': args.injection_params_file,
+            'UVSOURCE_USED': py_plan.values.uv,
+
             'BSCALE': 1.0,
             'BZERO': 0.0,
             'BUNIT': "UNCALIB"
