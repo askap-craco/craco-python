@@ -144,3 +144,9 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+#output txt files and lookup_tables saved by search_pipeline cli
+uv_data*.txt
+
+#vim swap files
+.*.swp
