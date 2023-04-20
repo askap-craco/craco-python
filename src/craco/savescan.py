@@ -35,10 +35,17 @@ def _main():
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
+    lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format=lformat,
+            datefmt='%Y-%m-%d %H:%M:%S')
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(
+            level=logging.INFO,
+            format=lformat,
+            datefmt='%Y-%m-%d %H:%M:%S')
 
     scanid = mycaget('ak:md2:scanId_O')
     sbid = mycaget('ak:md2:schedulingblockId_O')
@@ -62,13 +69,13 @@ def _main():
     #pol='--pol-sum'
     pol = '--dual-pol'
 
-    #tscrunch='--tscrunch 64'
-    tscrunch = '--tscrunch 1'
+    tscrunch='--tscrunch 32'
+    #tscrunch = '--tscrunch 1'
 
-    spi='--samples-per-integration 32'
+    spi='--samples-per-integration 64'
 
-    beam='--beam 0'
-    #beam = ''
+    #beam='--beam 0' # single beam
+    beam = '' # all beams
 
     card  = '-a 1-12'
     block = '-b 2-7'
@@ -79,9 +86,11 @@ def _main():
     #fpga_mask = '--fpga-mask 42'
     #fpga = '-f 1-6'
     #max_ncards = '--max-ncards 70'
-    max_ncards = '--max-ncards 70'
 
-    num_msgs = '-N 100'
+    # 30 cards is about the limit for cardcap
+    max_ncards = '--max-ncards 30'
+
+    num_msgs = '-N 10000000'
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
 
@@ -117,9 +126,11 @@ def _main():
     try:
         while not finish:
             time.sleep(1)
-            log.debug('Process %s returncode is %s', proc.pid, proc.returncode)
+            exit_code = proc.poll()
+            currsig  = signal.getsignal(signal.SIGINT)
+            log.debug('Process %s returncode is %s. Current signal is %s', proc.pid, proc.returncode, currsig)
             if proc.poll() is not None:
-                log.info('Process self-terminated with return code %s', proc.returncode)
+                log.info('Process %s terminated with return code %s', proc.pid, proc.returncode)
                 finish = True
             
     except KeyboardInterrupt:
@@ -133,6 +144,9 @@ def _main():
 
     log.info(f'Process completed with returncode {proc.returncode}')
     exit_function()
+    retcode = 0
+    log.info('Savescan complete. Returning %s', retcode)
+    sys.exit(retcode)
 
 
 def exit_function():

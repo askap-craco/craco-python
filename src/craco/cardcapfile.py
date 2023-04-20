@@ -421,7 +421,7 @@ class CardcapFile:
         packet_size_bytes = self.dtype.itemsize
 
         if beam is None or beam == -1:
-            nbeam_out = NBEAM
+            nbeam_out = self.nbeam
         else:
             nbeam_out = 1
 
@@ -431,7 +431,7 @@ class CardcapFile:
                 f.seek(self.hdr_nbytes)
                                         
                 while True:
-                    if beam is None or beam == -1:
+                    if nbeam_out == self.nbeam:
                         packets = np.fromfile(f, dtype=self.dtype, count=packets_per_frame) # just reads sequentially
                         if len(packets) != packets_per_frame:
                             break
