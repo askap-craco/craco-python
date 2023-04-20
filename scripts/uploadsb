@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Deletes a schedblock
+# Inputs should not have a prefix
+# e.g. SB046779/targets/NoDrive
+# it should start with SB and the entire SB will be delete
+
+
+
+for sb in $@ ; do
+    if [[ $sb == SB* ]] ; then
+	sbdir=$(echo $sb | cut -d/ -f 1)
+	fullpath=$(ls -d /data/seren*/big/craco/$sbdir )
+	for p in $fullpath ; do
+	    rclone copy -P  $p acacia:craco-eclipse/$sb
+	done
+    else
+	echo "Supplied SB doesnt start with SB: $sb. Continuing"
+	continue
+    fi
+
+done
