@@ -189,8 +189,6 @@ class CalibrationSolution:
         if values.calibration:
             gains, freqs = load_gains(values.calibration)
             log.info('Loaded calibration gains %s from calfile %s', gains.shape, plan.values.calibration)
-            if freqs is None:
-                freqs = plan.freqs # big assumption, but lets go with it for now
         else: # make dummy gains
             shape = (self.plan.maxant, self.plan.nf, 2)
             mask = np.zeros(shape, dtype=bool)

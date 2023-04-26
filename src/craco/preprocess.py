@@ -3,65 +3,6 @@ from iqrm import iqrm_mask
 import numpy as np
 from craft.craco import bl2ant, bl2array
 
-def normalise(block, target_input_rms = 1):
-    '''
-    Normalises each baseline and channel in the visibility block to the
-    specified mean and std values along the time axis.
-    It the array/dictionary in place
-
-    Input
-    -----
-    block: np.ndarray or np.ma.masked_array or dict
-            Input visbility data of shape (nbl, nf, [npol], nt) if array, or,
-            Visibility dict with nbl arrays/masked arrays of 
-            (nf, [npol], nt) shape each. The npol axis is optional
-
-    target_input_rms: float
-            Desired std of each channel
-    '''
-    
-    if type(block) == dict:
-        new_block = {}
-        for ibl, bldata in block.items():
-            #print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
-            existing_rms = bldata.std(axis=-1) / np.sqrt(2)
-            new_block[ibl] = (bldata - bldata.mean(axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
-            #print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
-    elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
-        existing_rms = block.std(axis=-1) / np.sqrt(2)   
-        new_block = (block - block.mean(axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
-    else:
-        raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
-    return new_block
-
-
-def average_pols(block, keepdims = True):
-    '''
-    Average the pol axis and remove the extra dimension. Edits it in-place
-
-    Input
-    -----
-    block: dict or np.ndarray or np.ma.core.MaskedArray
-            The block containing the data. 
-            If dict, it should be keyed by blid and each value
-            should contain an array of shape (nf, npol, nt)
-            If array (regular or masked) it should have the shape
-            (nbl, nf, npol, nt)
-
-    '''
-    if type(block) == dict:
-        for ibl, bldata in block.items():
-            assert bldata.ndim == 3, f"Exptected 3 dimensions (nf, npol, nt), but got {bldata.ndim}, shape={bldata.shape}"#, block = {block},\n bldata= {bldata}"
-            block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
-            if not keepdims:
-                block[ibl] = block[ibl].squeeze()
-    elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
-        assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
-        block = block.mean(axis=2, keepdims=keepdims)
-        if not keepdims:
-            block[ibl] = block[ibl].squeeze()
-    return block
-
 
 def get_isMasked_nPol(block):
 
@@ -91,22 +32,94 @@ def get_isMasked_nPol(block):
 
 
 
+
+
+def normalise(block, target_input_rms = 1):
+    '''
+    Normalises each baseline and channel in the visibility block to
+    0 median and a desired std value along the time axis.
+    It modifies the array/dictionary in place
+
+    Input
+    -----
+    block: np.ndarray or np.ma.masked_array or dict
+            Input visbility data of shape (nbl, nf, [npol], nt) if array, or,
+            Visibility dict with nbl arrays/masked arrays of 
+            (nf, [npol], nt) shape each. The npol axis is optional
+
+    target_input_rms: float
+            Desired std of each channel
+    '''
+    
+    if type(block) == dict:
+        new_block = {}
+        for ibl, bldata in block.items():
+            #print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
+            existing_rms = bldata.std(axis=-1) / np.sqrt(2)
+            new_block[ibl] = (bldata - np.median(bldata, axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
+            #print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
+    elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
+        existing_rms = block.std(axis=-1) / np.sqrt(2)   
+        new_block = (block - np.median(block, axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
+    else:
+        raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
+    return new_block
+
+
+def average_pols(block, keepdims = True):
+    '''
+    Average the pol axis and remove the extra dimension. Edits it in-place
+
+    Input
+    -----
+    block: dict or np.ndarray or np.ma.core.MaskedArray
+            The block containing the data. 
+            If dict, it should be keyed by blid and each value
+            should contain an array of shape (nf, npol, nt)
+            If array (regular or masked) it should have the shape
+            (nbl, nf, npol, nt)
+
+    '''
+    _, nPol, _ = get_isMasked_nPol(block)
+    if nPol == 0:
+        print("No pol axis to scrunch, returning the block as it is")
+        return block
+    if type(block) == dict:
+        for ibl, bldata in block.items():
+            assert bldata.ndim == 3, f"Exptected 3 dimensions (nf, npol, nt), but got {bldata.ndim}, shape={bldata.shape}"#, block = {block},\n bldata= {bldata}"
+            block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
+            if not keepdims:
+                block[ibl] = block[ibl].squeeze()
+    elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
+        assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
+        block = block.mean(axis=2, keepdims=keepdims)
+        if not keepdims:
+            block = block.squeeze()
+    return block
+
+
+
 class Calibrate:
-    def __init__(self, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
+    #TODO remove the dependence of Calibrate on plan -- needs to propage through to the calibration.py's CalSolution class
+    def __init__(self, plan, block_dtype, miriad_gains_file, baseline_order, keep_masks = True):
         self.gains_file = miriad_gains_file
         self.baseline_order = baseline_order
+        self.plan = plan
         self.reload_gains()
 
         if block_dtype not in [np.ndarray, np.ma.core.MaskedArray, dict]:
             raise ValueError("Unknown dtype of block provided")
 
-        self.block_dtype = block_dtype
+        #self.block_dtype = block_dtype
         self.keep_masks = keep_masks
         
 
     def reload_gains(self):
-        self.ant_gains = calibration.load_gains(self.gains_file)
-        self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
+        #self.ant_gains, _ = calibration.load_gains(self.gains_file)
+        #self.gains_array = calibration.soln2array(self.ant_gains, self.baseline_order)
+        self.plan.values.calibration = self.gains_file
+        calsoln_obj = calibration.CalibrationSolution(plan = self.plan)
+        self.gains_array = calsoln_obj.solarray.copy()
         self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
         if type(self.gains_array) == np.ma.core.MaskedArray:
             self.sol_isMasked = True
@@ -115,7 +128,7 @@ class Calibrate:
 
     def apply_calibration(self, block):
         block_isMasked, nPol, block_type = get_isMasked_nPol(block)
-        assert block_type == self.block_dtype, f"You Liar!, {block_type}, {self.block_dtype}"
+        #assert block_type == self.block_dtype, f"You Liar!, {block_type}, {self.block_dtype}"
 
         if block_type == dict:
             #print(f"Baseline order is: {self.baseline_order}")
@@ -126,7 +139,7 @@ class Calibrate:
                 elif nPol ==1:
                     block[blid] =  self.gains_pol_avged_array[ibl, ...] * block[blid]
                 elif nPol ==0:
-                    block[blid] = self.gains_pol_avged_array[ibl, ...].squeeze() * block[blid]
+                    block[blid] = self.gains_pol_avged_array[ibl, ...].squeeze()[..., None] * block[blid]
                 else:
                     raise ValueError(f"Expected nPol 0, 1, or 2, but got {nPol}")
                 
@@ -145,7 +158,7 @@ class Calibrate:
             elif nPol == 1:
                 calibrated_block = self.gains_pol_avged_array * block
             elif nPol == 0:
-                calibrated_block = self.gains_pol_avged_array.squeeze() * block
+                calibrated_block = self.gains_pol_avged_array.squeeze()[..., None] * block
             else:
                 raise ValueError(f"Expected nPol 0, 1, or 2, but got {nPol}")
 
@@ -206,7 +219,7 @@ class RFI_cleaner:
                 continue
             
             if freq:
-                autocorr_freq_mask = self.get_freq_mask(baseline_data)
+                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=10)
                 autocorr_masks[str(a1) + 'f'] = autocorr_freq_mask 
             if time:
                 autocorr_time_mask = self.get_time_mask(baseline_data)
@@ -307,7 +320,7 @@ class RFI_cleaner:
                         crosscorr_masks[str(ibl) + 't'] = bl_time_mask
 
                     if mcf:
-                        bl_freq_mask = self.get_freq_mask(baseline_data)
+                        bl_freq_mask = self.get_freq_mask(baseline_data, threshold=5.0)
                         if self.isMasked:
                             baseline_data.data[bl_freq_mask, ...] = 0
                             baseline_data.mask[bl_freq_mask, ...] = True
@@ -322,7 +335,7 @@ class RFI_cleaner:
 
         if mcasf or mcast:
             #Finally find bad samples in the CAS
-            cas_masks['f'] = self.get_freq_mask(cas_sum)  
+            cas_masks['f'] = self.get_freq_mask(cas_sum, threshold=5)  
             if self.isMasked:
                 cas_sum.data[cas_masks['f']] = 0
                 cas_sum.mask[cas_masks['f']] = True
@@ -360,6 +373,17 @@ def get_dm_delays(dm_samps, freqs):
     delay_samps = np.round(delay).astype(int)
     return delay_samps
 
+def get_dm_pccc(freqs, dm_samps, tsamp):
+    '''
+    freqs in Hz
+    tsamp in s
+    '''
+    delay_s = dm_samps * tsamp
+    fmax = np.max(freqs) * 1e-9
+    fmin = np.min(freqs) * 1e-9
+    dm_pccc = delay_s / 4.15 / 1e-3 / (1 / fmin**2 - 1 / fmax**2)
+    return dm_pccc
+
 def get_dm_samps(freqs, dm_pccc, tsamp):
     '''
     freqs in Hz
@@ -372,7 +396,7 @@ def get_dm_samps(freqs, dm_pccc, tsamp):
     delays_samps = np.round(delays_s / tsamp).astype(int)
     #dm_samps = np.max(delays_samps) - np.min(delays_samps)
     dm_samps = delays_samps
-    print(f"Delays_s are", delays_s, delays_samps, dm_samps)
+    #print(f"Delays_s are", delays_s, delays_samps, dm_samps)
     return dm_samps
 
 class Dedisp:
@@ -380,6 +404,7 @@ class Dedisp:
         self.fch1 = freqs[0]
         self.foff = np.abs(freqs[1] - freqs[0])
         self.freqs = freqs
+        self.nchans = len(self.freqs)
         self.baseline_order = baseline_order
         if dm_samps is None:
             if dm_pccc is None:
@@ -387,18 +412,19 @@ class Dedisp:
             dm_samps = get_dm_samps(freqs, dm_pccc, tsamp)
 
         self.delays_samps = get_dm_delays(dm_samps, self.freqs)
-        print(f"The computed delays_samps are: {self.delays_samps}")
+        #print(f"The computed delays_samps are: {self.delays_samps}")
         self.dm = dm_samps
+        self.dm_pccc = get_dm_pccc(freqs, dm_samps, tsamp)
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
 
         if type(inblock) == dict:
             block = bl2array(inblock)
-        elif type(inblock) == np.ndarray:
+        elif type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
             block = inblock
         else:
-            raise TypeError("Expected either np.ndarray or dict")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray or dict, but got {type(block)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -406,22 +432,24 @@ class Dedisp:
             history_shape = tuple(history_shape)
 
             self.dm_history = np.zeros(history_shape, dtype=block.dtype)
-            print(f"~~~~~~~~~~~~~~~~~~~~~~~~>>>>>>>>>>>>>>{type(self.dm_history)}")
 
         attached_block = np.concatenate([self.dm_history, block], axis=-1)
-        for ichan, chan in enumerate(attached_block):
-            attached_block[ichan] = np.roll(chan, self.delays_samps[ichan])
+        rolled_block = np.zeros_like(attached_block)
+        for ichan in range(self.nchans):
+            rolled_block[:, ichan, ...] = np.roll(attached_block[:, ichan, ...], self.delays_samps[ichan])
 
-        self.dm_history = block[..., -self.dm:]
-
+        self.dm_history = attached_block[..., -self.dm:]
+        #import IPython
+        
         if type(inblock) == dict:
             for ibl, blid in enumerate(self.baseline_order):
                 #print(ibl,blid, inblock[blid].shape, attached_block[ibl, ..., self.dm:].shape)
-                print(inblock[blid].mask)
-                inblock[blid] = attached_block[ibl, ..., self.dm:]
-                print(f"Type of the output vis array is -- {type(inblock[blid])}")
-                print(inblock[blid].mask)
+                #print(inblock[blid].mask)
+                inblock[blid] = rolled_block[ibl, ..., self.dm:]
+                #print(f"Type of the output vis array is -- {type(inblock[blid])}")
+                #print(inblock[blid].mask)
+            #IPython.embed()
             return inblock
 
-        return attached_block[..., self.dm:]
+        return rolled_block[..., self.dm:]
         
