@@ -440,7 +440,8 @@ class CardcapFile:
                         assert packets['beam_number'][0] == 0, f"Expected first beam to be zero. It was {packets['beam_number'][0]}"
                         # channel number isn't 0-4, its 0--large number, I thik
                         # assert packets['channel_number'][0] == 0, f"Expected first channel to be zero. It was {packets['channel_number'][0]}"
-                        packets.shape = (NCHAN, self.ntpkt_per_frame)
+
+                        packets.shape = (-1, self.ntpkt_per_frame)
                         
                     else: # read 4 channels worth of ntpkts
                         packets = np.empty((NCHAN, self.ntpkt_per_frame), dtype=self.dtype) # 1 beam
