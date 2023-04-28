@@ -5,7 +5,6 @@ from craft import uvfits
 from craco import preprocess, postprocess
 from craft.craco import bl2array
 import matplotlib.pyplot as plt
-from Visibility_injector import inject_in_fake_data as VI
 import IPython
 from PIL import Image
 
@@ -101,6 +100,7 @@ def main():
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
     if args.injection_params_file:
+        from Visibility_injector import inject_in_fake_data as VI
         block_type=np.ndarray
     else:
         block_type = np.ma.core.MaskedArray
