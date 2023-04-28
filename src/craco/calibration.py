@@ -16,7 +16,6 @@ from craft.craftcor import MiriadGainSolutions
 from craco import plotbp
 import warnings
 from scipy.interpolate import interp1d
-import casatools
 
 log = logging.getLogger(__name__)
 
@@ -136,6 +135,7 @@ def load_gains(fname):
             raise ValueError(f'MS file missing to load frequencies {msfile}')
 
         log.info('Loading frequencies from %s', msfile)
+        import casatools
         tb = casatools.table()
         tb.open(os.path.join(msfile, 'SPECTRAL_WINDOW'))
         assert tb.nrows() == 1, f'Expected only 1 spectral window. got {tb.nrows()}'

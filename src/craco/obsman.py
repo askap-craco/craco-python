@@ -34,8 +34,8 @@ class Obsman:
         # add_callback might have beaten us to it,
         #self.scan_changed(self.target_pv.pvname, self.target_pv.get())
         #self.callback_id = self.target_pv.add_callback(self.scan_changed)
-        self.scan_changed(self.scan_pv.pvname, self.scan_pv.get())
-        self.callback_id = self.scan_pv.add_callback(self.scan_changed)
+        #self.scan_changed(self.scan_pv.pvname, self.scan_pv.get())
+        #self.callback_id = self.scan_pv.add_callback(self.scan_changed)
 
         atexit.register(self.atexit_handler)
         signal.signal(signal.SIGTERM, self.sigterm_handler)
@@ -77,14 +77,16 @@ class Obsman:
         else:
             target_ok = True
 
-        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok}')
+        craco_enabled = caget('ak:enableCraco') == 1
+
+        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
             pass
         elif new_scanid == self.curr_scanid: # avoid race condition
             pass
-        elif target_ok: # new valid scan number with new scan ID
+        elif target_ok and craco_enabled: # new valid scan number with new scan ID
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
             self.start_process(new_scanid)
         else:
@@ -107,28 +109,48 @@ class Obsman:
         log.info(f'Started process {self.cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode}')
         
     def terminate_process(self):
-       proc = self.process
-       if self.process is not None:
-            pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
-            timeout = self.values.timeout
-            log.info(f'sending SIGNINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
-            proc.send_signal(signal.SIGINT)
-            os.killpg(pgid, signal.SIGINT)
-            #proc.terminate()
-            try:
-                proc.wait(timeout)
-            except TimeoutExpired:
-                log.warning('Process didnt complete after terminate. Doing kill')
-                os.killpg(pgid, signal.SIGKILL)
+        proc = self.process
+        if self.process is None:
+            log.info('terminate process called but process is none')
+            return
 
+        exit_code = self.process.poll()
+        log.info('In terminate_process(). Poll returns %s', exit_code)
+       
+        if exit_code is None: #process is still running
+            try:
+               pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
+               timeout = self.values.timeout
+               log.info(f'sending SIGINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
+               proc.send_signal(signal.SIGINT)
+               os.killpg(pgid, signal.SIGINT)
+               try:
+                   proc.wait(timeout)
+               except TimeoutExpired:
+                   log.warning('Process didnt complete after terminate. Doing kill')
+                   os.killpg(pgid, signal.SIGKILL)
+                   
+            except ProcessLookupError:# os.getpgid throws this if "your men are already dead" - Agent Smith
+                log.info('Process group for %s does not exist. Didnt kill but should cleaup automatically', proc.pid)
+                    
+            proc.terminate()
+
+        # by this point we've sent all the signals so, we just wait
+        exit_code = self.process.poll()
+        if exit_code is None:
+            log.info('Now doing eternal wait on process. Exit code is %s', exit_code)
             proc.wait()
-            retcode = proc.returncode
-            log.info('Process dead with return code %s. Stopping packets just in case', retcode)
-            caput('ak:cracoStop', 1)
             
-            # assert retcode is not None
-            self.process = None
-            self.curr_scanid = None
+        retcode = proc.returncode
+        log.info('Process dead with return code %s. Stopping packets just in case', retcode)
+        
+        caput('ak:cracoStop', 1)
+        
+        # assert retcode is not None
+        self.process = None
+        self.curr_scanid = None
+        log.info('CRACO stopped. process is None. Scanid is None')
+        
 
     def poll_process(self):
         if self.process is not None:
@@ -140,15 +162,22 @@ class Obsman:
 
     def shutdown(self):
         log.info('Shutting down process')
-        self.scan_pv.remove_callback(self.callback_id)
+        #self.scan_pv.remove_callback(self.callback_id)
         self.terminate_process()
         sys.exit()
         
     def wait(self):
         try:
+            scanid = self.scan_pv.get()
+            # initial setup
+            self.scan_changed(self.scan_pv.pvname, scanid)
             while True:
                 time.sleep(1)
                 self.poll_process()
+                new_scanid = self.scan_pv.get()
+                if new_scanid != scanid:
+                    self.scan_changed(self.scan_pv.pvname, new_scanid)
+                    scanid = new_scanid
         except KeyboardInterrupt:
             log.info('Ctrl-C detected')
         except:
@@ -161,15 +190,22 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--timeout', type=int, help='Timeout to wait after sending signal before killing process', default=30)
+    parser.add_argument('--timeout', type=int, help='Timeout to wait after sending signal before killing process', default=10)
     parser.add_argument('-R','--target-regex', help='Regex to apply to target name. If match then we start a scan')
     parser.add_argument(dest='cmd', nargs='+')
+    parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s %(levelname)-8s %(processName)s (%(process)d) %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S')
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S')
 
     obs = Obsman(values)
     obs.wait()

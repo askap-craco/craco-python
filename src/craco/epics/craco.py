@@ -167,7 +167,11 @@ class Craco(EpicsSubsystem):
         '''
         Retuns the value of start bat as an int
         '''
-        bat = int(self.read('evtf:craco:startBat', cache=False), 16)
+        batstr = self.read('evtf:craco:startBat', cache=False)
+        if batstr is None or len(batstr) == 0:
+            bat = 0
+        else:
+            bat = int(batstr, 16)
         return bat
 
     def get_start_bat(self):
@@ -191,6 +195,10 @@ class Craco(EpicsSubsystem):
         """
         start CRACO
         """
+        en = self.read('enableCraco', cache=False)
+        if en != 1:
+            raise ValueError('CRACO not enabled in EPICS. Ask someone to enable it via CSS or add it to an SB parset and schedule another block. Sorry kids. No dice')
+        
         self.previous_start_bat = self.read_start_bat()
         self.start_bat = None
         self.write("cracoStart", 1, timeout=10.0, wait=False)

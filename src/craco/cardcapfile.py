@@ -421,7 +421,7 @@ class CardcapFile:
         packet_size_bytes = self.dtype.itemsize
 
         if beam is None or beam == -1:
-            nbeam_out = NBEAM
+            nbeam_out = self.nbeam
         else:
             nbeam_out = 1
 
@@ -431,7 +431,7 @@ class CardcapFile:
                 f.seek(self.hdr_nbytes)
                                         
                 while True:
-                    if beam is None or beam == -1:
+                    if nbeam_out == self.nbeam:
                         packets = np.fromfile(f, dtype=self.dtype, count=packets_per_frame) # just reads sequentially
                         if len(packets) != packets_per_frame:
                             break
@@ -440,7 +440,8 @@ class CardcapFile:
                         assert packets['beam_number'][0] == 0, f"Expected first beam to be zero. It was {packets['beam_number'][0]}"
                         # channel number isn't 0-4, its 0--large number, I thik
                         # assert packets['channel_number'][0] == 0, f"Expected first channel to be zero. It was {packets['channel_number'][0]}"
-                        packets.shape = (NCHAN, self.ntpkt_per_frame)
+
+                        packets.shape = (-1, self.ntpkt_per_frame)
                         
                     else: # read 4 channels worth of ntpkts
                         packets = np.empty((NCHAN, self.ntpkt_per_frame), dtype=self.dtype) # 1 beam

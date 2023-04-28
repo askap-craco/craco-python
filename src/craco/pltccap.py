@@ -19,7 +19,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 def plot(f, values):
     cc = CardcapFile(f)
-    fid, d = next(cc.frame_iter())
+    fid, d = next(cc.frame_iter(beam=0))
     print(f, fid, d.shape, d.dtype, d['data'].shape)
     print(cc.mainhdr.get('DSPVER','UNKNOWN'), cc.mainhdr.get('FWDIR','UNKNOWN'))
     (products, revproducts, auto_products, cross_products) = cc.indexes
