@@ -608,6 +608,10 @@ class Pipeline:
         '''
         Apply calibration solutions -  Multiply by solution aray
          Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
+        
+        input_flat_raw is Converts complex input data in [NBL, NC, *NPOL*, NT]
+        NPOL optional
+
         '''
 
         if self.solarray is not None:
@@ -633,16 +637,21 @@ class Pipeline:
             else:
                 input_flat = input_flat.mean(axis=2)
 
+        # at this point input_flat is (nbl, nc, nt)
         # scale to give target RMS
         targrms = self.plan.values.target_input_rms
         if  targrms > 0:
             # calculate RMS
-            real_std = input_flat.real.std()
-            imag_std = input_flat.imag.std()
+            # In the past we calculated just one number for the whole block but this gives grief with unflagged RFI
+            # instead we compute a gain factor per channel & baseline
+            # I'm not entirely sure this is a good idea either
+            # see CRACO-118 for discussion
+            real_std = input_flat.real.std(axis=2, keepdims=True)
+            imag_std = input_flat.imag.std(axis=2, keepdims=True)
             input_std = np.sqrt(real_std**2+ imag_std**2)/np.sqrt(2) # I think this is right do do quadrature noise over all calibrated data
             # noise over everything
             stdgain = targrms / input_std
-            log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std, imag_std, input_std, stdgain, targrms)
+            log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std.mean(), imag_std.mean(), input_std.mean(), stdgain.mean(), targrms)
             input_flat *= stdgain
 
         return input_flat

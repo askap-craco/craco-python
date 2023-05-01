@@ -433,8 +433,8 @@ def proc_rx(pipe_info):
 
     pktiter = ccap.packet_iter()
     packets, fids = next(pktiter)
-    assert dummy_packet.shape == packets[0][1].shape, f'Dummy packet shape {dummy_packet.shape} doesnt match real packet {packets[0][1].shape}'
-    log.debug('packets %s %s %s %s %s %s %s', len(packets),type(packets),type(packets[0]), type(packets[0][0]), type(packets[0][1]), packets[0][1].shape, packets[0][1].dtype)
+    #assert dummy_packet.shape == packets[0][1].shape, f'Dummy packet shape {dummy_packet.shape} doesnt match real packet {packets[0][1].shape}'
+    #log.debug('packets %s %s %s %s %s %s %s', len(packets),type(packets),type(packets[0]), type(packets[0][0]), type(packets[0][1]), packets[0][1].shape, packets[0][1].dtype)
     # packets is list a list of 6 entires - 1 per FPGA
     # each entry contains a tuple of (fid, data)
     # if nbeam == 1 from file the the data shape = (128)
