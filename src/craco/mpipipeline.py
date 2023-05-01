@@ -28,6 +28,7 @@ import numba
 import glob
 import craft.sigproc as sigproc
 from craft.parset import Parset
+from craco.search_pipeline_sink import SearchPipelineSink
 
 log = logging.getLogger(__name__)
 
@@ -483,9 +484,10 @@ def proc_rx(pipe_info):
 
 
 class FilterbankSink:
-    def __init__(self, prefix, beamid, vis_source, values):
+    def __init__(self, prefix, vis_source):
+        values = vis_source.values
         fname = os.path.join(values.outdir, f'{prefix}_b{beamid:02d}.fil')
-        pos = vis_source.skycoord(beamid)
+        pos = vis_source.skycoord(vis_source.beamid)
         npol = 1 # Card averager always outputs 1 pol
         hdr = {'nbits':32,
                'nchans':vis_source.nchan,
@@ -518,13 +520,13 @@ class FilterbankSink:
 
 
 class UvFitsFileSink:
-    def __init__(self, beamno, obs_info):
+    def __init__(self, obs_info):
         from craco.metadatafile import MetadataFile # Stupid seren doesn't have libopenblas on all nodes yet
         from craco.ccapfits2uvfits import get_antennas
         from craft.corruvfits import CorrUvFitsFile
         import scipy
         self.c = scipy.constants.c
-
+        beamno = obs_info.beamid
         self.beamno = beamno
         self.obs_info = obs_info
         self.blockno = 0
@@ -634,6 +636,9 @@ class UvFitsFileSink:
         print(f'Closing file {self.uvout}')
         if self.uvout is not None:
             self.uvout.close()
+
+    def __del__(self):
+        self.close()
         
 def proc_beam(pipe_info):
     all_hdrs = comm.allgather([''])
@@ -665,9 +670,10 @@ def proc_beam(pipe_info):
     fid0 = comm.bcast(fid0, root=pipe_info.rx_processor_rank0)
     info.fid0 = fid0
     
-    cas_filterbank = FilterbankSink('cas', beamid, info, values)
-    ics_filterbank = FilterbankSink('ics', beamid, info, values)
-    vis_file = UvFitsFileSink(beamid, info)
+    cas_filterbank = FilterbankSink('cas',info)
+    ics_filterbank = FilterbankSink('ics',info)
+    vis_file = UvFitsFileSink(info)
+    pipeline_sink = SearchPipelineSink(info)
 
     try:
         while True:
@@ -675,11 +681,13 @@ def proc_beam(pipe_info):
             cas_filterbank.write(beam_data['cas'])
             ics_filterbank.write(beam_data['ics'])
             vis_file.write(beam_data['vis'])
+            pipeline_sink.write(beam_data['vis'])
     finally:
         print(f'Closing beam files for {beamid}')
         cas_filterbank.close()
         ics_filterbank.close()
         vis_file.close()
+        pipeline_sink.close()
 
 
 def dump_rankfile(values, fpga_per_rx=3):
