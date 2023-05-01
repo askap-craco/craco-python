@@ -92,7 +92,8 @@ if __name__ == '__main__':
                                 'fixuvfits=craco.fixuvfits:_main',
                                 'pltrescale=craco.pltrescale:_main',
                                 'pltccap=craco.pltccap:_main',
-                                'tab_filterbank=craco.tab_filterbank:_main'
+                                'tab_filterbank=craco.tab_filterbank:_main',
+                                'pretty_imager=craco.pretty_imager:main'
                                 
             ],
         },
