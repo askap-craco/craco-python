@@ -2,6 +2,7 @@ import numpy as np
 from craft.craco_kernels import Prepare, Gridder, Imager ,CracoPipeline, FdmtGridder
 from craft import craco_plan
 from craft import uvfits
+from craft.cmdline import strrange
 from craco import preprocess, postprocess
 from craft.craco import bl2array
 import matplotlib.pyplot as plt
@@ -72,6 +73,7 @@ def get_parser():
     parser.add_argument("-tx", type=int, help="Average in time by a factor of tx", default=1)
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
+    parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     g = parser.add_mutually_exclusive_group()
     g.add_argument("-dedm_pccc", type=float, help="De-DM in pc/cc")
     g.add_argument("-dedm_samps", type=int, help="De-DM in sample units", default=0)
@@ -96,6 +98,7 @@ def main():
     #values.uv = myfits
     values.nt = args.nt
     values.ndm = 2
+    values.npix = 512
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
@@ -125,7 +128,7 @@ def main():
     if args.calfile:
         calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
     
-    if args.rfi:
+    if args.rfi or args.flag_chans:
         rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
 
     if args.ofits or args.stats_image:
@@ -186,6 +189,8 @@ def main():
                 block = calibrator.apply_calibration(block)
                 if args.plot_blocks:
                     plot_block(block, title="The calibrated block")
+            if args.flag_chans:
+                block = rfi_cleaner.flag_chans(block, args.flag_chans, 0)
             if args.rfi:
                 block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
                 if args.plot_blocks:

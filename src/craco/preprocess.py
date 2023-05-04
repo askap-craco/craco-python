@@ -56,13 +56,17 @@ def normalise(block, target_input_rms = 1):
         for ibl, bldata in block.items():
             #print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
             existing_rms = bldata.std(axis=-1) / np.sqrt(2)
-            new_block[ibl] = (bldata - np.median(bldata, axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
+            new_block[ibl] = (bldata - np.mean(bldata, axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
             #print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         existing_rms = block.std(axis=-1) / np.sqrt(2)   
-        new_block = (block - np.median(block, axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
+        new_block = (block - np.mean(block, axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
+
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
+
+    #import IPython
+    #IPython.embed()
     return new_block
 
 
@@ -185,6 +189,19 @@ class RFI_cleaner:
 
         self.block_dtype = block_dtype
         self.baseline_order = baseline_order
+
+    def flag_chans(self, block, chanrange, flagval=0):
+        '''
+        Sets a given range of channels to value flagval
+        '''
+        self.isMasked, self.pol_axis_exists, _ = get_isMasked_nPol(block)
+        for ibl, bldata in enumerate(block):
+            if self.isMasked:
+                block[ibl].mask[chanrange, ...] = True
+                block[ibl][chanrange, ...] = flagval
+            else:
+                block[ibl][chanrange, ...] = flagval
+        return block
 
     def get_freq_mask(self, baseline_data, threshold=3.0):
         #Take the mean along the pol axis and rms along the time axis
