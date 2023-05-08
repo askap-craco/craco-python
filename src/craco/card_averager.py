@@ -305,6 +305,10 @@ class Averager:
         self.last_nvalid = valid.sum()
         data = List()
         [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
+        log.info('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
+        for idata, d in enumerate(data):
+            assert d.shape == self.dummy_packet.shape, f'Invalid shape for packet[{idata}] expected={self.dummy_packet.shape} but got {d.shape}'
+            
         self.reset()
         return self.accumulate_all(data, valid)
 
