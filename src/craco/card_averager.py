@@ -29,24 +29,26 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 real_dtype = numba.float32
 #real_dtype = numba.int32
 
-@njit(debug=True,cache=True,fastmath=True,parallel=False, locals={'v0':real_dtype,
-                                                       'v1':real_dtype,
-                                                       'vsqr':real_dtype,
-                                                       'va':real_dtype,
-                                                       'agg_mean':real_dtype,
-                                                      'agg_m2':real_dtype,
-                                                      'delta':real_dtype,
-                                                       'delta2':real_dtype})
+accumulate_locals = {'v0':real_dtype,
+                     'v1':real_dtype,
+                     'vsqr':real_dtype,
+                     'va':real_dtype,
+                    'agg_mean':real_dtype,
+                     'agg_m2':real_dtype,
+                     'delta':real_dtype,
+                     'delta2':real_dtype}
+
+@njit(debug=True,cache=True,fastmath=True,parallel=False, locals=accumulate_locals)
 def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ichan, beam_data, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     '''
     Computes ICS, CAS and averaged visibilities given a block of nt integration packets from a single FPGA
-    
+  
     makeing it parallel makes it worse
     :output: Rescaled and averaged output. 1 per beam.
     :rescale_scales: (nbeam, nbl, npol, 2) float 32 scales to apply to vis amplitudes before adding in ICS/CAS. [0] is subtracted and [1] is multiplied. 
     :rescale_stats: (nbeam, nc, nbl, npol, 2) flaot32 statistics of the visibility amplitues. [0] is the sum and [2] is the sum^2
     :count: Number of samples that have so far been used to do accumulation
-    :nant: number of antnenas. Should tally with number of baselines
+    :nant: number of antennas. Should tally with number of baselines
     :ibeam: Beam number to udpate
     :ichan: Channel number to update
     :beam_data: len(nt) list containing packets
@@ -73,43 +75,47 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
             otime = t // vis_tscrunch
             a1 = 0
             a2 = 0
+            output_bl = 0
+            vis_bl = 0
             # looping over baseline and calculating antenna numbers is about 15% faster than
             # 2 loops over antennas
             for ibl in range(nbl):
-                for pol in range(npol):
-                    v = bd[samp2, ibl, pol, :]
-                    v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
-                    v_imag= np.float32(v[1])
-                    # For ICS: Don't subtract before applying square  and square root.
-                    vsqr = v_real*v_real + v_imag*v_imag
-                    va = np.sqrt(vsqr)
+                ants_ok = antenna_mask[a1] and antenna_mask[a2]
+                #print('CAVG', ibeam, ichan, samp, samp2, ibl, ants_ok, bd.shape)
+                if ants_ok:
+                    for pol in range(npol):
+                        v = bd[samp2, ibl, pol, :]
+                        v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
+                        v_imag= np.float32(v[1])
+                        # For ICS: Don't subtract before applying square  and square root.
+                        vsqr = v_real*v_real + v_imag*v_imag
+                        va = np.sqrt(vsqr)
+                        
+                        # Update mean and M2 for variance calculation using Welfords online algorithm
+                        # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+                        agg_mean = rs_chan_stats[output_bl, pol, 0]
+                        agg_m2 = rs_chan_stats[output_bl, pol, 1]
+                        delta = va - agg_mean
+                        agg_mean += delta / agg_count
+                        delta2 = va - agg_mean
+                        agg_m2 += delta * delta2
+                        rs_chan_stats[output_bl, pol, 0] = agg_mean # Update amplitude
+                        rs_chan_stats[output_bl, pol, 1] = agg_m2 # Add amplitude**2 for stdev
+                        
+                        offset = rs_chan_scales[output_bl, pol, 0] # offset = 0
+                        scale = rs_chan_scales[output_bl, pol, 1] # scale = 1
+                        va_scaled = (va + offset)*scale
 
-                    # Update mean and M2 for variance calculation using Welfords online algorithm
-                    # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
-                    agg_mean = rs_chan_stats[ibl, pol, 0]
-                    agg_m2 = rs_chan_stats[ibl, pol, 1]
-                    delta = va - agg_mean
-                    agg_mean += delta / agg_count
-                    delta2 = va - agg_mean
-                    agg_m2 += delta * delta2
-                    rs_chan_stats[ibl, pol, 0] = agg_mean # Update amplitude
-                    rs_chan_stats[ibl, pol, 1] = agg_m2 # Add amplitude**2 for stdev
-                    
-                    offset = rs_chan_scales[ibl, pol, 0] # offset = 0
-                    scale = rs_chan_scales[ibl, pol, 1] # scale = 1
-                    va_scaled = (va + offset)*scale
-
-                    ants_ok = antenna_mask[a1] and antenna_mask[a2]
-
-                    if ants_ok: # only affects CAS/ICS currently. Willl need to resize vis otherwise
                         if a1 == a2:
                             # Could just add a scaled version of v0 here, but it makes  little diffeence
                             # given there are so few autos
                             ics[t,ichan] += va_scaled
                         else:
                             cas[t,ichan] += va_scaled
-
-                    vis[ibl, ochan, otime] += complex(v_real, v_imag)
+                            vis[vis_bl, ochan, otime] += complex(v_real, v_imag)
+                            vis_bl += 1
+                        
+                    output_bl += 1
                     
                 a2 += 1
                 if a2 == nant:
@@ -128,7 +134,7 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-@njit(parallel=True,cache=True)
+#@njit(parallel=True,cache=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6
@@ -141,7 +147,7 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
     nmsgs = dshape[0]
     npkt_per_accum = dshape[1]
     nt = output[0]['cas'].shape[0] # assume this is the same as ICS
-    for beam in prange(nbeam):
+    for beam in range(nbeam):
         for fpga in range(nfpga):
             # TODO: Work out what should do if some data isn't valid.
             # do we Just not add it, do we note it somewhere in some arrays ... what should we do?
@@ -168,14 +174,14 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 ichan = chan*nfpga + fpga
 
                 bd = data[didx,:]
-                do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask,vis_fscrunch, vis_tscrunch)
+                do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask, vis_fscrunch, vis_tscrunch)
                 
             count[fpga] += nt # only gets incremented if isvalid == True
 
 
 def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.complex64):
 
-    nbl = nant*(nant+1)//2
+    nbl = nant*(nant-1)//2
     assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
     assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
     vis_nt = nt // vis_tscrunch
@@ -193,19 +199,20 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
                 
 class Averager:
     def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None, exclude_ants=[], rescale_update_blocks=16, rescale_output_path=None):
-        nbl = nant*(nant+1)//2
-        self.nbl = nbl
-        self.nant = nant
+        self.nant_in = nant
+        self.nant_out = self.nant_in - len(exclude_ants)
+        nbl_with_autos = self.nant_out*(self.nant_out+1)//2
+        self.nbl_with_autos = nbl_with_autos
         self.nt = nt
         self.npol = npol
         self.nc = nc
         self.vis_fscrunch = vis_fscrunch
         self.vis_tscrunch = vis_tscrunch
         self.rescale_update_blocks = rescale_update_blocks
-        self.dtype = get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype, cdtype)
+        self.dtype = get_averaged_dtype(nbeam, self.nant_out, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype, cdtype)
         self.output = np.zeros(nbeam, dtype=self.dtype)
-        self.rescale_stats = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
-        self.rescale_scales = np.zeros((nbeam, nc, self.nbl, npol, 2), dtype=rdtype)
+        self.rescale_stats = np.zeros((nbeam, nc, self.nbl_with_autos, npol, 2), dtype=rdtype)
+        self.rescale_scales = np.zeros((nbeam, nc, self.nbl_with_autos, npol, 2), dtype=rdtype)
         self.count = np.zeros(NFPGA, dtype=np.int32)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
@@ -214,10 +221,10 @@ class Averager:
             exclude_ants = []
 
         self.exclude_ants = set(map(int, exclude_ants))
-        self.antenna_mask = np.array([False if (iant+1) in exclude_ants else True for iant in range(nant)])
+        self.antenna_mask = np.array([False if (iant+1) in exclude_ants else True for iant in range(self.nant_in)])
         log.info('There are %s valid antennas in mask=%s. Excluding=%s',
                  sum(self.antenna_mask==True), self.antenna_mask, self.exclude_ants)
-        assert len(self.antenna_mask) == nant
+        assert len(self.antenna_mask) == self.nant_in
         assert not np.all(self.antenna_mask==False), 'All antennas were masked'
 
         self.rescale_output_path = rescale_output_path
@@ -305,7 +312,7 @@ class Averager:
         self.last_nvalid = valid.sum()
         data = List()
         [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
-        log.info('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
+        log.debug('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
         for idata, d in enumerate(data):
             assert d.shape == self.dummy_packet.shape, f'Invalid shape for packet[{idata}] expected={self.dummy_packet.shape} but got {d.shape}'
             
@@ -323,7 +330,7 @@ class Averager:
                        self.rescale_scales,
                        self.rescale_stats,
                        self.count,
-                       self.nant,
+                       self.nant_in,
                        beam_data,
                        valid,
                        self.antenna_mask,
