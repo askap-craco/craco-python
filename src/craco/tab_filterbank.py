@@ -77,6 +77,19 @@ def phase_rotate(blk, model):
             blk_rephase[:, :, ipol, it] = blk[:, :, ipol, it] * np.conj(model)
     return blk_rephase
 
+def nbl2nant(nbl):
+    return int((1 + np.sqrt(1 + 8*nbl)) / 2)
+
+def get_ant_idx(nbl, flag_ant=None):
+    if flag_ant is None: return np.ones(nbl, dtype=bool)
+    if isinstance(flag_ant, str):
+        nant = nbl2nant(nbl)
+        blant = np.array([
+            (i, j) for i in range(nant) for j in range(i+1, nant)
+        ])
+        flag_ant = np.array(strrange(flag_ant)) - 1 # make it zero-indexed...
+        return (~np.isin(blant[:, 0], flag_ant)) & (~np.isin(blant[:, 1], flag_ant))
+
 
 def run(f, values):
     # we assume we are not using simulated data...
@@ -85,7 +98,9 @@ def run(f, values):
     uvsource = uvfits.open(values.uv)
     ## check if this need to change...
     # plan = craco_plan.PipelinePlan(uvsource, values)
-    plan_arg = f"--ndm {values.ndm} --max-nbl {values.max_nbl} --flag-ant {values.flag_ant}"
+    plan_arg = f"--ndm {values.ndm} --max-nbl {values.max_nbl}" # --flag-ant {values.flag_ant}"
+    if not (values.flag_ant is None): plan_arg += f" --flag-ant {values.flag_ant}"
+
     plan = craco_plan.PipelinePlan(uvsource, plan_arg) # --flag-ant 13-15,29")
     calibrator = preprocess.Calibrate(
         plan = plan, block_dtype=block_dtype, 
@@ -129,47 +144,68 @@ def run(f, values):
 
     iblk = 0
     for blk, bluvw in uvsource.time_blocks_with_uvws(values.nt):
+        try:
+            iblk += 1
+            # logger.info(f"processing block {iblk}...")
+            print(f"processing block {iblk}...")
 
-        iblk += 1
-        # logger.info(f"processing block {iblk}...")
-        print(f"processing block {iblk}...")
+            # take the mean of uvw here to represent the block
+            bluvw_ave = average_uvw(bluvw, metrics="mean")
+            
+            # make a model for a unit Jansky source
+            psvis = pointsource(1, lm, plan.freqs, plan.baseline_order, bluvw_ave)
 
-        # take the mean of uvw here to represent the block
-        bluvw_ave = average_uvw(bluvw, metrics="mean")
-        
-        # make a model for a unit Jansky source
-        psvis = pointsource(1, lm, plan.freqs, plan.baseline_order, bluvw_ave)
+            # perform calibration
+            blk = bl2array(blk)
+            _vis = calibrator.apply_calibration(blk)
+            # phase rotation
+            # this need to be done for each sample...
+            _vis = _vis * np.conj(psvis)[:, :, None, None]
+            # # flagging
+            # flag_vis, _, _, _ = rfi_cleaner.run_IQRM_cleaning(
+            #     np.abs(rot_vis), False, False, False, False, True, True
+            # )
 
-        # perform calibration
-        blk = bl2array(blk)
-        cal_vis = calibrator.apply_calibration(blk)
-        # phase rotation
-        # this need to be done for each sample...
-        rot_vis = cal_vis * np.conj(psvis)[:, :, None, None]
-        # # flagging
-        # flag_vis, _, _, _ = rfi_cleaner.run_IQRM_cleaning(
-        #     np.abs(rot_vis), False, False, False, False, True, True
-        # )
-        # # normalisation
-        # fin_vis = preprocess.normalise(
-        #     flag_vis, target_input_rms=values.target_input_rms
-        # )
+            if values.norm:
+                _vis = preprocess.normalise(
+                    _vis, target_input_rms=values.target_input_rms
+                )
+            # shape: nbl, nchan, npol, nt
 
-        fin_vis = preprocess.normalise(
-            rot_vis, target_input_rms=values.target_input_rms
-        )
+            out_tf = _vis.real.mean(axis=0)
+            # ### if using weighted_snr...
+            # if values.weighted_snr is None:
+            #     out_tf = fin_vis.real.mean(axis=0)
+            # else:
+            #     ### shape: nbl, nchan, npol
+            #     bp_snr = np.load(values.weighted_snr)[..., 0] # just pick up one polarisation atm...
+            #     ### work out flagged antenna...
+            #     _nbl, _nchan = bp_snr.shape
+            #     ant_idx = get_ant_idx(_nbl, values.flag_ant)
+            #     bp_snr = bp_snr[ant_idx, ...]
+            #     #####
+            #     bp_var = 1 / bp_snr ** 2
+            #     bp_var = bp_var[..., None, None] # make dimension match...
+            #     bp_weight = bp_var / np.nansum(bp_var, axis=0, keepdims=True) # sum over baseline
 
-        out_tf = fin_vis.real.mean(axis=0)
-        assert out_tf.shape[1] == 1, "not single polarsiation found..."
-        out_tf = out_tf[:, 0, :].T.data.astype(np.float32) # shape: frequency vs time
+            #     weight_tf = fin_vis.real * bp_weight
+            #     out_tf = fin_vis.sum(axis=0)
+                
+            assert out_tf.shape[1] == 1, "not single polarsiation found..."
+            out_tf = out_tf[:, 0, :].T.data.astype(np.float32) # shape: frequency vs time
 
-        # mask = np.ma.getmask(out_tf)
-        # data = np.ma.getdata(out_tf)
-        # data[mask] = np.nan
+            # mask = np.ma.getmask(out_tf)
+            # data = np.ma.getdata(out_tf)
+            # data[mask] = np.nan
 
-        out_tf.tofile(fout.fin)
+            out_tf.tofile(fout.fin)
+        except KeyboardInterrupt:
+            fout.fin.close()
+            os.system("rm uv_data*.txt")
+            break
 
     fout.fin.close()
+    os.system("rm uv_data*.txt")
     
 
 def _main():
@@ -180,6 +216,8 @@ def _main():
     parser.add_argument('-c','--calibration',  type=str, help="Path to the calibration file", default=None)
     parser.add_argument("-t", "--target", type=str, help="coordinate of the phase center", default="pc")
     parser.add_argument("-nt", "--nt", type=int, help="number of block reduce in each iteration...", default=128)
+    # parser.add_argument("-w", "--weighted-snr", type=str, help="snr weighted bandpass...", default=None)
+    parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("--target_input_rms", type=int, default=1)
     parser.add_argument("--ndm", type=int, default=2)
     parser.add_argument("--max-nbl", type=int, default=465)
