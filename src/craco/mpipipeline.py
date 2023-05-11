@@ -33,7 +33,8 @@ from craft.parset import Parset
 from craco.search_pipeline_sink import SearchPipelineSink
 from craco.metadatafile import MetadataFile
 from scipy import constants
-
+from collections import namedtuple
+from craft.craco import ant2bl
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,37 @@ numprocs = comm.Get_size()
 
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
+
+
+class BaselineIndex:
+    def __init__(self, blidx, a1, a2, ia1, ia2):
+        '''
+        blidx - index into an array that's had flagged antenans removed
+        a1 - 1 based antenna number
+        a2 - 1 based antenna number
+        ia1 = index into an array of antennas that's had the flagged antennas removed
+        ia2 = index into an array of antennas that's had the flagged antennas removed
+        '''
+        assert a1 > 0 and a2 > 0
+        self.blidx = blidx
+        self.a1 = a1
+        self.a2 = a2
+        self.ia1 = ia1
+        self.ia2 = ia2
+
+    @property
+    def blid(self):
+        '''
+        Returns the baseline ID (FITS formatted) of this index
+        '''
+        return ant2bl((self.a1, self.a2))
+
+    def __str__(self):
+        s = f'BaselineIndex blidx={self.blidx} {self.a1}-{self.a2} idx={self.ia1}-{self.ia2} blid={self.blid}'
+        return s
+
+    __repr__ = __str__
+        
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
 CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
@@ -195,16 +227,18 @@ class MpiObsInfo:
 
     def baseline_iter(self):
         '''
-        Returns an iterator over the valid, unflagged antenna indicies, 0 based
-        Returns an iterator that returns 2-typle (ia1, ia2), 0 based.
+        Returns an iterator over the valid baselines
+        Returns a BaselineIndex whichis info on which baselines are present
         No autocorrelations are returned
         '''
-        for ia1 in range(self.nant):
-            for ia2 in range(ia1+1, self.nant):
-                if ia1+1 in self.values.flag_ants or ia2+1 in self.values.flag_ants:
-                    continue
+        blidx = 0
+        for ia1, a1 in enumerate(self.valid_ants_0based):
+            for a2 in self.valid_ants_0based[ia1+1:]:
+                ia2 = list(self.valid_ants_0based).index(a2)
+                b = BaselineIndex(blidx, a1+1, a2+1, ia1, ia2)
+                yield b
+                blidx += 1
 
-                yield (ia1, ia2)
                 
     @property
     def xrt_device_id(self):
@@ -775,12 +809,13 @@ class UvFitsFileSink:
 
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
-            blidx = 0
             mjd = info.fid_to_mjd(fid_start + itime)
-            for (ia1, ia2) in info.baseline_iter():
+            for blinfo in info.baseline_iter():
+                ia1 = blinfo.ia1
+                ia2 = blinfo.ia2
                 uvwdiff = uvw[ia1, :] - uvw[ia2, :]
                 # TODO: channel-dependent weights - somehow
-                dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
+                dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
 
                 assert len(antflags) == info.nant_valid
                 if antflags[ia1] or antflags[ia2]:
@@ -792,7 +827,6 @@ class UvFitsFileSink:
                 # fits convention has source index with starting value of 1
                 fits_sourceidx = sourceidx + 1
                 self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
-                blidx += 1
         
         self.uvout.fout.flush()
         print(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
@@ -931,18 +965,32 @@ def _main():
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=None)
     parser.add_argument(dest='files', nargs='*')
-
-
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
-    FORMAT = '%(asctime)s (%(process)d) %(module)s %(message)s'
+    
+    import platform
 
+    class HostnameFilter(logging.Filter):
+        hostname = platform.node()
+        def filter(self, record):
+            record.hostname = HostnameFilter.hostname
+            record.rank = rank
+            return True
+
+    
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+        level = logging.DEBUG
     else:
-        logging.basicConfig(level=logging.INFO, format=FORMAT)
+        level = logging.INFO
 
-
+    FORMAT = '%(asctime)s [%(hostname)s:%(process)d] r%(rank)d %(module)s %(message)s'
+    handler = logging.StreamHandler()
+    handler.addFilter(HostnameFilter())
+    handler.setFormatter(logging.Formatter(FORMAT))
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    
     pipe_info = MpiPipelineInfo(values)
 
     if values.dump_rankfile:

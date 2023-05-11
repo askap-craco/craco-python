@@ -14,6 +14,7 @@ import logging
 from craft.craco import ant2bl,get_max_uv
 from craft.craco_plan import PipelinePlan
 from craco.search_pipeline import PipelineWrapper
+from astropy import units as u
 import pyxrt
 import scipy
 
@@ -40,7 +41,8 @@ class VisInfoAdapter:
         ''' Return umax, vmax'''
         fmax = self.channel_frequencies.max()
         baselines = self.baselines
-        return get_max_uv(baselines, fmax)
+        maxuv = get_max_uv(baselines, fmax)
+        return maxuv
 
     @property
     def baselines(self):
@@ -52,17 +54,17 @@ class VisInfoAdapter:
         # how does flagants work?
         # bleach. Gross. This requires much thinking
         # for now we just do something brittle and see where it breaks
-        toffset = 0 # TODO: How far in the future should we compute the UVWs?
+        toffset = 10*u.minute # TODO: How far in the future should we compute the UVWs?
         tbaseline = self.tstart + toffset
         # UVW is a np array shape [nant, 3]
         uvw = self.info.uvw_at_time(tbaseline)
         bluvws = {}
 
-        for (ia1, ia2) in self.info.baseline_iter():
-            blid = ant2bl((ia1+1, ia2+1)) # 1 based
-            bluvw = uvw[ia1, :] - uvw[ia2, :]
+        for blinfo in self.info.baseline_iter():
+            bluvw = uvw[blinfo.ia1, :] - uvw[blinfo.ia2, :]
+            assert np.all(bluvw != 0), f'UVWs were zero for {blinfo}'
             d = {'UU': bluvw[0], 'VV': bluvw[1], 'WW':bluvw[2]}
-            bluvws[float(blid)] = d
+            bluvws[float(blinfo.blid)] = d
 
         return bluvws
 
@@ -119,12 +121,16 @@ class SearchPipelineSink:
         self.pipeline = None
         if devid is not None:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
-            self.pipeline = PipelineWrapper(self.adapter, info.values, devid)
-            nf = len(info.vis_channel_frequencies)
-            nt = self.pipeline.plan.nt
-            nbl = self.adapter.nbl
-            self.pipeline_data = np.zeros((nbl, nf, nt), dtype=np.complex64)
-            self.t = 0
+            try:
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid)
+                nf = len(info.vis_channel_frequencies)
+                nt = self.pipeline.plan.nt
+                nbl = self.adapter.nbl
+                self.pipeline_data = np.zeros((nbl, nf, nt), dtype=np.complex64)
+                self.t = 0
+            except:
+                log.exception(f'Failed to make pipeline for devid={devid}')
+                raise
             
 
     def write(self, vis_data):

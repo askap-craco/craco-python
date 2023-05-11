@@ -81,7 +81,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
             # 2 loops over antennas
             for ibl in range(nbl):
                 ants_ok = antenna_mask[a1] and antenna_mask[a2]
-                #print('CAVG', ibeam, ichan, samp, samp2, ibl, ants_ok, bd.shape)
+                #print('CAVG', ibeam, ichan, samp, samp2, ibl, a1, a2, ants_ok, vis_bl, output_bl, bd.shape, vis.shape)
                 if ants_ok:
                     for pol in range(npol):
                         v = bd[samp2, ibl, pol, :]
@@ -113,7 +113,8 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                         else:
                             cas[t,ichan] += va_scaled
                             vis[vis_bl, ochan, otime] += complex(v_real, v_imag)
-                            vis_bl += 1
+                            if pol == npol -1 :# what a mess
+                                vis_bl += 1 
                         
                     output_bl += 1
                     
@@ -134,7 +135,7 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-#@njit(parallel=True,cache=True)
+@njit(parallel=True,cache=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6
