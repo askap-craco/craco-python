@@ -494,8 +494,10 @@ class ByteTransposer:
         t_barrier = MPI.Wtime()
         log.info('Rank %s waiting', comm.Get_rank())
         comm.Barrier()
-        log.info('Rank %s finished barrier', comm.Get_rank())
         t_start = MPI.Wtime()
+        t_wait = t_start - t_barrier
+        log.info('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
             s_msg = [dtx.view(np.byte),
@@ -643,7 +645,9 @@ def proc_rx(pipe_info):
 
         transposer.send(averaged)
         if cardidx == 0:
-            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d',transposer.last_latency, avg_time*1e3, averager.last_nvalid)
+            size_bytes = averaged.size * averaged.itemsize
+            rate_gbps = size_bytes * 8/1e9/avg_time
+            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, size=%s rate=%0.1fGbps',transposer.last_latency, avg_time*1e3, averager.last_nvalid, averaged.shape, averaged.dtype, size_bytes, rate_gbps)
 
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
