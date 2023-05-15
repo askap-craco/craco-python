@@ -24,11 +24,16 @@ from craco.cardcapmerger import CcapMerger
 from craco.mpiutil import np2array
 from craco.vissource import VisSource,open_source
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
+import astropy.units as u
 import numba
 import glob
 import craft.sigproc as sigproc
 from craft.parset import Parset
 from craco.search_pipeline_sink import SearchPipelineSink
+from craco.metadatafile import MetadataFile
+from scipy import constants
+
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +107,7 @@ class MpiPipelineInfo:
         theid = self.world_rank - self.nbeams
         return theid
 
+
 class MpiObsInfo:
     '''
     Gets headers from everyone and tells everyone what they need to know
@@ -148,46 +154,146 @@ class MpiObsInfo:
             
         self.__fid0 = None # this gets sent with some transposes later
 
+        if self.pipe_info.is_beam_processor and values.metadata is not None:
+            # TODO: implement calc11 and getting sources from .... elsewhere
+            self.md = MetadataFile(values.metadata)
+        else:
+            self.md = None
+
+        self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
+        assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
+  
+    def sources(self):
+        '''
+        Returns an ordered dict
+        '''
+        assert self.md is not None, 'Requested source list but not metadata specified'
+        return self.md.sources(self.beamid)
+
+    def source_index_at_time(self, mjd:Time):
+        '''
+        Return the 0 based index in the list of sources at the specified time
+        '''
+        assert self.md is not None, 'Requested source index but no metadata specified'
+        s = self.md.source_index_at_time(mjd.value)
+        return s
+
+    def uvw_at_time(self, mjd:Time):
+        '''
+        Returns np array (nant, 3) UVW values in seconds at the given time
+        '''
+        uvw = self.md.uvw_at_time(mjd.value)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
+        return uvw
+
+    def antflags_at_time(self, mjd:Time):
+        '''
+        Return antenna flags at given time
+        :see:MetadadtaFile for format
+        '''
+        flags =  self.md.flags_at_time(mjd.value)[self.valid_ants_0based]
+        return flags
+
+    def baseline_iter(self):
+        '''
+        Returns an iterator over the valid, unflagged antenna indicies, 0 based
+        Returns an iterator that returns 2-typle (ia1, ia2), 0 based.
+        No autocorrelations are returned
+        '''
+        for ia1 in range(self.nant):
+            for ia2 in range(ia1+1, self.nant):
+                if ia1+1 in self.values.flag_ants or ia2+1 in self.values.flag_ants:
+                    continue
+
+                yield (ia1, ia2)
+                
+    @property
+    def xrt_device_id(self):
+        '''
+        Returns which device should be used for searcing for this pipeline
+        Returns None if this beam processor shouldnt be processing this beam
+        '''
+        assert self.pipe_info.is_beam_processor, 'Device id shouldnt be called by non beam processors'
+        search_beams = self.values.search_beams
+        beamid = self.beamid
+        devices = [0,1] # these are the available devices
+        devid = None
+        if beamid in search_beams:
+            bidx = search_beams.index(beamid)
+            devidx = bidx % len(devices)
+            devid = devices[devidx]
+
+        return devid
+
+    @property
+    def beamid(self):
+        return self.pipe_info.beamid
 
     @property
     def nbeams(self):
+        '''
+        Number of beams being processed
+        '''
         return self.pipe_info.nbeams
 
     @property
     def nt(self):
+        '''
+        Number of samples per block
+        '''
         return self.pipe_info.nt
 
     @property
     def nrx(self):
+        '''
+        Number of receiver processes
+        '''
         return self.pipe_info.nrx
     
     @property
     def target(self):
+        '''
+        Target name
+        '''
         return self.main_merger.target
 
-    def fid_to_mjd(self, fid):
+    def fid_to_mjd(self, fid:int):
+        '''
+        Convert the given frame ID into an MJD
+        '''
         return self.main_merger.fid_to_mjd(fid)
 
     @property
     def vis_fscrunch(self):
+        '''
+        Requested visibility fscrunch factor
+        '''
         return self.values.vis_fscrunch
 
     @property
     def vis_tscrunch(self):
+        '''
+        Requested visibility tscrunch factor
+        '''
         return self.values.vis_tscrunch
         
     @property
     def fid0(self):
+        '''
+        Frame ID of first data value
+        '''
         return self.__fid0
 
     @fid0.setter
     def fid0(self, fid):
+        '''
+        Set frame iD of first data value
+        '''
         self.__fid0 = np.uint64(fid)
 
     @property
     def tstart(self):
         '''
-        Returns astropy time given fid0
+        Returns astropy of fid0
         We assume we start on the frame after fid0
         '''
         assert self.__fid0 is not None, 'First frame ID must be set before we can calculate tstart'
@@ -199,33 +305,69 @@ class MpiObsInfo:
 
     @property
     def nchan(self):
+        '''
+        Number of channels of input before fscrunch
+        '''
         return self.main_merger.nchan
 
     @property
     def npol(self):
+        '''
+        Number of polarisations of input source
+        '''
         return self.main_merger.npol
 
     @property
     def fch1(self):
+        '''
+        First channel frequency
+        '''
         return self.main_merger.fch1
 
     @property
     def fcent(self):
+        '''
+        Central frequency of band
+        '''
         return self.main_merger.fcent
 
     @property
     def foff(self):
+        '''
+        Offset Hz between channels
+        '''
         return self.main_merger.foff
 
-    def skycoord(self, beam):
+    @property
+    def vis_channel_frequencies(self):
         '''
-        TODO: Fill this in
+        Channel frequencies in Hz of channels in the visibilities after 
+        f scrunching
         '''
-        return SkyCoord('15h30m00s','-30d00m00s')
+        main_freqs = np.arange(self.nchan)*self.foff + self.fch1
+        vis_freqs = main_freqs.reshape(-1, self.vis_fscrunch).mean(axis=1)
+        return vis_freqs
+
+    @property
+    def skycoord(self) -> SkyCoord:
+        '''
+        Astorpy skycoord of given beam
+        '''
+        # For the metadata file we calculate the start time and use that
+        # to work out which source is being used,
+        # then load the source table and get the skycoord
+        tstart = self.tstart
+        source = self.md.source_at_time(self.pipe_info.beamid, tstart.mjd)
+        coord = source['skycoord']
+        return coord
 
     @property
     def inttime(self):
-        return self.main_merger.inttime
+        return self.main_merger.inttime*u.second
+
+    @property
+    def vis_inttime(self):
+        return self.inttime # do I need to scale by vis_tscrunch? Main merger already has it?
 
     @property
     def nt(self):
@@ -238,6 +380,22 @@ class MpiObsInfo:
     def nant(self):
         return self.main_merger.nant
 
+    @property
+    def nant_valid(self):
+        '''
+        Returns the number of antennas after flagging
+        '''
+        return len(self.valid_ants_0based)
+
+    @property
+    def nbl_flagged(self):
+        '''
+        Returns number of baselines after flagging
+        '''
+        na = self.nant_valid
+        nb = na * (na -1) // 2
+        return nb
+
     def __str__(self):
         m = self.main_merger
         s = f'fch1={m.fch1} foff={m.foff} nchan={m.nchan} nant={m.nant} inttime={m.inttime}'
@@ -247,7 +405,7 @@ class MpiObsInfo:
 def get_transpose_dtype(values):
     nbeam = values.nbeams
     nt = values.nt
-    nant = values.nant
+    nant = values.nant_valid
     nc = NCHAN*NFPGA
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
@@ -334,8 +492,12 @@ class ByteTransposer:
     def all2all(self, dtx):
         nmsgs = self.nmsgs
         t_barrier = MPI.Wtime()
-        #comm.Barrier()
+        log.info('Rank %s waiting', comm.Get_rank())
+        comm.Barrier()
         t_start = MPI.Wtime()
+        t_wait = t_start - t_barrier
+        log.info('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
             s_msg = [dtx.view(np.byte),
@@ -372,6 +534,7 @@ class TransposeSender(ByteTransposer):
 
     def send(self, dtx):
         assert len(dtx) == self.nbeam
+        assert dtx.dtype == self.dtype, f'Attempt to send invalid dtype. expected {self.dtype} but got {dtx.dtype}'
         return self.all2all(dtx)
 
 class TransposeReceiver(ByteTransposer):
@@ -394,11 +557,14 @@ def proc_rx(pipe_info):
     1 card = 6 FGPAs
     '''
     ccap = open_source(pipe_info)
+    log.info('opened source')
 
     # tell all ranks about the headers
     all_hdrs = comm.allgather(ccap.fpga_headers)
+    log.info('Got headers')
     
     info = MpiObsInfo(all_hdrs, pipe_info)
+    log.info('got info')
     nbeam = pipe_info.nbeams
     cardidx = pipe_info.cardid
     values = pipe_info.values
@@ -410,20 +576,23 @@ def proc_rx(pipe_info):
     assert numprocs == nrx + nbeam
 
     dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
+    log.info('made packet %s this is a thing', dummy_packet.shape)
     rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/') if pipe_info.values.cardcap_dir is not None else None
 
-    averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.exclude_ants, rescale_output_path=rsout)
+    averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.flag_ants, rescale_output_path=rsout)
+    log.info('made averager')
+    
     transposer = TransposeSender(info)
+    log.info('made transposer')
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
     t_start = MPI.Wtime()
 
-    log.debug('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
+    log.info('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
     # Do dummy transpose to warm up and make connections
-    log.info('Sending dummy transpose for warmup')
     transposer.send(averager.output)
     
     fid0 = ccap.start()
@@ -476,7 +645,9 @@ def proc_rx(pipe_info):
 
         transposer.send(averaged)
         if cardidx == 0:
-            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d',transposer.last_latency, avg_time*1e3, averager.last_nvalid)
+            size_bytes = averaged.size * averaged.itemsize
+            rate_gbps = size_bytes * 8/1e9/avg_time
+            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, size=%s rate=%0.1fGbps',transposer.last_latency, avg_time*1e3, averager.last_nvalid, averaged.shape, averaged.dtype, size_bytes, rate_gbps)
 
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
@@ -486,8 +657,9 @@ def proc_rx(pipe_info):
 class FilterbankSink:
     def __init__(self, prefix, vis_source):
         values = vis_source.values
+        beamid = vis_source.pipe_info.beamid
         fname = os.path.join(values.outdir, f'{prefix}_b{beamid:02d}.fil')
-        pos = vis_source.skycoord(vis_source.beamid)
+        pos = vis_source.skycoord
         npol = 1 # Card averager always outputs 1 pol
         hdr = {'nbits':32,
                'nchans':vis_source.nchan,
@@ -495,7 +667,7 @@ class FilterbankSink:
                'src_raj':pos.ra.deg,
                'src_dej':pos.dec.deg,
                'tstart':vis_source.tstart.utc.mjd,
-               'tsamp':vis_source.inttime,
+               'tsamp':vis_source.inttime.to(u.second).value,
                'fch1':vis_source.fch1,
                'foff':vis_source.foff,
                'source_name':vis_source.target
@@ -525,8 +697,7 @@ class UvFitsFileSink:
         from craco.ccapfits2uvfits import get_antennas
         from craft.corruvfits import CorrUvFitsFile
         import scipy
-        self.c = scipy.constants.c
-        beamno = obs_info.beamid
+        beamno = obs_info.pipe_info.beamid
         self.beamno = beamno
         self.obs_info = obs_info
         self.blockno = 0
@@ -548,10 +719,9 @@ class UvFitsFileSink:
         nchan = info.nchan // values.vis_fscrunch
         self.npol = 1 # card averager always sums polarisations
         npol = self.npol
-        tstart = info.tstart.value + info.inttime/3600./24.
+        tstart = (info.tstart.value + info.inttime.to(u.day).value)
         self.total_nchan = nchan
-        self.md = MetadataFile(values.metadata)
-        self.source_list = self.md.sources(self.beamno).values()
+        self.source_list = obs_info.sources().values()
         source_list = self.source_list
         log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
 
@@ -563,14 +733,13 @@ class UvFitsFileSink:
                                     tstart,
                                     source_list,
                                     antennas)
-        
+
         # create extra tables so we can fix it later on. if the file is not closed properly
         self.uvout.fq_table().writeto(fileout+".fq_table", overwrite=True)
         self.uvout.an_table(self.uvout.antennas).writeto(fileout+'.an_table', overwrite=True)
         self.uvout.su_table(self.uvout.sources).writeto(fileout+'.su_table', overwrite=True)
         self.uvout.hdr.totextfile(fileout+'.header', overwrite=True)
 
-        print(self.uvout.dtype, self.uvout.dtype.itemsize)
         with open(fileout+'.groupsize', 'w') as fout:
             fout.write(str(self.uvout.dtype.itemsize) + '\n')
             
@@ -586,46 +755,44 @@ class UvFitsFileSink:
             return
         
         info = self.obs_info
-        md = self.md
+        md = self.obs_info
         fid_start = info.fid_of_block(self.blockno)
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+        assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
         # TODO: Check timestamp convention for for FID and mjd.
         # I think this is right
         fid_mid = fid_start + info.nt // 2
-        print('*'*10, fid_start, fid_mid, info)
         mjd = info.fid_to_mjd(fid_mid)
-        sourceidx = md.source_index_at_time(mjd.value)
-        sourcename = md.source_name_at_time(mjd.value)
-        uvw = md.uvw_at_time(mjd.value)[:, self.beamno, :] /self.c # UVW in seconds
-        antflags = md.flags_at_time(mjd.value)
-        print(f'Input data shape {vis_data.shape}')
+        sourceidx = md.source_index_at_time(mjd)
+        #sourcename = md.source_name_at_time(mjd.value)
+        uvw = md.uvw_at_time(mjd)
+        antflags = md.antflags_at_time(mjd)
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
-        inttime = info.inttime
-
+        inttime = info.inttime.to(u.second).value
 
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             blidx = 0
             mjd = info.fid_to_mjd(fid_start + itime)
-            for ia1 in range(nant):
-                for ia2 in range(ia1, nant):
-                    uvwdiff = uvw[ia1, :] - uvw[ia2, :]
-                    # TODO: channel-dependent weights - somehow
-                    dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
-                    
-                    if antflags[ia1] or antflags[ia2]:
-                        weights[:] = 0
-                        dblk[:] = 0 # set output to zeros too, just so we can't cheat
-                    else:
-                        weights[:] = 1
+            for (ia1, ia2) in info.baseline_iter():
+                uvwdiff = uvw[ia1, :] - uvw[ia2, :]
+                # TODO: channel-dependent weights - somehow
+                dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
 
-                    # fits convention has source index with starting value of 1
-                    fits_sourceidx = sourceidx + 1
-                    self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
-                    blidx += 1
+                assert len(antflags) == info.nant_valid
+                if antflags[ia1] or antflags[ia2]:
+                    weights[:] = 0
+                    dblk[:] = 0 # set output to zeros too, just so we can't cheat
+                else:
+                    weights[:] = 1
+                    
+                # fits convention has source index with starting value of 1
+                fits_sourceidx = sourceidx + 1
+                self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
+                blidx += 1
         
         self.uvout.fout.flush()
         print(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
@@ -747,8 +914,12 @@ def dump_rankfile(values, fpga_per_rx=3):
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     from craft.cmdline import strrange
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    cardcap.add_arguments(parser)
+    from craco import search_pipeline
+    
+    cardcap_parser = cardcap.get_parser()
+    pipeline_parser = search_pipeline.get_parser()
+    parser = ArgumentParser(description='Run MPI pipeline', formatter_class=ArgumentDefaultsHelpFormatter, parents=[cardcap_parser, pipeline_parser], conflict_handler='resolve')
+    
     parser.add_argument('--fcm', help='Path to FCM file for antenna positions')
     parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
     parser.add_argument('--nfpga-per-rx', type=int, default=6, help='Number of FPGAS received by a single RX process')
@@ -758,14 +929,19 @@ def _main():
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
-    parser.add_argument('--exclude-ants', help='Antenna numbers to exclude e.g. 1,2,3,35-36', type=strrange, default=None)
+    parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=None)
     parser.add_argument(dest='files', nargs='*')
+
+
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
+    FORMAT = '%(asctime)s (%(process)d) %(module)s %(message)s'
+
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format=FORMAT)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format=FORMAT)
+
 
     pipe_info = MpiPipelineInfo(values)
 

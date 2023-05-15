@@ -954,12 +954,16 @@ def add_arguments(parser):
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
     pol_group.add_argument('--dual-pol', help='Dual pol mode', action='store_true')
 
-def _main():
+
+def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Raw download and saving ROCE data from correlator cards', formatter_class=ArgumentDefaultsHelpFormatter)
     add_arguments(parser)
-    
     parser.set_defaults(verbose=False)
+    return parser
+
+def _main():
+    parser = get_parser()
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)

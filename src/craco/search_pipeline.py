@@ -282,7 +282,7 @@ class Pipeline:
         log.info(f'{lut.shape}')
         
         np.savetxt("lut.txt", lut, fmt="%d")
-                
+
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -608,10 +608,6 @@ class Pipeline:
         '''
         Apply calibration solutions -  Multiply by solution aray
          Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
-        
-        input_flat_raw is Converts complex input data in [NBL, NC, *NPOL*, NT]
-        NPOL optional
-
         '''
 
         if self.solarray is not None:
@@ -637,21 +633,16 @@ class Pipeline:
             else:
                 input_flat = input_flat.mean(axis=2)
 
-        # at this point input_flat is (nbl, nc, nt)
         # scale to give target RMS
         targrms = self.plan.values.target_input_rms
         if  targrms > 0:
             # calculate RMS
-            # In the past we calculated just one number for the whole block but this gives grief with unflagged RFI
-            # instead we compute a gain factor per channel & baseline
-            # I'm not entirely sure this is a good idea either
-            # see CRACO-118 for discussion
-            real_std = input_flat.real.std(axis=2, keepdims=True)
-            imag_std = input_flat.imag.std(axis=2, keepdims=True)
+            real_std = input_flat.real.std()
+            imag_std = input_flat.imag.std()
             input_std = np.sqrt(real_std**2+ imag_std**2)/np.sqrt(2) # I think this is right do do quadrature noise over all calibrated data
             # noise over everything
             stdgain = targrms / input_std
-            log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std.mean(), imag_std.mean(), input_std.mean(), stdgain.mean(), targrms)
+            log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std, imag_std, input_std, stdgain, targrms)
             input_flat *= stdgain
 
         return input_flat
@@ -825,7 +816,7 @@ def get_parser():
     parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
     parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract', default=True)
     parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
-    parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna number')
+    parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
@@ -888,85 +879,69 @@ class VisSource:
 
         return myiter
 
-def _main():
-    parser = get_parser()
-    values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
 
-    log.info(f'Values={values}')
+class PipelineWrapper:
+    def __init__(self, f, values, devid):
+        self.plan = PipelinePlan(f, values)
+        self.device = pyxrt.device(devid)
+        self.xbin = pyxrt.xclbin(values.xclbin)
+        self.uuid = self.device.load_xclbin(self.xbin)
+        self.values = values
+        iplist = self.xbin.get_ips()
+        for iip, ip in enumerate(iplist):
+            log.debug('IP %s name=%s', iip, ip.get_name())
 
-    assert values.max_ndm == NDM_MAX
+        plan = self.plan
+        device = self.device
+        xbin = self.xbin
+        uuid = self.uuid
 
-    mode   = get_mode()
-    device = pyxrt.device(values.device)
-    xbin = pyxrt.xclbin(values.xclbin)
-    uuid = device.load_xclbin(xbin)
-    iplist = xbin.get_ips()
-    for ip in iplist:
-        log.info(ip.get_name())
+        hdr = {'nbits':32,
+               'nchans':plan.nf,
+               'nifs':1,
+               'src_raj_deg':plan.phase_center.ra.deg,
+               'src_dej_deg':plan.phase_center.dec.deg,
+               'tstart':plan.tstart.utc.mjd,
+               'tsamp':plan.tsamp_s.value,
+               'fch1':plan.fmin/1e6,
+               'foff':plan.foff/1e6,
+               #'source_name':'UNKNOWN'
+        }
 
-    # Create a plan
-    f = uvfits.open(values.uv, skip_blocks=values.skip_blocks)
-    plan = PipelinePlan(f, values)
+        if values.phase_center_filterbank is None:
+            self.pc_filterbank = None
+        else:
+            self.pc_filterbank = sigproc.SigprocFile(values.phase_center_filterbank, 'wb', hdr)
 
-    hdr = {'nbits':32,
-           'nchans':plan.nf,
-           'nifs':1,
-           'src_raj_deg':plan.phase_center.ra.deg,
-           'src_dej_deg':plan.phase_center.dec.deg,
-           'tstart':plan.tstart.utc.mjd,
-           'tsamp':plan.tsamp_s.value,
-           'fch1':plan.fmin/1e6,
-           'foff':plan.foff/1e6,
-           #'source_name':'UNKNOWN'
-    }
-
-    if values.phase_center_filterbank is None:
-        pc_filterbank = None
-    else:
-        pc_filterbank = sigproc.SigprocFile(values.phase_center_filterbank, 'wb', hdr)
-
-
-    # Create a pipeline
-    alloc_device_only = values.dump_mainbufs is not None or \
-                        values.dump_fdmt_hist_buf is not None or \
-                        values.dump_boxcar_hist_buf is not None or \
-                        values.dump_input is not None or \
-                        values.print_dm0_stats
+        # Create a pipeline
+        alloc_device_only = values.dump_mainbufs is not None or \
+                            values.dump_fdmt_hist_buf is not None or \
+                            values.dump_boxcar_hist_buf is not None or \
+                            values.dump_input is not None or \
+                            values.print_dm0_stats
     
-    p = Pipeline(device, xbin, plan, alloc_device_only)
-    if values.flag_chans:
-        log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
-        p.set_channel_flags(values.flag_chans, True)
+        p = Pipeline(device, xbin, plan, alloc_device_only)
+        if values.flag_chans:
+            log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
+            p.set_channel_flags(values.flag_chans, True)
+            
+        self.pipeline = p
+        p.clear_buffers(values)
+        candout = open(values.cand_file, 'w')
+        candout.write(cand_str_wcs_header)
+        self.total_candidates = 0
+        self.candout = candout
+        self.iblk = 0
 
-
-    uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-    uv_shape2     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide, 2)
-    uv_out  = np.zeros(uv_shape, dtype=np.complex64)
-    uv_out_fixed = np.zeros(uv_shape2, dtype=np.int16)
-
-    vis_source = VisSource(plan, f, values)
-
-    if values.wait:
-        input('Press any key to continue...')
-
-    p.clear_buffers(values)
-    
-    candout = open(values.cand_file, 'w')
-    candout.write(cand_str_wcs_header)
-    total_candidates = 0
-    bestcand = None
-
-    for iblk, input_flat in enumerate(vis_source):
-        if values.nblocks is not None and iblk >= values.nblocks:
-            log.info('Finished due to values.nblocks=%d', values.nblocks)
-            break
-
-        log.debug("Running block %s", iblk)
-
+    def write(self, input_flat):
+        p = self.pipeline
+        pc_filterbank = self.pc_filterbank
+        candout = self.candout
+        iblk = self.iblk
+        values = self.values
+        plan = self.plan
+        
+        log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
@@ -986,7 +961,7 @@ def _main():
         candidates = p.get_candidates().copy()
 
         log.info('Got %d candidates in block %d', len(candidates), iblk)
-        total_candidates += len(candidates)
+        self.total_candidates += len(candidates)
         for c in candidates:
             candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
         candout.flush()
@@ -1013,21 +988,55 @@ def _main():
 
         if do_dump(values.dump_boxcar_hist_buf, iblk):
             p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
-                               
+
+        self.iblk += 1
+
+    def close(self):
+        candout = self.candout
+        pc_filterbank = self.pc_filterbank
+        values = self.values
+        cmdstr =  ' '.join(sys.argv)
+        now = datetime.datetime.now()
+        logstr = f'# Run {cmdstr} finished on {now}\n'
+        candout.write(logstr)
+        candout.flush()    
+        candout.close()
+        logging.info('Wrote %s candidates to %s', self.total_candidates, values.cand_file)
+        
+        if pc_filterbank is not None:
+            pc_filterbank.fin.close()
+
+        
+def _main():
+    parser = get_parser()
+    values = parser.parse_args()
+    if values.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    log.info(f'Values={values}')
+
+    assert values.max_ndm == NDM_MAX
+
+    # Create a plan
+    f = uvfits.open(values.uv, skip_blocks=values.skip_blocks)
+    pipeline_wrapper = PipelineWrapper(f, values, values.device)
+    plan = pipeline_wrapper.plan
+    vis_source = VisSource(plan, f, values)
+
+    if values.wait:
+        input('Press any key to continue...')
+
+    for iblk, input_flat in enumerate(vis_source):
+        if values.nblocks is not None and iblk >= values.nblocks:
+            log.info('Finished due to values.nblocks=%d', values.nblocks)
+            break
+
+        pipeline_wrapper.write(input_flat)
 
     f.close()
-
-    cmdstr =  ' '.join(sys.argv)
-    now = datetime.datetime.now()
-    logstr = f'# Run {cmdstr} finished on {now}\n'
-    candout.write(logstr)
-    candout.flush()    
-    candout.close()
-    logging.info('Wrote %s candidates to %s', total_candidates, values.cand_file)
-
-    if pc_filterbank is not None:
-        pc_filterbank.fin.close()
-
+    pipeline_wrapper.close()
                      
 if __name__ == '__main__':
     _main()

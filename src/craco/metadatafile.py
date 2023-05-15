@@ -99,6 +99,15 @@ class MetadataFile:
         sourceidx = i
         return sourceidx
 
+    def source_at_time(self, beam: int,  time : float):
+        '''
+        Return the source dictionary being tracked at the given time and beam
+        '''
+        sourcename = self.source_name_at_time(time)
+        source = self.sources(beam)[sourcename]
+        
+        return source
+
     def data_index_at_time(self, time : float):
         idx = int(self.index_interp(time))
         return idx
@@ -170,7 +179,7 @@ class MetadataFile:
             last_source_name = name
 
         return sources
-                
+
 
     @property
     def sbid(self):
