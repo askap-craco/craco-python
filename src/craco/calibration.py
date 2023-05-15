@@ -128,7 +128,7 @@ def load_gains(fname):
 
         freqfile = fname.replace(".bin", ".freq.npy")
 
-        if os.path.exist(freqfile):
+        if os.path.exists(freqfile):
             freqs = np.load(freqfile)
 
         else:
