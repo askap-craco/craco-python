@@ -126,23 +126,29 @@ def load_gains(fname):
         # the maske array part at the bottom of tthis function will mask them out
         g[np.isnan(g)] = 0
 
-        # get solutions from casa
-        msfile = fname.replace('.bin','.ms')
-        freqs = None
+        freqfile = fname.replace(".bin", ".freq.npy")
 
-        # load channel frequencies from associated casa ms spectral
-        if not os.path.isdir(msfile):
-            raise ValueError(f'MS file missing to load frequencies {msfile}')
+        if os.path.exist(freqfile):
+            freqs = np.load(freqfile)
 
-        log.info('Loading frequencies from %s', msfile)
-        import casatools
-        tb = casatools.table()
-        tb.open(os.path.join(msfile, 'SPECTRAL_WINDOW'))
-        assert tb.nrows() == 1, f'Expected only 1 spectral window. got {tb.nrows()}'
-        freqs = tb.getcol('CHAN_FREQ')[:,0] # list of all frequencies in Hz
-        chan_width = tb.getcol('CHAN_WIDTH')
-        assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
-        tb.close()
+        else:
+            # get solutions from casa
+            msfile = fname.replace('.bin','.ms')
+            freqs = None
+
+            # load channel frequencies from associated casa ms spectral
+            if not os.path.isdir(msfile):
+                raise ValueError(f'MS file missing to load frequencies {msfile}')
+
+            log.info('Loading frequencies from %s', msfile)
+            import casatools
+            tb = casatools.table()
+            tb.open(os.path.join(msfile, 'SPECTRAL_WINDOW'))
+            assert tb.nrows() == 1, f'Expected only 1 spectral window. got {tb.nrows()}'
+            freqs = tb.getcol('CHAN_FREQ')[:,0] # list of all frequencies in Hz
+            chan_width = tb.getcol('CHAN_WIDTH')
+            assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
+            tb.close()
 
     elif os.path.isdir(fname): #probably miriad 
         if fname.endswith('/'): # remove traiilng slash if prsent
