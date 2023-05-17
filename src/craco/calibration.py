@@ -150,6 +150,23 @@ def load_gains(fname):
             assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
             tb.close()
 
+    elif os.path.isfile(fname) and fname.endswith('.smooth.npy'):
+        g = np.load(fname)[0]
+        npol = g.shape[-1]
+        if npol == 4: # Npol is [XX, XY, YX, YY] just pick out [XX,YY]
+            log.info('Removing cross pols from solution %s', fname)
+            g = g[...,[0,3]]
+
+        log.info("loaded CALIBRATION bandpass solutions from %s", fname)
+
+        # Values are nan if the antenna is missing. We'll replace with zeros here and
+        # the maske array part at the bottom of tthis function will mask them out
+        g[np.isnan(g)] = 0
+
+        freqfile = fname.replace(".smooth.npy", ".freq.npy")
+        freqs = np.load(freqfile)
+
+
     elif os.path.isdir(fname): #probably miriad 
         if fname.endswith('/'): # remove traiilng slash if prsent
             fname = fname[:-1]
