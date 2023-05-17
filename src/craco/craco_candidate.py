@@ -215,6 +215,59 @@ def importfig2img(fig):
     
     return Image.open(buffer)
 
+### webpage related code
+def _webpage_style():
+    """
+    define css here
+    """
+    return """<style>
+    table.info {
+        table-layout: fixed;
+        width: 80%;
+        border: 1px solid black;
+        border-left: none; 
+        border-right: none;
+    }
+    table.info tr{
+        border: 1px solid black;
+        border-left: none; 
+        border-right: none;
+    }
+    table.info td {
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        width: 25%;
+    }
+
+    table.threecol {
+        table-layout: fixed;
+        border: none;
+        width: 90%;
+    }
+    table.threecol td {
+        width: 33%;
+    }
+</style>
+"""
+
+def _webpage_info_table(infolst, ncol=2):
+    """
+    create a `ncol` table to show information of the burst
+    """
+    header = '''<table class="info" style="margin-left: auto; margin-right: auto;">\n'''
+    body = ''
+    for i in range(0, len(infolst), ncol):
+        row = "<tr>\n"
+        for j in range(ncol):
+            if i + j >= len(infolst): 
+                row += '''<td><b></b></td> <td></td>\n'''
+            else:
+                _key, _value = infolst[i+j]
+                row += '''<td><b>{}</b></td> <td>{}</td>\n'''.format(_key, _value)
+        row += "</tr>\n"
+        body += row
+    return f"{header}{body}</table>"
+
 class Candidate:
     """
     class for analysing candidate from craco pipeline
@@ -247,7 +300,7 @@ class Candidate:
     
     def __init__(
         self, crow, uvsource, calibration_file,
-        flagauto=True, extractdata=True,
+        workdir="./", flagauto=True, extractdata=True,
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -259,6 +312,10 @@ class Candidate:
         """
         self.search_output = crow # candidate run output
         self.calibration_file = calibration_file
+        self.workdir = workdir
+
+        # make work dir if not exists
+        if not os.path.exists(workdir): os.makedirs(workdir)
         
         # get basic information from uvsource
         self._fetch_uvprop(uvsource)
@@ -272,7 +329,13 @@ class Candidate:
             
         # get candidate data from vis...
         if extractdata:
-            self._get_candidate_data(buffer=10)
+            self._get_candidate_data(buffer=0)
+
+        self.coord = SkyCoord(
+                self.search_output["ra_deg"],
+                self.search_output["dec_deg"],
+                unit=units.degree,
+            )
             
         
     def _fetch_uvprop(self, uvsource):
@@ -317,10 +380,10 @@ class Candidate:
             find_flag(self.uvsource)
         )
         
-    def _get_candidate_data(self, buffer=10, uvwave_metrics="mean"):
+    def _get_candidate_data(self, buffer=0, uvwave_metrics="mean"):
         """
         get candidate data based on the burst_range
-        buffer is the value for extract integration
+        buffer is the value for extra integration, by default no extra integration
         """
         logging.info(f"extracting burst data from uvfits file... this can take a long time...")
         _sstart, _send = self.burst_range
@@ -356,11 +419,6 @@ class Candidate:
         """
         rotate the phase center to the candidate coordinate...
         """
-        self.coord = SkyCoord(
-            self.search_output["ra_deg"],
-            self.search_output["dec_deg"],
-            unit=units.degree,
-        )
 
         lm = coord2lm(self.coord, self.plan.phase_center)
         psvis = pointsource(
@@ -397,7 +455,7 @@ class Candidate:
         function to load burst filterbank
         """
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=10)
+            self._get_candidate_data(buffer=0)
         
         if not hasattr(self, "rotate_data"):
             self._rotate_vis()
@@ -525,7 +583,7 @@ class Candidate:
         """
         # note: we don't need to perform phase rotation here
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=10)
+            self._get_candidate_data(buffer=0)
 
         if not hasattr(self, "norm_data_pc"):
             self._normalise_vis(target_input_rms=target_input_rms, target=False)
@@ -580,10 +638,24 @@ class Candidate:
 
         ### TODO: make images each integration, and image for the whole burst
         # make image cube...
-        self.imgcube = np.array([
+        imgcube = np.array([
             self._image_gridded_data(self.grid_data[..., i], self.imager)
             for i in range(self.grid_data.shape[-1])
         ])
+
+        # note from keith: the final image is a complex number,
+        # real part and imag part are both images
+        # real part stands for timestamp 1, 3, 5, ...
+        # imag part stands for timestamp 2, 4, 6, ...
+        # TODO: finish this part for self.imgcube
+
+        ### currently, we will use a for loop
+        _imgcube = [] # use a list here
+        for i in imgcube: #each element is an image (complex number)
+            _imgcube.append([i.real])
+            _imgcube.append([i.imag])
+        self.imgcube = np.concatenate(_imgcube)
+        
 
     def _plot_single_image_wo_wcs(self, imgdata, vmin, vmax):
         """
@@ -628,9 +700,9 @@ class Candidate:
         self.imglist = imglist # this store burst images...
 
         if gif == True: # make gif images...
-            imageio.mimsave("burst.gif", self.imglist, duration=30)
+            imageio.mimwrite(f"{self.workdir}/burst.gif", self.imglist, duration=20, loop=0)
         else:
-            zoomdir = "./burstzoom/"
+            zoomdir = f"{self.workdir}/burstzoom/"
             if not os.path.exists(zoomdir):
                 os.makedirs(zoomdir)
             for iimg, img in enumerate(self.imglist):
@@ -663,7 +735,7 @@ class Candidate:
         )
         ax.set_title("std image (log10)")
 
-        fig.savefig("./burst_field_image.jpg", bbox_inches="tight")
+        fig.savefig(f"{self.workdir}/burst_field_image.jpg", bbox_inches="tight")
         plt.close()
 
     ###### main public functions here!
@@ -681,7 +753,7 @@ class Candidate:
         """
         # load data, calibrate data, rotate data, normalise data, make filterbank
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=10)
+            self._get_candidate_data(buffer=0)
         if not hasattr(self, "cal_data"):
             self._calibrate_data(self.calibration_file)
         if not hasattr(self, "rotate_data"):
@@ -695,18 +767,18 @@ class Candidate:
         # 0-DM dedispered data
         fig, ax = self.plot_filterbank(dm=0.)
         ax.set_title("Dedispersed at DM=0")
-        fig.savefig("filterbank_dm0.0.jpg", bbox_inches="tight")
+        fig.savefig(f"{self.workdir}/filterbank_dm0.0.jpg", bbox_inches="tight")
         plt.close()
 
         # nominal-DM dedispersed data
         fig, ax = self.plot_filterbank(dm=self.search_output["dm_pccm3"])
         ax.set_title("Dedispersed at DM={:.2f}".format(self.search_output["dm_pccm3"]))
-        fig.savefig("filterbank_dm{:.1f}.jpg".format(self.search_output["dm_pccm3"]), bbox_inches="tight")
+        fig.savefig(f"{self.workdir}/filterbank_dm{self.search_output['dm_pccm3']:.1f}.jpg", bbox_inches="tight")
         plt.close()
 
         # plot DM-t plot, butterfly!!!
         fig, ax = self.plot_dmt(dmfact=dmfact, ndm=ndm)
-        fig.savefig("butterfly_plot.jpg", bbox_inches="tight")
+        fig.savefig(f"{self.workdir}/butterfly_plot.jpg", bbox_inches="tight")
         plt.close()
 
     def run_imager(
@@ -719,7 +791,7 @@ class Candidate:
         """
         #load data, calibrate data, normalise data, dedisperse data
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=10)
+            self._get_candidate_data(buffer=0)
         if not hasattr(self, "cal_data"):
             self._calibrate_data(self.calibration_file)
         if not hasattr(self, "norm_data_pc"):
@@ -730,7 +802,7 @@ class Candidate:
                 dm=self.search_output["dm_pccm3"],
             )
             # TODO: need to double check if the data has already
-            # been dedispered before, if it is dedispersed with 
+            # been dedispered before, and if it is dedispersed with 
             # the correct dm
         
         # make gridding and perform imaging...
@@ -743,6 +815,89 @@ class Candidate:
         )
         # make image of the field
         self._make_field_image(wwcs=wwcs)
+
+    def _make_srcinfo(self):
+        """
+        create a list contains source/burst information
+        """
+        ### information from uvsource
+        # make information for coordinate
+        pccoord = self.uvsource.get_target_skycoord()
+        self.fitsinfo=[
+            ["Target", self.uvsource.target_name],
+            ["Center Coord",  pccoord.to_string("hmsdms")],
+            ["Telescope", "ASKAP CRACO"],
+            ["Tsamp", "{:.2f} ms".format(self.tsamp * 1e3)],
+            ["Freq", "{:.1f} - {:.1f} MHz".format(self.freqs[0]/1e6, self.freqs[-1]/1e6)],
+            ["Fctr", "{:.1f} MHz".format((self.freqs[0] + self.freqs[-1]) / 2 / 1e6)],
+            ["Nchan", "{}".format(self.nchan)],
+        ]
+
+        ### information from candidates
+        # work out the mjd time of the burst at inf freq
+        _mjd = self.search_output["mjd"]
+        _delay = calculate_dm_tdelay(self.freqs.min(), np.inf, self.search_output["dm_pccm3"])
+        _day = 24 * 3600
+        _boxcwidth = self.search_output["boxc_width"] + 1
+        _mjd = _mjd - _delay / _day - _boxcwidth * self.tsamp / _day
+
+        # check if coord exists
+        # if not hasattr(self, "coord"):
+        #     self.coord = SkyCoord(
+        #         self.search_output["ra_deg"],
+        #         self.search_output["dec_deg"],
+        #         unit=units.degree,
+        #     )
+
+        self.srcinfo=[
+            ["Coord", self.coord.to_string("hmsdms")],
+            ["Gal Coord", self.coord.galactic.to_string("decimal")],
+            ["SNR", "{:.2f}".format(self.search_output["SNR"])],
+            ["DM", "{:.2f} pc cm^-3".format(self.search_output["dm_pccm3"])],
+            ["Width", "boxcar {} => {:.1f} ms".format(_boxcwidth, _boxcwidth * self.tsamp * 1e3)],
+            ["TimeSec", "{:.1f} s".format(self.search_output["obstime_sec"])],
+            ["MJDinf", "{:.9f}".format(_mjd)], 
+        ]
+
+    def create_webpage(self):
+        """
+        function to create a webpage to store all information
+        """
+        self._make_srcinfo()
+
+        head = """<head>\n{}</head>\n""".format(_webpage_style())
+
+        ### information
+        info = """<table style="width: 95%; margin-left: auto; margin-right: auto;">\n"""
+        info += """<td style="width: 80%;">\n"""
+        info += _webpage_info_table(self.fitsinfo)
+        # info += """</tr>\n<tr>\n"""
+        info += _webpage_info_table(self.srcinfo)
+        info += """</td>\n"""
+        info += """<td style="width: 20%;"><img src="burst.gif" style="width: 100%;"></td>\n"""
+        info += """</tr>\n</table>\n"""
+
+        ### filterbanks
+        burstplots = """<table class="threecol" style="margin-left: auto; margin-right: auto;">
+<tr>
+    <td><img src="filterbank_dm0.0.jpg" style="width: 100%;"></td>
+    <td><img src="filterbank_dm{:.1f}.jpg" style="width: 100%;"></td>
+    <td><img src="butterfly_plot.jpg" style="width: 100%;"></td>
+</tr>
+</table>
+""".format(self.search_output["dm_pccm3"])
+
+        fieldplots = """<table style="width: 45%; margin-left: auto; margin-right: auto;">
+<tr>
+    <td><img src="burst_field_image.jpg" style="width: 100%;"></td>
+</tr>
+</table>
+"""
+        html =  f"<html>{head}{info}{burstplots}{fieldplots}</html>"
+
+        with open(f"{self.workdir}/burst.html", "w") as fp:
+            fp.write(html)
+
 
 def load_cands(fname, maxcount=None):
     dtype = np.dtype(
@@ -778,6 +933,7 @@ def _main():
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = True)
     parser.add_argument("--target_input_rms", type=int, default=1)
     parser.add_argument("--remove_aux", type=bool, help="wheter to clean uvdata created by cracoplan function", default=True)
+    parser.add_argument("-p", "--path", type=str, help="place to save all images, html files", default="./")
     
     values = parser.parse_args()
 
@@ -785,11 +941,12 @@ def _main():
     cand = Candidate(
         crow=c[values.index], uvsource=values.uv,
         calibration_file=values.calibration, 
-        extractdata=False,
+        extractdata=False, workdir=values.path,
     )
 
     cand.run_filterbank(norm=values.norm, target_input_rms=values.target_input_rms)
     cand.run_imager(norm=values.norm, target_input_rms=values.target_input_rms)
+    cand.create_webpage()
 
     if values.remove_aux:
         os.system("rm $PWD/uv_data.*.txt")
