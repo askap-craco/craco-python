@@ -35,7 +35,10 @@ from craco.metadatafile import MetadataFile
 from scipy import constants
 from collections import namedtuple
 from craft.craco import ant2bl
+from craco import mpiutil
+from craft.cmdline import strrange
 
+    
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
@@ -82,8 +85,27 @@ class BaselineIndex:
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
 CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
 
+class BeamRankInfo(namedtuple('BeamProcInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
+    @property
+    def rank_file_str(self):
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} xrtdevid={self.xrt_device_id}'
+        return s
+
+class ReceiverRankInfo(namedtuple('ReceiverInfo', ['rxid','rank','host','slot','core','block','card','fpga'])):
+    @property
+    def rank_file_str(self):
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
+        return s
+
+
 class MpiPipelineInfo:
     def __init__(self, values):
+        '''
+        TODO - integrate this in with a nice way of doing dump hostfile
+        '''
+        self.hosts = mpiutil.parse_hostfile(values.hostfile)
+        self.beam_ranks = []
+        self.receiver_ranks = []
 
         if values.max_ncards is None:
             ncards = len(values.block)*len(values.card)
@@ -94,7 +116,7 @@ class MpiPipelineInfo:
         self.nrx = nrx
         self.ncards = ncards
 
-            # yuck. This is just yuk.
+        # yuck. This is just yuk.
         if values.beam is None:
             values.nbeams = 36
         else:
@@ -127,6 +149,14 @@ class MpiPipelineInfo:
     def beamid(self):
         assert self.is_beam_processor, 'Requested beam ID of non beam processor'
         return self.world_rank
+
+    def beam_rank_info(self, beamid):
+        '''
+        Returns the rank info for the given beam
+        '''
+        
+        rank_info = next(filter(lambda info: info.beamid == beamid, self.beam_ranks))
+        return rank_info
 
     @property
     def is_rx_processor(self):
@@ -246,17 +276,11 @@ class MpiObsInfo:
         Returns which device should be used for searcing for this pipeline
         Returns None if this beam processor shouldnt be processing this beam
         '''
-        assert self.pipe_info.is_beam_processor, 'Device id shouldnt be called by non beam processors'
-        search_beams = self.values.search_beams
-        beamid = self.beamid
-        devices = [0,1] # these are the available devices
-        devid = None
-        if beamid in search_beams:
-            bidx = search_beams.index(beamid)
-            devidx = bidx % len(devices)
-            devid = devices[devidx]
-
-        return devid
+        
+        beam_rank_info = self.pipe_info.beam_rank_info(self.beamid)
+        xrtdev = beam_rank_info.xrt_device_id
+        
+        return xrtdev
 
     @property
     def beamid(self):
@@ -526,11 +550,11 @@ class ByteTransposer:
     def all2all(self, dtx):
         nmsgs = self.nmsgs
         t_barrier = MPI.Wtime()
-        log.info('Rank %s waiting', comm.Get_rank())
+        log.debug('Rank %s waiting', comm.Get_rank())
         comm.Barrier()
         t_start = MPI.Wtime()
         t_wait = t_start - t_barrier
-        log.info('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+        log.debug('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
 
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
@@ -829,7 +853,7 @@ class UvFitsFileSink:
                 self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
         
         self.uvout.fout.flush()
-        print(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
+        log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
         self.blockno += 1
 
 
@@ -891,9 +915,34 @@ def proc_beam(pipe_info):
         pipeline_sink.close()
 
 
-def dump_rankfile(values, fpga_per_rx=3):
+def parse_host_devices(hosts, devstr, devices):
+    '''
+    Get host devices from device string
+    :hosts: list of host names
+    :devstr: string like 'seren-01:1,seren-04:0,seren-5:0-1' of 'host:strrange' list of devices
+    :devices: Tuple of devices that are normally allowed, e.g. (0,1)
+    '''
+
+    dead_cards = [dc.split(':') for dc in devstr.split(',')]
+    host_cards = {}
+    for h in hosts:
+        my_devices = devices[:]
+        my_bad_devices = [strrange(dc[1]) for dc in dead_cards if dc[0] == h]
+        all_bad_devices = set()
+        for bd in my_bad_devices:
+            all_bad_devices.update(bd)
+
+
+        host_cards[h] = tuple(sorted(set(devices) - all_bad_devices))
+        
+    return host_cards
+
+def dump_rankfile(pipe_info, fpga_per_rx=3):
     from craco import mpiutil
-    hosts = mpiutil.parse_hostfile(values.hostfile)
+    values = pipe_info.values
+    fpga_per_rx = values.nfpga_per_rx
+    hosts = pipe_info.hosts
+    
     log.debug("Hosts %s", hosts)
     total_cards = len(values.block)*len(values.card)
     
@@ -910,44 +959,67 @@ def dump_rankfile(values, fpga_per_rx=3):
     log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
-    with open(values.dump_rankfile, 'w') as fout:
-        # add all the beam processes
-        for beam in range(nbeams):
-            hostidx = beam % len(hosts)
-            host = hosts[hostidx]
-            slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
-            core='1-2'
-            s = f'rank {rank}={host} slot={slot}:{core} # Beam {beam}\n'
-            fout.write(s)
-            rank += 1
+    host_search_beams = {}
+    devices = (0,1)
+    host_cards = parse_host_devices(hosts, values.dead_cards, devices)
+    
+    for beam in range(nbeams):
+        hostidx = beam % len(hosts)
+        assert hostidx < len(hosts), f'Invalid hostidx beam={beam} hostidx={hostidx} lenhosts={len(hosts)}'
+        host = hosts[hostidx]
+        slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
+        core='1-2'
+        devices = host_cards[host]
+        this_host_search_beams = host_search_beams.get(host,[])
+        host_search_beams[host] = this_host_search_beams
+        if beam in values.search_beams:
+            this_host_search_beams.append(beam)
+            
+        devid = None
+        if beam in this_host_search_beams:
+            devid = this_host_search_beams.index(beam)
+            if devid not in devices:
+                devid = None
 
-        rxrank = 0
-        cardno = 0
-        for block in values.block:
-            for card in values.card:
-                cardno += 1
-                if values.max_ncards is not None and cardno >= values.max_ncards + 1:
-                    break
-                for fpga in values.fpga[::fpga_per_rx]:
-                    hostidx = rxrank // nrx_per_host
-                    hostrank = rxrank % nrx_per_host
-                    host = hosts[hostidx]
-                    slot = 1 # fixed because both cards are on NUMA=1
-                    # Put different FPGAs on differnt cores
-                    evenfpga = fpga % 2 == 0
-                    ncores = 10
-                    icore = (hostrank % 5)*2
-                    core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
-                    core='0-9'
-                    slot = 1 # where the network cards are
-                    s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
-                    fout.write(s)
-                    rank += 1
-                    rxrank += 1
+        log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
+        rank_info = BeamRankInfo(beam, rank, host, slot, core, devid)
+        pipe_info.beam_ranks.append(rank_info)
+        rank += 1
+
+    rxrank = 0
+    cardno = 0
+    for block in values.block:
+        for card in values.card:
+            cardno += 1
+            if values.max_ncards is not None and cardno >= values.max_ncards + 1:
+                break
+            for fpga in values.fpga[::fpga_per_rx]:
+                hostidx = rxrank // nrx_per_host
+                hostrank = rxrank % nrx_per_host
+                host = hosts[hostidx]
+                slot = 1 # fixed because both cards are on NUMA=1
+                # Put different FPGAs on differnt cores
+                evenfpga = fpga % 2 == 0
+                ncores = 10
+                icore = (hostrank % 5)*2
+                core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
+                core='0-9'
+                slot = 1 # where the network cards are
+                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
+                pipe_info.receiver_ranks.append(rank_info)
+                rank += 1
+                rxrank += 1
+
+        if values.dump_rankfile:
+            with open(values.dump_rankfile, 'w') as fout:
+                for rank_info in pipe_info.beam_ranks:
+                    fout.write(rank_info.rank_file_str+'\n')
+                for rank_info in pipe_info.receiver_ranks:
+                    fout.write(rank_info.rank_file_str+'\n')
+
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    from craft.cmdline import strrange
     from craco import search_pipeline
     
     cardcap_parser = cardcap.get_parser()
@@ -964,6 +1036,7 @@ def _main():
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=None)
+    parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -977,7 +1050,6 @@ def _main():
             record.rank = rank
             return True
 
-    
     if values.verbose:
         level = logging.DEBUG
     else:
@@ -990,22 +1062,27 @@ def _main():
     logger = logging.getLogger()
     logger.addHandler(handler)
     logger.setLevel(level)
+
+    try :
+        pipe_info = MpiPipelineInfo(values)
+        
+        dump_rankfile(pipe_info) # always dump the rankfile - just need to do this to setup pipe_info
+        if values.dump_rankfile:
+            sys.exit(0)
+            
+        if pipe_info.is_beam_processor:
+            proc_beam(pipe_info)
+        else:
+            proc_rx(pipe_info)
+
+        log.info(f'Rank {rank}/{numprocs} complete. Waiting for everythign')
+        comm.Barrier()
+    except:
+        log.exception('Exception running pipeline')
+
     
-    pipe_info = MpiPipelineInfo(values)
-
-    if values.dump_rankfile:
-        dump_rankfile(pipe_info.values, values.nfpga_per_rx)
-        sys.exit(0)
-
-    if pipe_info.is_beam_processor:
-        proc_beam(pipe_info)
-    else:
-        proc_rx(pipe_info)
-
-    comm.Barrier()
-    print(f'Rank {rank}/{numprocs} complete')
-
-                  
+    if rank == 0:
+        log.info('Pipeline complete')
     
 
 if __name__ == '__main__':

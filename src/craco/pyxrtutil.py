@@ -66,7 +66,7 @@ class Kernel:
             flags = getattr(pyxrt.kernel, flags)
         self.krnl = pyxrt.kernel(device, xbin.get_uuid(), name, flags)
         self.name = name
-        self.print_groups()
+        #self.print_groups()
         
     def print_groups(self):
         self.groups = []

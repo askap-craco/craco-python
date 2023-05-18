@@ -210,7 +210,7 @@ class CalibrationSolution:
         self.values = values
 
         if values.calibration:
-            gains, freqs = load_gains(values.calibration)
+            gains, freqs = open_calibration_file(values.calibration, plan.beamid)
             log.info('Loaded calibration gains %s from calfile %s', gains.shape, plan.values.calibration)
         else: # make dummy gains
             shape = (self.plan.maxant, self.plan.nf, 2)
@@ -300,6 +300,19 @@ class CalibrationSolution:
         # OMFG - if you do g[:,chanrange,:].mask if chanrange if a list of indexes, it doesn't work, but if it's a slice it does work. But if you do g.mask[:,chanrange,:] it works for both
         self.gains.mask[:,chanrange,:] = flagval
         return self.__calc_solarray()
+
+def open_calibration_file(calpath, beamid):
+    '''
+    Try to load calibraiton gains, if not, try to load them in a pathgiven by the beamid instead
+    '''
+    try: 
+        g = load_gains(calpath)
+    except:
+        beam_path = os.path.join(calpath, f'{beamid:02d}/b{beamid:02d}.aver.4pol.smooth.npy')
+        log.info('Calpath %s is not openable as a file. Trying as a multibeam directory with beam=%s', calpath, beam_path)
+        g = load_gains(beam_path)
+
+    return g
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

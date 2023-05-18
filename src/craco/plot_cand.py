@@ -44,6 +44,7 @@ def _main():
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
+    parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -52,6 +53,7 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
+    fig, ax = pylab.subplots(2,2)
     for f in values.files:
         c = load_cands(f)
         if values.threshold is not None:
@@ -65,7 +67,7 @@ def _main():
             c = c[c['dm'] == values.dm]
             
             
-        fig, ax = pylab.subplots(2,2)
+
         dmhist = ax[0,0]
         snhist = ax[0,1]
         candvt = ax[1,0]
@@ -78,21 +80,30 @@ def _main():
         dmhist.hist(c['dm_pccm3'], histtype='step', bins=50)
         dmhist.set_xlabel('DM (pc/cm3)')
         dmhist.set_ylabel('count')
-        
 
-        candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, c['SNR'])
+        ms = c['SNR']**2 * values.sn_gain
+
+        candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms)
         candvt.set_yscale('log')
         candvt.set_xlabel('Obstime (sec)')
         candvt.set_ylabel('1+DM (pc/cm3)')
 
-        candimg.scatter(c['ra_deg'],c['dec_deg'], c['SNR'])
+        candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms)
+        dec = c['dec_deg']
+        ra = c['ra_deg']
+        if len(c) == 0:
+            print(f, 'is empty')
+        else:
+            print(f, 'decrange', dec.max() - dec.min(), 'rarange', ra.max() - ra.min())
+
         candimg.set_xlabel('RA (deg)')
         candimg.set_ylabel('Dec (deg)')
 
         fig.tight_layout()
-        pylab.show()
-        if values.output:
-            pylab.savefig(values.output)
+        
+    pylab.show()
+    if values.output:
+        pylab.savefig(values.output)
         
     
 

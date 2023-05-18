@@ -31,9 +31,9 @@ echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 
 
 # save the rankfile
-extra_args="--devices mlx5_1"
+extra_args="--devices mlx5_1 --hostfile $hostfile"
 
-mpipipeline --hostfile $hostfile --dump-rankfile $rankfile $extra_args $@
+mpipipeline --dump-rankfile $rankfile $extra_args $@
 
 retval=$?
 if [ $retval -ne 0 ]; then

@@ -791,7 +791,7 @@ def get_parser():
     #parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
     
     parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed')
-    parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per beam')
+    parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per synthesized beam')
     
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
@@ -895,6 +895,7 @@ class PipelineWrapper:
         device = self.device
         xbin = self.xbin
         uuid = self.uuid
+        beamid = self.plan.beamid
 
         hdr = {'nbits':32,
                'nchans':plan.nf,
@@ -911,7 +912,9 @@ class PipelineWrapper:
         if values.phase_center_filterbank is None:
             self.pc_filterbank = None
         else:
-            self.pc_filterbank = sigproc.SigprocFile(values.phase_center_filterbank, 'wb', hdr)
+            pcfile = os.path.join(values.outdir, values.phase_center_filterbank.replace('.fil',f'b{beamid:02d}.fil'))
+            self.pc_filterbank = sigproc.SigprocFile(pcfile, 'wb', hdr)
+
 
         # Create a pipeline
         alloc_device_only = values.dump_mainbufs is not None or \
@@ -927,7 +930,8 @@ class PipelineWrapper:
             
         self.pipeline = p
         p.clear_buffers(values)
-        candout = open(values.cand_file, 'w')
+        candfile = os.path.join(values.outdir, values.cand_file+f'b{beamid:02d}')
+        candout = open(candfile, 'w')
         candout.write(cand_str_wcs_header)
         self.total_candidates = 0
         self.candout = candout
