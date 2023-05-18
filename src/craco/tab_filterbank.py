@@ -123,8 +123,8 @@ def run(f, values):
         'src_dej':coord.dec.deg,
         'tstart':plan.tstart.utc.mjd,
         'tsamp':plan.tsamp_s.value, # in the unit of second
-        'fch1':plan.fmin,
-        'foff':plan.foff,
+        'fch1':plan.fmin / 1e6,
+        'foff':plan.foff / 1e6,
         'source_name':vis_source.target_name,
     }
 
