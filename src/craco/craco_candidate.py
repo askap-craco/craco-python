@@ -13,6 +13,7 @@ from PIL import Image
 
 from astropy.coordinates import SkyCoord
 import astropy.units as units
+from astropy.io import fits
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -215,6 +216,19 @@ def importfig2img(fig):
     
     return Image.open(buffer)
 
+def _vis2nbl(vis):
+    """
+    functions to infer the number of the baselines based on the visibility data from uvfits.
+    This don't consider any flagging etc as we don't care about that
+    """
+    d0 = vis[0]["DATE"]
+
+    nbl = 0
+    for visrow in vis:
+        d = visrow["DATE"]
+        if d > d0: return nbl
+        nbl += 1
+
 ### webpage related code
 def _webpage_style():
     """
@@ -323,13 +337,15 @@ class Candidate:
         # get starting time and ending time of the burst
         self._burstrange()
         
-        if flagauto: # automatically flagging long uvw antennas
-            self._flag_ants()
-        self._load_plan()
+        # TODO:1. allow flagged antenna input based on the candidate file
+        # TODO:2. do not load plan automatically.
+        # if flagauto: # automatically flagging long uvw antennas
+        #     self._flag_ants()
+        # self._load_plan()
             
         # get candidate data from vis...
         if extractdata:
-            self._get_candidate_data(buffer=0)
+            self._get_candidate_data(buffer=50)
 
         self.coord = SkyCoord(
                 self.search_output["ra_deg"],
@@ -366,10 +382,11 @@ class Candidate:
         )
         dt_dis_samp = dt_dis // self.tsamp
         _send = self.search_output["total_sample"] # sample end
-        _sstart = max(0, _send - dt_dis_samp - self.search_output["boxc_width"])
+        _sstart = _send - dt_dis_samp - self.search_output["boxc_width"]
+        # _sstart = max(0, _send - dt_dis_samp - self.search_output["boxc_width"])
         
         
-        self.burst_range = (int(_sstart), int(_send))
+        self.burst_range = (int(_sstart), int(_send)) # note this can be out of range...
         logging.info(f"burst spanning from {int(_sstart)} to {int(_send)}...")
         
     def _flag_ants(self):
@@ -379,18 +396,106 @@ class Candidate:
         self.uvsource = self.uvsource.set_flagants(
             find_flag(self.uvsource)
         )
+
+    def _visdata_padding(self, vis, visrange, finrange):
+        """
+        padding zeros to the visibility data given the range
+
+        Params
+        ----------
+        vis: dict or numpy.ndarray
+            visibility data to be modified
+        visrange: (int, int)
+            visibility range in terms of indices
+        finrange: (int, int)
+            final timestamp range we want to achieve, 
+            usually this range should be wider (at least equal) to the visrange
+
+        Returns
+        ----------
+        """
+        vis_ = vis.copy() # just in case it perform modification on the raw data...
+
+        vis_start, vis_end = visrange
+        fin_start, fin_end = finrange
+
+        t_pre = vis_start - fin_start
+        t_app = fin_end - vis_end
+
+        assert t_pre >= 0 and t_app >= 0, "finrange is shorted than the visrange, aborted..."
+
+        if isinstance(vis, dict):
+            # ifthe visibility data is a dictionary...
+            for bl in vis:
+                visbl = vis[bl]
+                nchan, npol, _ = visbl.shape
+                ### values here
+                vis_pre = np.zeros((nchan, npol, t_pre), dtype=complex)
+                vis_app = np.zeros((nchan, npol, t_app), dtype=complex)
+
+                finvis = np.concatenate(
+                    [vis_pre, visbl, vis_app], axis=-1
+                )
+
+                if isinstance(finvis, np.ma.core.MaskedArray):
+                    finvis[..., t_pre].mask = 1.
+                    finvis[..., -t_app-1:].mask = 1.
+
+                vis_[bl] = finvis
+
+            return vis_
+
+        # other cases, numpy.ndarray or numpy.ma.core.MaskedArray
+        raise NotImplementedError("Currently array is not supported...")     
         
-    def _get_candidate_data(self, buffer=0, uvwave_metrics="mean"):
+    def dump_burst_uvfits(self, padding=50, fout="burst.uvfits"):
+        """
+        dump burst uvfits data based on the burst range...
+        """
+        nbl = _vis2nbl(self.uvsource.vis)
+        tt = self.uvsource.vis.size // nbl
+
+        _sstart, _send = self.burst_range
+        
+        ## add padding
+        _sstart = _sstart - padding
+        _send = _send + padding
+
+        # check if there are within the range
+        if _sstart < 0: _sstart = 0
+        if _send >= tt: _send = tt - 1
+
+        ### extract tables
+        da_table = self.uvsource.hdulist[0]
+        aux_table = self.uvsource.hdulist[1:]
+
+        ### only extract _sstart, _send data
+        bu_data = da_table.data[_sstart*nbl:_send*nbl]
+        bu_table = fits.GroupsHDU(bu_data, header=da_table.header)
+        bu_table.header["PZERO4"] = bu_data[0]["DATE"]
+
+        nhdu = fits.HDUList([bu_table, *aux_table])
+        nhdu.writeto(fout)
+    
+    def _get_candidate_data(self, buffer=50, uvwave_metrics="mean"):
         """
         get candidate data based on the burst_range
-        buffer is the value for extra integration, by default no extra integration
+        buffer (padding) is the value for extra integration, by default no extra integration
         """
         logging.info(f"extracting burst data from uvfits file... this can take a long time...")
         _sstart, _send = self.burst_range
-        _sstart = max(0, _sstart - buffer)
+        # _sstart = max(0, _sstart - buffer)
+        _sstart = _sstart - buffer
         _send = _send + buffer
         
-        self.burst_data_dict, _burst_uvws = self.uvsource.time_block_with_uvw_range((_sstart, _send))
+        # self.visrange = (_sstart, _send)
+        self.burst_data_dict, _burst_uvws, _vis_range = self.uvsource.time_block_with_uvw_range((_sstart, _send))
+        # self.burst_data_dict = self._visdata_padding(
+        #     burst_data_dict, visrange=_visrange, finrange=(_sstart, _send)
+        # )
+        ### this is for testing ###
+        self.burst_uvws = _burst_uvws
+        self.visrange = _vis_range # store the visibility range...
         self.burst_uvw = average_uvws(_burst_uvws, metrics=uvwave_metrics)
         self.burst_data = bl2array(self.burst_data_dict)
         
@@ -512,11 +617,11 @@ class Candidate:
             self._load_burst_filterbank(norm=norm, target_input_rms=1)
         
         if dm is None or dm == 0.0:
-            return self.filterbank[:, 0, :].data, self.burst_range
+            return self.filterbank[:, 0, :].data, self.visrange
         return filterbank_roll(
             tf=self.filterbank[:, 0, :].data, dm=dm,
             freqs=self.freqs, tint=self.tsamp,
-            tstart=self.burst_range[0],
+            tstart=self.visrange[0],
         )
 
     def _dedisperse2ts(self, dm=None, norm=True):
@@ -536,7 +641,7 @@ class Candidate:
 
         ndm = dm_range.shape[0] # just in case something went wrong...
 
-        trange = (self.burst_range[0], 2 * self.burst_range[1] - self.burst_range[0])
+        trange = (self.visrange[0], 2 * self.visrange[1] - self.visrange[0])
         nt = trange[1] - trange[0] + 1
 
         dmt = np.zeros((ndm, nt)) * np.nan
@@ -656,7 +761,6 @@ class Candidate:
             _imgcube.append([i.imag])
         self.imgcube = np.concatenate(_imgcube)
         
-
     def _plot_single_image_wo_wcs(self, imgdata, vmin, vmax):
         """
         plot a single image without wcs, this is mainly used for zoom in image
