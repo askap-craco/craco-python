@@ -179,25 +179,24 @@ def get_mode():
     
 class DdgridCu(Kernel):
     def __init__(self, device, xbin):
-        super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu:krnl_ddgrid_reader_4cu_1')
+        super().__init__(device, xbin, 'krnl_ddgrid_reader_4cu')
   
         
 class FfftCu(Kernel):
     def __init__(self, device, xbin, icu):
-        super().__init__(device, xbin, f'fft2d:fft2d_{icu+1}')
+        super().__init__(device, xbin, 'fft2d',icu=icu)
  
 class GridCu(Kernel):
     def __init__(self, device, xbin, icu):
-        super().__init__(device, xbin, f'krnl_grid_4cu:krnl_grid_4cu_{icu+1}')
+        super().__init__(device, xbin, f'krnl_grid_4cu', icu=icu)
 
-        
 class BoxcarCu(Kernel):
     def __init__(self, device, xbin):
-        super().__init__(device, xbin, f'krnl_boxc_4cu:krnl_boxc_4cu_1')
+        super().__init__(device, xbin, f'krnl_boxc_4cu')
 
 class FdmtCu(Kernel):
     def __init__(self, device, xbin):
-        super().__init__(device, xbin, 'fdmt_tunable_c32:fdmt_tunable_c32_1')
+        super().__init__(device, xbin, 'fdmt_tunable_c32')
 
 def instructions2grid_lut(instructions, max_nsmp_uv):
     data = np.array([[i.target_slot, i.uvidx, i.shift_flag, i.uvpix[0], i.uvpix[1]] for i in instructions], dtype=np.int32)
@@ -527,6 +526,22 @@ class Pipeline:
         I'm not sure why I did it this way, rather than waiting on the starts
         Maybe the starts hang for some reason
         '''
+
+
+        # new XRT doesn't need to poll register
+        poll_registers = False
+        if poll_registers:
+            self.poll_registers()
+
+        if self.starts is not None:
+            wait_for_starts(self.starts, self.call_start)
+            self.starts = None
+
+    def poll_registers(self):
+        '''
+        Wait for starts hung with old XRT. We polled registers to work around it.
+        WE might not need that anymore
+        '''
         log.debug('Sleeping 0.4')
         time.sleep(0.4) # short enough that any reasonable execution will still be running by the time we poll
         for retry in range(1000):
@@ -543,9 +558,6 @@ class Pipeline:
 
         self.total_retries += retry
 
-        if self.starts is not None:
-            wait_for_starts(self.starts, self.call_start)
-            self.starts = None
         
 
     def clear_candidates(self):
@@ -887,9 +899,15 @@ class PipelineWrapper:
         self.xbin = pyxrt.xclbin(values.xclbin)
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values
+
+        # New XRT versions return 'None' for IPs and return kernels instead
         iplist = self.xbin.get_ips()
+        if iplist is None:
+            iplist = self.xbin.get_kernels()
+            
         for iip, ip in enumerate(iplist):
             log.debug('IP %s name=%s', iip, ip.get_name())
+                    
 
         plan = self.plan
         device = self.device
