@@ -17,6 +17,7 @@ from astropy.io import fits
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 
 ### function to auto flag the antenna...
@@ -118,7 +119,7 @@ def average_uvws(bluvws, metrics="mean"):
     if metrics == "end":
         return {blid: bluvws[blid][:, -1] for blid in bluvws}
 
-def filterbank_roll(tf, dm, freqs, tint, tstart=0):
+def filterbank_roll(tf, dm, freqs, tint, tstart=0, keepnan=True):
     """
     dedisperse filterbank data with a given dm (part of code is stolen from plot_allbeams)
 
@@ -164,10 +165,17 @@ def filterbank_roll(tf, dm, freqs, tint, tstart=0):
     trange = np.arange(tstart - shift_max, tstart + nt + shift_max) # both included...
     
     ### perform clipping... remove nan values...
-    nonnan_t = (~np.isnan(newtf)).sum(axis=0) != 0
-    newtf = newtf[:, nonnan_t]
-    trange = trange[nonnan_t]
-    
+    if keepnan:
+        nonnan_t = (~np.isnan(newtf)).sum(axis=0) != 0
+        newtf = newtf[:, nonnan_t]
+        trange = trange[nonnan_t]
+    else:
+        nonnan_t = (np.isnan(newtf)).sum(axis=0) == 0
+        _index = np.arange(newtf.shape[-1])
+        _index = _index[nonnan_t]
+        trange = trange[_index[0]:_index[-1]+1]
+        newtf = newtf[:, _index[0]:_index[-1]+1]
+        
     return newtf, (trange[0], trange[-1])
 
 def _get_overlap_index(value1, value2):
@@ -261,6 +269,15 @@ def _webpage_style():
     table.threecol td {
         width: 33%;
     }
+
+    table.fourcol {
+        table-layout: fixed;
+        border: none;
+        width: 90%;
+    }
+    table.fourcol td {
+        width: 25%;
+    }
 </style>
 """
 
@@ -315,6 +332,7 @@ class Candidate:
     def __init__(
         self, crow, uvsource, calibration_file,
         workdir="./", flagauto=True, extractdata=True,
+        loadplan=False, flag_ant=None, padding=50,
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -327,6 +345,7 @@ class Candidate:
         self.search_output = crow # candidate run output
         self.calibration_file = calibration_file
         self.workdir = workdir
+        self.padding = padding
 
         # make work dir if not exists
         if not os.path.exists(workdir): os.makedirs(workdir)
@@ -339,13 +358,17 @@ class Candidate:
         
         # TODO:1. allow flagged antenna input based on the candidate file
         # TODO:2. do not load plan automatically.
-        # if flagauto: # automatically flagging long uvw antennas
-        #     self._flag_ants()
-        # self._load_plan()
+        if flagauto: # automatically flagging long uvw antennas
+            self._flag_ants()
+        else:
+            self._flag_ants(flag_ant)
+
+        if loadplan:
+            self._load_plan()
             
         # get candidate data from vis...
         if extractdata:
-            self._get_candidate_data(buffer=50)
+            self._get_candidate_data(buffer=self.padding)
 
         self.coord = SkyCoord(
                 self.search_output["ra_deg"],
@@ -353,7 +376,6 @@ class Candidate:
                 unit=units.degree,
             )
             
-        
     def _fetch_uvprop(self, uvsource):
         """
         get basic information from uvfits file
@@ -389,64 +411,68 @@ class Candidate:
         self.burst_range = (int(_sstart), int(_send)) # note this can be out of range...
         logging.info(f"burst spanning from {int(_sstart)} to {int(_send)}...")
         
-    def _flag_ants(self):
+    def _flag_ants(self, flag_ant=None):
         """
         flagging antennas based on the code we had...
         """
-        self.uvsource = self.uvsource.set_flagants(
-            find_flag(self.uvsource)
-        )
+        if flag_ant is None:
+            self.uvsource = self.uvsource.set_flagants(
+                find_flag(self.uvsource)
+            )
+        else:
+            self.uvsource = self.uvsource.set_flagants(flag_ant)
 
-    def _visdata_padding(self, vis, visrange, finrange):
-        """
-        padding zeros to the visibility data given the range
+    # def _visdata_padding(self, vis, visrange, finrange):
+    #     """
+    #     Note: this function is not used anymore
+    #     padding zeros to the visibility data given the range
 
-        Params
-        ----------
-        vis: dict or numpy.ndarray
-            visibility data to be modified
-        visrange: (int, int)
-            visibility range in terms of indices
-        finrange: (int, int)
-            final timestamp range we want to achieve, 
-            usually this range should be wider (at least equal) to the visrange
+    #     Params
+    #     ----------
+    #     vis: dict or numpy.ndarray
+    #         visibility data to be modified
+    #     visrange: (int, int)
+    #         visibility range in terms of indices
+    #     finrange: (int, int)
+    #         final timestamp range we want to achieve, 
+    #         usually this range should be wider (at least equal) to the visrange
 
-        Returns
-        ----------
-        """
-        vis_ = vis.copy() # just in case it perform modification on the raw data...
+    #     Returns
+    #     ----------
+    #     """
+    #     vis_ = vis.copy() # just in case it perform modification on the raw data...
 
-        vis_start, vis_end = visrange
-        fin_start, fin_end = finrange
+    #     vis_start, vis_end = visrange
+    #     fin_start, fin_end = finrange
 
-        t_pre = vis_start - fin_start
-        t_app = fin_end - vis_end
+    #     t_pre = vis_start - fin_start
+    #     t_app = fin_end - vis_end
 
-        assert t_pre >= 0 and t_app >= 0, "finrange is shorted than the visrange, aborted..."
+    #     assert t_pre >= 0 and t_app >= 0, "finrange is shorted than the visrange, aborted..."
 
-        if isinstance(vis, dict):
-            # ifthe visibility data is a dictionary...
-            for bl in vis:
-                visbl = vis[bl]
-                nchan, npol, _ = visbl.shape
-                ### values here
-                vis_pre = np.zeros((nchan, npol, t_pre), dtype=complex)
-                vis_app = np.zeros((nchan, npol, t_app), dtype=complex)
+    #     if isinstance(vis, dict):
+    #         # ifthe visibility data is a dictionary...
+    #         for bl in vis:
+    #             visbl = vis[bl]
+    #             nchan, npol, _ = visbl.shape
+    #             ### values here
+    #             vis_pre = np.zeros((nchan, npol, t_pre), dtype=complex)
+    #             vis_app = np.zeros((nchan, npol, t_app), dtype=complex)
 
-                finvis = np.concatenate(
-                    [vis_pre, visbl, vis_app], axis=-1
-                )
+    #             finvis = np.concatenate(
+    #                 [vis_pre, visbl, vis_app], axis=-1
+    #             )
 
-                if isinstance(finvis, np.ma.core.MaskedArray):
-                    finvis[..., t_pre].mask = 1.
-                    finvis[..., -t_app-1:].mask = 1.
+    #             if isinstance(finvis, np.ma.core.MaskedArray):
+    #                 finvis[..., t_pre].mask = 1.
+    #                 finvis[..., -t_app-1:].mask = 1.
 
-                vis_[bl] = finvis
+    #             vis_[bl] = finvis
 
-            return vis_
+    #         return vis_
 
-        # other cases, numpy.ndarray or numpy.ma.core.MaskedArray
-        raise NotImplementedError("Currently array is not supported...")     
+    #     # other cases, numpy.ndarray or numpy.ma.core.MaskedArray
+    #     raise NotImplementedError("Currently array is not supported...")     
         
     def dump_burst_uvfits(self, padding=50, fout="burst.uvfits"):
         """
@@ -475,7 +501,7 @@ class Candidate:
         bu_table.header["PZERO4"] = bu_data[0]["DATE"]
 
         nhdu = fits.HDUList([bu_table, *aux_table])
-        nhdu.writeto(fout)
+        nhdu.writeto(f"{self.workdir}/{fout}")
     
     def _get_candidate_data(self, buffer=50, uvwave_metrics="mean"):
         """
@@ -493,8 +519,6 @@ class Candidate:
         # self.burst_data_dict = self._visdata_padding(
         #     burst_data_dict, visrange=_visrange, finrange=(_sstart, _send)
         # )
-        ### this is for testing ###
-        self.burst_uvws = _burst_uvws
         self.visrange = _vis_range # store the visibility range...
         self.burst_uvw = average_uvws(_burst_uvws, metrics=uvwave_metrics)
         self.burst_data = bl2array(self.burst_data_dict)
@@ -522,7 +546,7 @@ class Candidate:
 
     def _rotate_vis(self):
         """
-        rotate the phase center to the candidate coordinate...
+        rotate the phase center to the candidate coordinate... phase rotate the calibrated data
         """
 
         lm = coord2lm(self.coord, self.plan.phase_center)
@@ -541,7 +565,7 @@ class Candidate:
         """
         normalise the data by channels (and baselines?)
 
-        by default, we will normalise the phase rotated data
+        by default, we will normalise the phase rotated data (i.e., target is True)
         """
         if target==True:
             self.norm_data = preprocess.normalise(
@@ -560,7 +584,7 @@ class Candidate:
         function to load burst filterbank
         """
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=0)
+            self._get_candidate_data(buffer=self.padding)
         
         if not hasattr(self, "rotate_data"):
             self._rotate_vis()
@@ -573,7 +597,7 @@ class Candidate:
         else:
             self.filterbank = np.nanmean(self.cal_data.real, axis=0)
 
-    def plot_filterbank(self, norm=True, dm=None):
+    def plot_filterbank(self, norm=True, dm=None, keepnan=True):
         """
         plot filterbank with a given dm value...
 
@@ -588,9 +612,15 @@ class Candidate:
             self._load_burst_filterbank(norm=norm, target_input_rms=1)
 
         fig = plt.figure(figsize=(6, 4))
-        ax = fig.add_subplot(1, 1, 1)
 
-        filterbank_plot, trange_ = self._dedisperse2tf(dm=dm, norm=norm)
+        filterbank_plot, trange_ = self._dedisperse2tf(dm=dm, norm=norm, keepnan=keepnan)
+
+        grid = mpl.gridspec.GridSpec(
+            nrows=5, ncols=5, wspace=0., hspace=0.
+        )
+
+        fig = plt.figure(figsize=(6, 4))
+        ax1 = fig.add_subplot(grid[1:, :-1])
 
         extent = [
             self.tsamp * trange_[0], # starting time
@@ -598,18 +628,40 @@ class Candidate:
             self.freqs[0] / 1e6, self.freqs[-1] / 1e6,
         ]
 
-        ax.imshow(
+        ax1.imshow(
             filterbank_plot, 
             aspect="auto", origin="lower", 
             extent=extent,
         )
 
-        ax.set_xlabel("Time since the observation (s)")
-        ax.set_ylabel("Frequencies (MHz)")
+        ax1.set_xlabel("Time since the observation (s)")
+        ax1.set_ylabel("Frequencies (MHz)")
 
-        return fig, ax
+        ax2 = fig.add_subplot(grid[0, :-1], sharex=ax1)
+        ### this is something as a function of time
+        t = np.linspace(trange_[0], trange_[1], trange_[1]-trange_[0]+1) * self.tsamp
+        tmin = np.nanmin(filterbank_plot, axis=0)
+        tmax = np.nanmax(filterbank_plot, axis=0)
+        tmea = np.nanmean(filterbank_plot, axis=0)
+        ax2.plot(t, tmin, color="C0")
+        ax2.plot(t, tmax, color="C1")
+        ax2.plot(t, tmea, color="C2")
+        ax2.tick_params(labelbottom=False)
 
-    def _dedisperse2tf(self, dm=None, norm=True):
+        ax3 = fig.add_subplot(grid[1:, -1], sharey=ax1)
+        ax3.tick_params(labelleft=False)
+        ### this is something as a function of freq
+        f = np.linspace(self.freqs[0]/1e6, self.freqs[-1]/1e6, self.freqs.shape[0])
+        fmin = np.nanmin(filterbank_plot, axis=1)
+        fmax = np.nanmax(filterbank_plot, axis=1)
+        fmea = np.nanmean(filterbank_plot, axis=1)
+        ax3.plot(fmin, f, color="C0")
+        ax3.plot(fmax, f, color="C1")
+        ax3.plot(fmea, f, color="C2")
+
+        return fig, (ax1, ax2, ax3)
+
+    def _dedisperse2tf(self, dm=None, norm=True, keepnan=True):
         """
         dedisperse the data and return a filterbank
         """
@@ -621,7 +673,7 @@ class Candidate:
         return filterbank_roll(
             tf=self.filterbank[:, 0, :].data, dm=dm,
             freqs=self.freqs, tint=self.tsamp,
-            tstart=self.visrange[0],
+            tstart=self.visrange[0], keepnan=keepnan,
         )
 
     def _dedisperse2ts(self, dm=None, norm=True):
@@ -688,7 +740,7 @@ class Candidate:
         """
         # note: we don't need to perform phase rotation here
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=0)
+            self._get_candidate_data(buffer=self.padding)
 
         if not hasattr(self, "norm_data_pc"):
             self._normalise_vis(target_input_rms=target_input_rms, target=False)
@@ -728,7 +780,7 @@ class Candidate:
         """
         return slice(max(center-radius, 0), min(center+radius+1, length))
 
-    def _grid_image_data(self):
+    def _grid_image_data(self, cutradius=10, ):
         """
         perform gridding and imaging the data
         """
@@ -760,6 +812,20 @@ class Candidate:
             _imgcube.append([i.real])
             _imgcube.append([i.imag])
         self.imgcube = np.concatenate(_imgcube)
+
+        ### perform zoom in
+        nt, llen, mlen = self.imgcube.shape
+        lpix = self.search_output["lpix"]
+        mpix = self.search_output["mpix"]
+        self.imgzoomcube = self.imgcube[
+            :, self._workout_slice_w_center(lpix, llen, cutradius),
+            self._workout_slice_w_center(lpix, llen, cutradius),
+        ]
+
+        ### work out image stats
+        self.imgmax = np.nanmax(self.imgzoomcube, axis=(1, 2))
+        self.imgstd = np.nanstd(self.imgcube, axis=(1, 2))
+        self.imgsnr = self.imgmax / self.imgstd
         
     def _plot_single_image_wo_wcs(self, imgdata, vmin, vmax):
         """
@@ -777,7 +843,7 @@ class Candidate:
         return fig, ax
 
     def _make_burst_images(
-            self, gif=True, cutradius=10, vmin=0, vmax=50
+            self, gif=True, vmin=0, vmax=50
     ):
         """
         make burst image, zoom in version for the detected burst...
@@ -788,13 +854,14 @@ class Candidate:
 
         imglist = []
         nt, llen, mlen = self.imgcube.shape
-        lpix = self.search_output["lpix"]
-        mpix = self.search_output["mpix"]
+
         for it in range(nt):
-            img_zoom = self.imgcube[it][
-                self._workout_slice_w_center(lpix, llen, cutradius),
-                self._workout_slice_w_center(mpix, mlen, cutradius),
-            ]
+            # img_zoom = self.imgcube[it][
+            #     self._workout_slice_w_center(lpix, llen, cutradius),
+            #     self._workout_slice_w_center(mpix, mlen, cutradius),
+            # ]
+            img_zoom = self.imgzoomcube[it]
+
             fig, _ = self._plot_single_image_wo_wcs(
                 imgdata=img_zoom.real, vmin=vmin, vmax=vmax,
             )
@@ -821,26 +888,81 @@ class Candidate:
         medimg = np.nanmedian(self.imgcube.real, axis=0)
         stdimg = np.nanstd(self.imgcube.real, axis=0)
 
-        fig = plt.figure(figsize=(8, 4))
+        fig = plt.figure(figsize=(12, 4))
 
         projection=self.plan.wcs if wwcs else None
-        #median image
-        ax = fig.add_subplot(1, 2, 1, projection=projection)
+        #maximum image
+        ax = fig.add_subplot(1, 3, 1, projection=projection)
+
+        maxidx = np.argmax(self.imgsnr)
+        
         ax.imshow(
-            medimg, vmin=vmin, vmax=vmax, 
+            self.imgcube[maxidx], vmin=vmin, vmax=vmax, 
+            origin="lower", aspect="auto",
+        )
+        ax.set_title("max image")
+
+        ax = fig.add_subplot(1, 3, 2, projection=projection)
+        ax.imshow(
+            medimg, vmin=None, vmax=None, 
             origin="lower", aspect="auto",
         )
         ax.set_title("median image")
 
-        ax = fig.add_subplot(1, 2, 2, projection=projection)
+        ax = fig.add_subplot(1, 3, 3, projection=projection)
         ax.imshow(
-            np.log10(stdimg), vmin=vmin, vmax=vmax, 
+            np.log10(stdimg), vmin=None, vmax=None, 
             origin="lower", aspect="auto",
         )
         ax.set_title("std image (log10)")
 
         fig.savefig(f"{self.workdir}/burst_field_image.jpg", bbox_inches="tight")
         plt.close()
+
+    def _make_detection_images(self, vmin=0, vmax=50):
+        """
+        make a series of images based on the detection sample
+        """
+        dets = self.search_output["total_sample"]
+        viss = self.visrange[0]
+
+        imgidx_e = dets - viss
+        imgidx_s = dets - viss - self.search_output["boxc_width"]
+
+
+        fig = plt.figure(figsize=(24, 3))
+        for i, iimg in enumerate(range(imgidx_s, imgidx_e + 1)):
+            if i >= 8: break
+            ax = fig.add_subplot(1, 8, i+1)
+            ax.imshow(
+                self.imgzoomcube[iimg].real, 
+                vmin=vmin, vmax=vmax, aspect="auto"
+            )
+
+            ax.set_title(f"{iimg} IMG_SNR={self.imgsnr[iimg]:.2f}")
+        
+        fig.savefig(f"{self.workdir}/burst_snapshots.jpg", bbox_inches="tight")
+        plt.close()
+
+    def _plot_image_stats(self):
+        fig = plt.figure(figsize=(4, 4))
+
+        ax = fig.add_subplot(3, 1, 1)
+        ax.plot(self.imgsnr, label="snr")
+        ax.legend()
+
+        ax = fig.add_subplot(3, 1, 2)
+        ax.plot(self.imgstd, label="std")
+        ax.legend()
+
+        ax = fig.add_subplot(3, 1, 3)
+        ax.plot(self.imgmax, label="max pixel")
+        ax.legend()
+        
+
+        fig.savefig(f"{self.workdir}/image_stats.jpg", bbox_inches="tight")
+        plt.close()
+        
 
     ###### main public functions here!
     def run_filterbank(
@@ -857,7 +979,7 @@ class Candidate:
         """
         # load data, calibrate data, rotate data, normalise data, make filterbank
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=0)
+            self._get_candidate_data(buffer=self.padding)
         if not hasattr(self, "cal_data"):
             self._calibrate_data(self.calibration_file)
         if not hasattr(self, "rotate_data"):
@@ -870,14 +992,19 @@ class Candidate:
         ### do some plots...
         # 0-DM dedispered data
         fig, ax = self.plot_filterbank(dm=0.)
-        ax.set_title("Dedispersed at DM=0")
+        fig.suptitle("Dedispersed at DM=0")
         fig.savefig(f"{self.workdir}/filterbank_dm0.0.jpg", bbox_inches="tight")
         plt.close()
 
         # nominal-DM dedispersed data
         fig, ax = self.plot_filterbank(dm=self.search_output["dm_pccm3"])
-        ax.set_title("Dedispersed at DM={:.2f}".format(self.search_output["dm_pccm3"]))
+        fig.suptitle("Dedispersed at DM={:.2f}".format(self.search_output["dm_pccm3"]))
         fig.savefig(f"{self.workdir}/filterbank_dm{self.search_output['dm_pccm3']:.1f}.jpg", bbox_inches="tight")
+        plt.close()
+
+        fig, ax = self.plot_filterbank(dm=self.search_output["dm_pccm3"], keepnan=False)
+        fig.suptitle("Dedispersed at DM={:.2f}".format(self.search_output["dm_pccm3"]))
+        fig.savefig(f"{self.workdir}/filterbank_dm{self.search_output['dm_pccm3']:.1f}_center.jpg", bbox_inches="tight")
         plt.close()
 
         # plot DM-t plot, butterfly!!!
@@ -895,7 +1022,7 @@ class Candidate:
         """
         #load data, calibrate data, normalise data, dedisperse data
         if not hasattr(self, "burst_data"):
-            self._get_candidate_data(buffer=0)
+            self._get_candidate_data(buffer=self.padding)
         if not hasattr(self, "cal_data"):
             self._calibrate_data(self.calibration_file)
         if not hasattr(self, "norm_data_pc"):
@@ -910,15 +1037,17 @@ class Candidate:
             # the correct dm
         
         # make gridding and perform imaging...
-        self._grid_image_data()
+        self._grid_image_data(cutradius=cutradius)
 
         ### plots
         # plot burst image
         self._make_burst_images(
-            gif=gif, cutradius=cutradius, vmin=vmin, vmax=vmax,
+            gif=gif, vmin=vmin, vmax=vmax,
         )
         # make image of the field
-        self._make_field_image(wwcs=wwcs)
+        self._make_field_image(wwcs=wwcs, vmin=vmin, vmax=vmax,)
+        self._make_detection_images(vmin=vmin, vmax=vmax,)
+        self._plot_image_stats()
 
     def _make_srcinfo(self):
         """
@@ -982,25 +1111,59 @@ class Candidate:
         info += """</tr>\n</table>\n"""
 
         ### filterbanks
-        burstplots = """<table class="threecol" style="margin-left: auto; margin-right: auto;">
+        burstplots = """<table class="fourcol" style="margin-left: auto; margin-right: auto;">
 <tr>
     <td><img src="filterbank_dm0.0.jpg" style="width: 100%;"></td>
     <td><img src="filterbank_dm{:.1f}.jpg" style="width: 100%;"></td>
+    <td><img src="filterbank_dm{:.1f}_center.jpg" style="width: 100%;"></td>
     <td><img src="butterfly_plot.jpg" style="width: 100%;"></td>
 </tr>
 </table>
-""".format(self.search_output["dm_pccm3"])
+""".format(self.search_output["dm_pccm3"], self.search_output["dm_pccm3"])
 
-        fieldplots = """<table style="width: 45%; margin-left: auto; margin-right: auto;">
+        burstimages = """<table style="width: 95%; margin-left: auto; margin-right: auto;">
 <tr>
-    <td><img src="burst_field_image.jpg" style="width: 100%;"></td>
+    <td><img src="burst_snapshots.jpg" style="width: 100%;"></td>
 </tr>
 </table>
 """
-        html =  f"<html>{head}{info}{burstplots}{fieldplots}</html>"
+
+        fieldplots = """<table style="width: 80%; margin-left: auto; margin-right: auto;">
+<tr>
+    <td style="width: 60%"><img src="burst_field_image.jpg" style="width: 100%;"></td>
+    <td style="width: 20%"><img src="image_stats.jpg" style="width: 100%;"></td>
+</tr>
+</table>
+"""
+        html =  f"<html>{head}{info}{burstplots}{burstimages}{fieldplots}</html>"
 
         with open(f"{self.workdir}/burst.html", "w") as fp:
             fp.write(html)
+
+        #save the html file as the png file
+        # make sure you install weasyprint v52.5
+        self._export_html2png()
+
+    def _export_html2png(self):
+        """
+        export saved webpage to png files...
+        """
+        try: from weasyprint import HTML, CSS 
+        except ImportError: 
+            logging.info("no weasyprint package found... will not convert html to png")
+            return
+
+        ### start converting
+        html = HTML(f"{self.workdir}/burst.html")
+        html.write_png(
+            f"{self.workdir}/burst.html.png",
+            presentational_hints=True,
+            stylesheets=[CSS(string='''@page {
+                size: A3 landscape; 
+                margin: 0mm; 
+                background-color: white;
+            }''')],
+        )
 
 
 def load_cands(fname, maxcount=None):
@@ -1037,7 +1200,12 @@ def _main():
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = True)
     parser.add_argument("--target_input_rms", type=int, default=1)
     parser.add_argument("--remove_aux", type=bool, help="wheter to clean uvdata created by cracoplan function", default=True)
+    parser.add_argument("--fout", type=str, help="burst uvfits file filename", default="burst.uvfits")
+    parser.add_argument("-pad", "--padding", type=int, help="padding when extracting data", default=50,)
     parser.add_argument("-p", "--path", type=str, help="place to save all images, html files", default="./")
+    parser.add_argument("--vmin", type=float, help="minimum value for imshow", default=0.)
+    parser.add_argument("--vmax", type=float, help="maximum value for imshow", default=50.)
+    parser.add_argument("--cutradius", type=int, help="zoom in radius for the cutout", default=10)
     
     values = parser.parse_args()
 
@@ -1046,10 +1214,15 @@ def _main():
         crow=c[values.index], uvsource=values.uv,
         calibration_file=values.calibration, 
         extractdata=False, workdir=values.path,
+        padding=values.padding,  loadplan=True
     )
 
+    cand.dump_burst_uvfits(fout=values.fout)
     cand.run_filterbank(norm=values.norm, target_input_rms=values.target_input_rms)
-    cand.run_imager(norm=values.norm, target_input_rms=values.target_input_rms)
+    cand.run_imager(
+        norm=values.norm, target_input_rms=values.target_input_rms,
+        vmin=values.vmin, vmax=values.vmax, cutradius=values.cutradius,
+    )
     cand.create_webpage()
 
     if values.remove_aux:
