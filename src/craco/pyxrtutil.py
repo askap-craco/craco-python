@@ -61,12 +61,28 @@ def convert_buffer(b):
         return b
       
 class Kernel:
-    def __init__(self, device, xbin, name, flags=pyxrt.kernel.exclusive):
+    def __init__(self, device, xbin, name, flags=pyxrt.kernel.exclusive, icu=None):
         if isinstance(flags, str):
             flags = getattr(pyxrt.kernel, flags)
-        self.krnl = pyxrt.kernel(device, xbin.get_uuid(), name, flags)
-        self.name = name
-        #self.print_groups()
+
+        # new XRT wants extra brackets
+        try:
+            if icu is None:
+                newname = name
+            else:
+                newname = f'{name}:{{{name}_{icu+1}}}'
+            print(f'Opening kernel with new name {newname}')
+            # new XRT doesn't like flags as the final argument, but we probably don't mind either.
+            self.krnl = pyxrt.kernel(device, xbin.get_uuid(), newname)#, flags)
+        except RuntimeError as r:
+            raise r
+            if icu is None:
+                icu = 1
+            newname = f'{name}:{name}_{icu+1}'
+            self.krnl = pyxrt.kernel(device, xbin.get_uuid(), newname, flags)
+
+        self.name = newname
+        self.print_groups()
         
     def print_groups(self):
         self.groups = []
