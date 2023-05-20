@@ -1076,13 +1076,15 @@ def _main():
             proc_rx(pipe_info)
 
         log.info(f'Rank {rank}/{numprocs} complete. Waiting for everythign')
-        comm.Barrier()
+        #comm.Barrier()
     except:
         log.exception('Exception running pipeline')
 
     
     if rank == 0:
         log.info('Pipeline complete')
+
+#    raise StopIteration('Im raising a stop so it tears down the whole shebang. Perahps a bad idea. Maybe we should look at sending null form the receivers so the beams know theyre done and can shutdown clean')
     
 
 if __name__ == '__main__':

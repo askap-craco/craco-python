@@ -100,7 +100,8 @@ def _main():
         candimg.set_ylabel('Dec (deg)')
 
         fig.tight_layout()
-        
+
+    candvt.set_ylim(1, None)
     pylab.show()
     if values.output:
         pylab.savefig(values.output)
