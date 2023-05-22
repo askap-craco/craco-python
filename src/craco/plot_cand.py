@@ -11,6 +11,9 @@ import numpy as np
 import os
 import sys
 import logging
+from collections import namedtuple
+from astropy.coordinates import SkyCoord
+from astropy.time import Time
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +38,33 @@ def load_cands(fname, maxcount=None):
     c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
     return c
 
+CandInputFile = namedtuple("CandInputFile", 'filename candidates')
+CandfileArtist = namedtuple("CandfileArtist", 'candfile artist')
+
+def cand2str(c):
+    coord = SkyCoord(c['ra_deg'],c['dec_deg'], frame='icrs', unit='deg')
+    coords = coord.to_string('hmsdms')
+    t = Time(c['mjd'], scale='utc', format='mjd')
+    
+    s =  f"SNR={c['SNR']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot}"
+    
+    return s
+
+# should make a class but maket this global for now
+all_artists = []
+def on_pick(event):
+    # shoudl just return one thing
+    candf= next(filter(lambda x: x.artist == event.artist, all_artists))
+    candfile = candf.candfile
+#    print('Artist picked:', event.artist)
+#    print(f'{len(ind)} vertices picked:{ind}')
+#    print(event.mouseevent)
+#    print(candf)
+
+    for i in event.ind:
+        print(f'{candfile.filename}[{i}] {cand2str(candfile.candidates[i])}')
+
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -54,6 +84,8 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
     fig, ax = pylab.subplots(2,2)
+    tolerance = 3
+
     for f in values.files:
         c = load_cands(f)
         if values.threshold is not None:
@@ -66,8 +98,10 @@ def _main():
         if values.dm is not None:
             c = c[c['dm'] == values.dm]
             
-            
+        if len(c) == 0:
+            continue
 
+        candfile = CandInputFile(filename=f, candidates=c)
         dmhist = ax[0,0]
         snhist = ax[0,1]
         candvt = ax[1,0]
@@ -83,12 +117,15 @@ def _main():
 
         ms = c['SNR']**2 * values.sn_gain
 
-        candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms)
+        points1 = candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms, picker=tolerance)
+        all_artists.append(CandfileArtist(candfile, points1))
         candvt.set_yscale('log')
         candvt.set_xlabel('Obstime (sec)')
         candvt.set_ylabel('1+DM (pc/cm3)')
 
-        candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms)
+        points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
+        all_artists.append(CandfileArtist(candfile, points2))
+        
         dec = c['dec_deg']
         ra = c['ra_deg']
         if len(c) == 0:
@@ -102,6 +139,7 @@ def _main():
         fig.tight_layout()
 
     candvt.set_ylim(1, None)
+    fig.canvas.callbacks.connect('pick_event', on_pick)
     pylab.show()
     if values.output:
         pylab.savefig(values.output)
