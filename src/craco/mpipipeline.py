@@ -837,6 +837,8 @@ class UvFitsFileSink:
             for blinfo in info.baseline_iter():
                 ia1 = blinfo.ia1
                 ia2 = blinfo.ia2
+                a1 = blinfo.a1
+                a2 = blinfo.a2
                 uvwdiff = uvw[ia1, :] - uvw[ia2, :]
                 # TODO: channel-dependent weights - somehow
                 dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
@@ -850,7 +852,8 @@ class UvFitsFileSink:
                     
                 # fits convention has source index with starting value of 1
                 fits_sourceidx = sourceidx + 1
-                self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
+                # put_data wants 0-based antenna numbers
+                self.uvout.put_data(uvwdiff, mjd.value, a1-1, a2-1, inttime, dblk, weights, fits_sourceidx)
         
         self.uvout.fout.flush()
         log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
@@ -1033,7 +1036,6 @@ def _main():
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
     parser.add_argument('--ncards-per-host', type=int, default=None, help='Number of cards to process per host, helpful to match previous cardcap')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
-    parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=None)
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
