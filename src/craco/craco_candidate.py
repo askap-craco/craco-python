@@ -818,7 +818,7 @@ class Candidate:
         lpix = self.search_output["lpix"]
         mpix = self.search_output["mpix"]
         self.imgzoomcube = self.imgcube[
-            :, self._workout_slice_w_center(lpix, llen, cutradius),
+            :, self._workout_slice_w_center(mpix, mlen, cutradius),
             self._workout_slice_w_center(lpix, llen, cutradius),
         ]
 
@@ -926,8 +926,9 @@ class Candidate:
         dets = self.search_output["total_sample"]
         viss = self.visrange[0]
 
-        imgidx_e = dets - viss
-        imgidx_s = dets - viss - self.search_output["boxc_width"]
+        # TODO: check if this make sense
+        imgidx_e = dets - viss + 1
+        imgidx_s = dets - viss - self.search_output["boxc_width"] + 1
 
 
         fig = plt.figure(figsize=(24, 3))
@@ -936,12 +937,13 @@ class Candidate:
             ax = fig.add_subplot(1, 8, i+1)
             ax.imshow(
                 self.imgzoomcube[iimg].real, 
-                vmin=vmin, vmax=vmax, aspect="auto"
+                vmin=vmin, vmax=vmax, aspect="auto",
+                origin="lower",
             )
 
             ax.set_title(f"{iimg} IMG_SNR={self.imgsnr[iimg]:.2f}")
         
-        fig.savefig(f"{self.workdir}/burst_snapshots.jpg", bbox_inches="tight")
+        fig.savefig(f"{self.workdir}/burst_snapshots.jpg", )
         plt.close()
 
     def _plot_image_stats(self):
