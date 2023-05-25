@@ -3,6 +3,7 @@
 rankfile=mpipipeline.rank
 hostfile=mpi_seren.txt
 
+echo "Running $0 with argumnets $@ `pwd` with rankfile=$rankfile hostfile=$hostfile"
 
 # IF HCOLL IS ENABED WITH col-hcoll-enable 1 THEN IT HANGS ON MPI_FINALIZE !!!!
 use_roce=0

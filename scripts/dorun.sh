@@ -14,7 +14,7 @@ search_beams=0-19
 
 
 
-./mpipipeline.sh --cardcap-dir $indir \
+mpipipeline.sh --cardcap-dir $indir \
 		 --outdir $outdir \
 		 --calibration $caldir \
 		 --phase-center-filterbank pc.fil \
