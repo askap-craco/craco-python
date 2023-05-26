@@ -275,13 +275,6 @@ class Pipeline:
         self.alloc_device_only_buffers = alloc_device_only_buffers
         self.device_only_buffer_flag = 'normal' if alloc_device_only_buffers else 'device_only'
 
-        # If we are on new version of pipeline
-        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
-        log.info(f'{self.nparallel_uvin} {self.nparallel_uvout} {self.h_nparallel_uvout}')
-        log.info(f'{lut.shape}')
-        
-        np.savetxt("lut.txt", lut, fmt="%d")
-
         self.grid_reader = DdgridCu(device, xbin)
         self.grids = [GridCu(device, xbin, i) for i in range(4)]
         self.ffts = [FfftCu(device, xbin, i) for i in range(4)]
@@ -291,18 +284,7 @@ class Pipeline:
         self.all_kernels.extend(self.grids)
         self.all_kernels.extend(self.ffts)
 
-        log.info(f'lut.shape {lut.shape}')
-        log.info(f'nuv {self.plan.fdmt_plan.nuvtotal}')
-        
-        log.info('Allocating grid LUTs')
 
-        # small buffer
-        # For grid with new version pipeline
-        self.grid_luts = [Buffer(lut.shape, np.uint16, device, g.krnl.group_id(5)).clear() for g in self.grids]
-        
-        for l in self.grid_luts:
-            l.nparr[:] = lut
-            l.copy_to_device()
                 
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         log.info('Allocating FDMT Input')
@@ -314,15 +296,6 @@ class Pipeline:
         log.info(self.plan.nuvwide)
         log.info(self.plan.nuvrest)
         log.info(self.plan.ndout)
-
-        #self.plan.fdmt_plan.nuvtotal = 3200
-        #self.plan.nuvrest = 400
-        
-        #log.info(f'{self.plan.fdmt_plan.nuvtotal*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
-        #log.info(f'{self.plan.nuvrest*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
-
-        #log.info(f'{3200*self.plan.nt*self.plan.ncin*self.plan.nuvwide*4/1024**2} MB')        
-        #log.info(f'{400*self.plan.ndout*NBLK*self.plan.nt*self.plan.nuvwide*4/1024**3} GB')
 
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
@@ -342,14 +315,6 @@ class Pipeline:
         # However, we need to make sure that in link file, we assign enough HBM for the FDMT history
         self.fdmt_hist_buf = Buffer((HBM_SIZE), np.int8, device, self.fdmtcu.krnl.group_id(2), self.device_only_buffer_flag).clear() # Grr, group_id puts you in some weird addrss space self.fdmtcu.krnl.group_id(2))
         
-        #log.info('Allocating FDMT fdmt_config_buf')
-        #self.fdmt_config_buf = Buffer((self.plan.fdmt_plan.nuvtotal*5*self.plan.ncin), np.uint32, device, self.fdmtcu.krnl.group_id(4)).clear()
-
-        # small buffer
-        fdmt_luts = self.plan.fdmt_plan.fdmt_lut
-        self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, device, self.fdmtcu.krnl.group_id(4)).clear()
-        self.fdmt_config_buf.nparr[:] = fdmt_luts
-        self.fdmt_config_buf.copy_to_device()
         
         # pout of FDMT should be pin of grid reader
         assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
@@ -371,14 +336,6 @@ class Pipeline:
         # Allocate buffers in sub buffers - this works around an XRT bug that doesn't let you allocate a large buffer
         self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
 
-        # DD reader lookup table
-        log.info('Allocating ddreader_lut')
-        ddreader_lut_size = (NDM_MAX + self.plan.nuvrest_max) # old version
-        ddreader_lut_size = len(plan.ddreader_lut)
-        self.ddreader_lut = Buffer(ddreader_lut_size, np.uint32, device, self.grid_reader.group_id(5)).clear()
-        self.ddreader_lut.nparr[:] = plan.ddreader_lut
-        self.ddreader_lut.copy_to_device()
-
         log.info('Allocating boxcar_history')    
 
         npix = self.plan.npix
@@ -397,6 +354,56 @@ class Pipeline:
         self.uv_out  = np.zeros(uv_shape, dtype=np.complex64)
         self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
         self.cal_solution = calibration.CalibrationSolution(self.plan)
+
+        self.fdmt_config_buf = None
+        self.grid_luts = None
+        self.ddreader_lut = None
+        self.update_lookup_tables(plan) 
+
+    def _update_grid_lut(self,plan):
+        # If we are on new version of pipeline
+        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+        log.info(f'Grid shape {lut.shape} nuv={self.plan.fdmt_plan.nuvtotal}')
+        # small buffer
+        # For grid with new version pipeline
+        if self.grid_luts is None:
+            self.grid_luts = [Buffer(lut.shape, np.uint16, self.device, g.krnl.group_id(5)).clear() for g in self.grids]
+        
+        for l in self.grid_luts:
+            l.nparr[:] = lut
+            l.copy_to_device()
+
+    def _update_fdmt_lut(self, plan):
+        # small buffer
+        fdmt_luts = plan.fdmt_plan.fdmt_lut
+        if self.fdmt_config_buf is None:
+            self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, self.device, self.fdmtcu.krnl.group_id(4)).clear()
+            
+        self.fdmt_config_buf.nparr[:] = fdmt_luts
+        self.fdmt_config_buf.copy_to_device()
+
+    def _update_ddreader_lut(self, plan):
+        # DD reader lookup table
+        ddreader_lut_size = len(plan.ddreader_lut)
+        if self.ddreader_lut is None:
+            self.ddreader_lut = Buffer(ddreader_lut_size, np.uint32, self.device, self.grid_reader.group_id(5)).clear()
+
+        log.info('DDREADER lut size: %s dtype=%s', self.ddreader_lut.shape, self.ddreader_lut.dtype)
+        self.ddreader_lut.nparr[:] = plan.ddreader_lut
+        self.ddreader_lut.copy_to_device()
+
+    def update_lookup_tables(self, plan):
+        '''
+        Copies the lookup tables from the given plan 
+        and sets the plan variable.
+        Note: you'd better not fiddle with anything like frequencies, or nbl, otherwise we'll have trouble
+        '''
+        uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+        assert uv_shape == self.uv_out.shape, 'Mistmached uv shape'
+        self._update_grid_lut(plan)
+        self._update_fdmt_lut(plan)
+        self._update_ddreader_lut(plan)
+        
 
     @property
     def solarray(self):
@@ -737,7 +744,7 @@ def cand2str_wcs(c, iblk, plan, raw_noise_level):
     total_sample = iblk*plan.nt + c['time']
     tsamp_s = plan.tsamp_s
     obstime_sec = total_sample*plan.tsamp_s
-    mjd = plan.tstart.mjd + obstime_sec.value/3600/24
+    mjd = plan.tstart.utc.mjd + obstime_sec.value/3600/24
     dmdelay_ms = c['dm']*tsamp_s.to(units.millisecond)
     dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
     lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
@@ -787,6 +794,7 @@ def get_parser():
     parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
+    parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('-w', '--wait',      action='store_true', help='Wait during execution')
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks to process')

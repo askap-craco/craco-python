@@ -65,8 +65,20 @@ class CardCapFileSource:
         return hdrs
 
     def start(self):
-        maxfid = np.uint64(self.merger.frame_id0)
-        fid0 = self.pipe_info.rx_comm.allreduce(maxfid, MPI.MAX)
+
+        '''
+        If we have no frame ID then we return 0
+        MPI.MAX reduce will ignore the 0 value
+        '''
+        
+        if self.merger.is_all_empty:
+            infid = 0
+        else:
+            infid = self.merger.frame_id0
+            assert infid != 0
+            
+        infid = np.uint64(infid)
+        fid0 = self.pipe_info.rx_comm.allreduce(infid, MPI.MAX)
         self.fid0 = np.uint64(fid0)
         return self.fid0
 
