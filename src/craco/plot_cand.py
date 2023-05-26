@@ -88,6 +88,7 @@ def _main():
 
     for f in values.files:
         c = load_cands(f)
+        print(f'Loaded {len(c)} candidates from {f}')
         if values.threshold is not None:
             c = c[c['SNR'] >= values.threshold]
 
@@ -100,6 +101,8 @@ def _main():
             
         if len(c) == 0:
             continue
+
+        print(f'plotting {len(c)} candidates from {f}')
 
         candfile = CandInputFile(filename=f, candidates=c)
         dmhist = ax[0,0]
@@ -140,6 +143,7 @@ def _main():
 
     candvt.set_ylim(1, None)
     fig.canvas.callbacks.connect('pick_event', on_pick)
+    print('Showing')
     pylab.show()
     if values.output:
         pylab.savefig(values.output)
