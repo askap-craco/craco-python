@@ -90,7 +90,7 @@ class Obsman:
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
             self.start_process(new_scanid)
         else:
-            log.info('Passing on %s as doesnt match regex %s', target, self.values.target_regex)
+            log.info('Passing on %s as doesnt match regex %s or craco enabled={craco_enable}', target, self.values.target_regex)
 
     def start_process(self, new_scanid:int):
         assert new_scanid is not None
