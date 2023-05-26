@@ -112,7 +112,7 @@ def load_gains(fname):
     note: those sizes may be different than what you asked for
     But nant = 36 always, so we know that the non-existent natennas should be flagged
     '''
-    if os.path.isfile(fname) and fname.endswith('.bin'):
+    if fname.endswith('.bin'):
         bp = plotbp.Bandpass.load(fname)
         g = bp.bandpass[0]
         npol = g.shape[-1]
@@ -150,7 +150,7 @@ def load_gains(fname):
             assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
             tb.close()
 
-    elif os.path.isfile(fname) and fname.endswith('.smooth.npy'):
+    elif fname.endswith('.smooth.npy'):
         g = np.load(fname)[0]
         npol = g.shape[-1]
         if npol == 4: # Npol is [XX, XY, YX, YY] just pick out [XX,YY]
