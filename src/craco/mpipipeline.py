@@ -660,13 +660,6 @@ def proc_rx(pipe_info):
 
     pktiter = ccap.packet_iter()
     packets, fids = next(pktiter)
-    #assert dummy_packet.shape == packets[0][1].shape, f'Dummy packet shape {dummy_packet.shape} doesnt match real packet {packets[0][1].shape}'
-    #log.debug('packets %s %s %s %s %s %s %s', len(packets),type(packets),type(packets[0]), type(packets[0][0]), type(packets[0][1]), packets[0][1].shape, packets[0][1].dtype)
-    # packets is list a list of 6 entires - 1 per FPGA
-    # each entry contains a tuple of (fid, data)
-    # if nbeam == 1 from file the the data shape = (128)
-    # if nbeam == 36 data shape = (144,32)
-    # Maybe should fix that
 
     averaged = averager.accumulate_packets(packets)
     averaged = averager.output
@@ -685,10 +678,6 @@ def proc_rx(pipe_info):
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         expected_fid = info.fid_of_block(ibuf) 
-        #for ifpga, (pkt, fid) in enumerate(zip(packets, fids)):
-        #    if pkt is not None:
-        #        diff = int(expected_fid) - int(fid)
-        #        assert diff==0, f'Invalid fid. Expected {expected_fid} but got {fid} diff={diff} for rank={rank} ibuf={ibuf} card={cardidx} ifpga={ifpga} start_fid={start_fid}'
 
         best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
@@ -1081,6 +1070,7 @@ def _main():
         #comm.Barrier()
     except:
         log.exception('Exception running pipeline')
+        raise # raise it again so the interpreter dies and MPIRUN cleans it up
 
     
     if rank == 0:
