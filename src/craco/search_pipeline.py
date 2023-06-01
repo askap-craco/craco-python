@@ -289,14 +289,6 @@ class Pipeline:
         # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         log.info('Allocating FDMT Input')
 
-        # Used to be like this
-        log.info(self.plan.fdmt_plan.nuvtotal)
-        log.info(self.plan.nt)
-        log.info(self.plan.ncin)
-        log.info(self.plan.nuvwide)
-        log.info(self.plan.nuvrest)
-        log.info(self.plan.ndout)
-
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
