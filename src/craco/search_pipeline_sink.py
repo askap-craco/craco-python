@@ -54,7 +54,7 @@ class VisInfoAdapter:
         # how does flagants work?
         # bleach. Gross. This requires much thinking
         # for now we just do something brittle and see where it breaks
-        toffset = 10*u.minute # TODO: How far in the future should we compute the UVWs?
+        toffset = 0*u.minute # TODO: How far in the future should we compute the UVWs?
         tbaseline = self.tstart + toffset
         # UVW is a np array shape [nant, 3]
         uvw = self.info.uvw_at_time(tbaseline)
