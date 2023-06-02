@@ -67,7 +67,7 @@ def interpolate_gains(gains, from_freqs, to_freqs):
     re_interp = interp1d(from_freqs, gains.real, axis=1, fill_value='extrapolate')
     im_interp = interp1d(from_freqs, gains.imag, axis=1, fill_value='extrapolate')
     out_gains = re_interp(to_freqs) + 1j*im_interp(to_freqs)
-    out_gains = np.ma.masked_where(abs(out_gains) == 0, out_gains)
+    out_gains = np.ma.masked_array(out_gains, mask=abs(out_gains) == 0, shrink=False)
     
     return out_gains
     
@@ -197,7 +197,6 @@ def load_gains(fname):
     g = np.ma.masked_equal(g,0) # This seems to work, even though I can't get the abs to work
     g.set_fill_value(0+0j)
     
-    
     assert g.shape[0] == 36, f'First dimension of gains shoudl be nant=36. Shape was (nant, chan, npol)={g.shape}'
     
     return (g, freqs)
@@ -215,6 +214,8 @@ class CalibrationSolution:
         else: # make dummy gains
             shape = (self.plan.maxant, self.plan.nf, 2)
             mask = np.zeros(shape, dtype=bool)
+            # Need to have shrink = False otherwise it just sets the mask to a single value (no mask)
+            # which means you can't update the chanel mask later
             gains = np.ma.masked_array(np.ones(shape, dtype=np.complex64), mask=mask)
             freqs = plan.freqs
 
@@ -226,11 +227,13 @@ class CalibrationSolution:
         assert len(freqs) == nchan
         chan_bw_ratio = int(np.round(self.plan.foff / foff))
         
-        log.info('Calibration file: fch1=%s, foff=%s nchan=%d plan: fch1=%s foff=%s nchan=%d chan_bw_ratio=%d gains.shape=%s',
+        log.info('Calibration file: fch1=%s, foff=%s nchan=%d plan: fch1=%s foff=%s nchan=%d chan_bw_ratio=%d gains.shape=%s masktype=%s',
                  fch1, foff, nchan,
                  plan.fmin, plan.foff, plan.nf,
                  chan_bw_ratio,
-                 gains.shape)
+                 gains.shape,
+                 type(gains.mask)
+        )
         assert foff >0, 'Assume freq always increasing, it just makes me feel better'
         assert self.plan.foff > 0, 'Assume freq always incerasing'
         
