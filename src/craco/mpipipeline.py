@@ -808,21 +808,28 @@ class UvFitsFileSink:
         assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
         # TODO: Check timestamp convention for for FID and mjd.
         # I think this is right
-        fid_mid = fid_start + info.nt // 2
+        # fid_start goes up by NSAMP_PER_FRAME = 2048 every block
+        # We'll calculate the same UVWs for everything in this block. A bit lazy but not rediculous
+        fid_mid = fid_start + np.uint64(NSAMP_PER_FRAME//2)
         mjd = info.fid_to_mjd(fid_mid)
         sourceidx = md.source_index_at_time(mjd)
-        #sourcename = md.source_name_at_time(mjd.value)
         uvw = md.uvw_at_time(mjd)
         antflags = md.antflags_at_time(mjd)
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
-        inttime = info.inttime.to(u.second).value
+        inttime = info.inttime.to(u.second).value*info.vis_tscrunch
+        assert NSAMP_PER_FRAME % vis_nt == 0
+        samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
 
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
-            mjd = info.fid_to_mjd(fid_start + itime)
+            # FID is for the beginning of the block.
+            # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
+            fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
+            mjd = info.fid_to_mjd(fid_itime)
+            log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
             for blinfo in info.baseline_iter():
                 ia1 = blinfo.ia1
                 ia2 = blinfo.ia2
