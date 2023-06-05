@@ -27,6 +27,7 @@ from collections import OrderedDict
 from astropy import units
 
 import logging
+import warnings
 
 DM_CONSTANT = 4.15 # milliseconds and GHz- Shri Kulkarni will kill me
 
@@ -244,7 +245,9 @@ def get_grid_lut_from_plan(plan):
     nuv, nuvout, input_index, output_index, send_marker           = instructions2grid_lut(upper_instructions, max_nsmp_uv)
     h_nuv, h_nuvout, h_input_index, h_output_index, h_send_marker = instructions2grid_lut(lower_instructions, max_nsmp_uv)
 
-    assert nuv == h_nuv # These two should equal
+    if nuv != h_nuv:
+        warnings.warn(f'nuv={nuv} shouldS equal h_nuv={h_nuv}. Or ... should it? THis happens becasuse the lower matrix doesnt include the diagonal and the last UV index used is on the diagona.. Well take the maximum here but perhaps we should have thouught a bit harder. See CRACO-125 for more info')
+        nuv = max(nuv, h_nuv)
 
     nuv_round = nuv+(8-nuv%8)       # Round to 8
     location   = instructions2pad_lut(plan.upper_idxs, plan.npix)
