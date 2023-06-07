@@ -11,6 +11,7 @@ import numpy as np
 import os
 import sys
 import logging
+import pytest
 
 log = logging.getLogger(__name__)
 

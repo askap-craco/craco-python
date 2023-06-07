@@ -19,6 +19,7 @@ from craft import sigproc
 from craft import uvfits
 from craft import craco
 from craco import calibration
+from craco.vis_subtractor import VisSubtractor
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -353,6 +354,7 @@ class Pipeline:
         self.fdmt_config_buf = None
         self.grid_luts = None
         self.ddreader_lut = None
+        self.subtractor = None
         self.update_lookup_tables(plan) 
 
     def _update_grid_lut(self,plan):
@@ -635,8 +637,11 @@ class Pipeline:
             input_flat = input_flat_raw.copy()
 
         # subtract average over time
-        if self.plan.values.subtract:
-            input_flat -= input_flat.mean(axis=-1, keepdims=True)
+        if self.plan.values.subtract >= 0:
+            if self.subtractor is None: # TODO: allocate vissubtractor in constructor. It's just tricky to know what the shape will be in advance
+                self.subtractor = VisSubtractor(input_flat.shape, self.plan.values.subtract)
+                
+            input_flat = self.subtractor(input_flat)
 
         # average polarisations, if necessary
         if input_flat.ndim == 4:
@@ -829,14 +834,13 @@ def get_parser():
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
     parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
-    parser.add_argument('--no-subtract', help='Dont subtract block average from data', action='store_false', dest='subtract', default=True)
     parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
+    parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
-    parser.set_defaults(subtract  = True)
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
     parser.set_defaults(show      = False)

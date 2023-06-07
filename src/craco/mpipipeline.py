@@ -425,7 +425,7 @@ class MpiObsInfo:
 
     @property
     def vis_inttime(self):
-        return self.inttime # do I need to scale by vis_tscrunch? Main merger already has it?
+        return self.inttime*self.values.vis_tscrunch # do I need to scale by vis_tscrunch? Main merger already has it?
 
     @property
     def nt(self):

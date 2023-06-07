@@ -36,7 +36,6 @@ dtype = np.dtype([('SNR',np.float32),
 
 def load_cands(fname, maxcount=None):
     c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
-    
     return c
 
 CandInputFile = namedtuple("CandInputFile", 'filename candidates')
