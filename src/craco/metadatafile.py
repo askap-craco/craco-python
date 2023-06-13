@@ -48,11 +48,43 @@ def get_azel(ants):
 def ts2time(ts):
     return Time(ts/1e6/3600/24, format='mjd', scale='tai')
 
+def load_robust(f):
+    '''
+    If there's GZIP correuption you can use gzrecover to recover the file partially, then use some dumb assumptions to see if you can get JSON to parse it
+    Assumes the input is not gzipped
+    '''
+    f.seek(0)
+    nblocks = 0
+    try:
+        lines = []
+        for line in f:
+            if line.strip().replace(' ','') == '}{':
+                lines.append('}')
+                s = ''.join(lines)
+                block = json.loads(s)
+                yield block
+                lines = ['{']
+                nblocks += 1
+            else:
+                lines.append(line)
+    except UnicodeDecodeError: # junk data - thats the end
+        pass
+    except json.JSONDecodeError: # never had this but it might happen and signal the end
+        pass
+            
+
+def open_gz_or_plain(fname, mode='rt'):
+    if fname.endswith('.gz'):
+        fout = gzip.open(fname, mode)
+    else:
+        fout = open(fname, mode)
+
+    return fout
 
 class MetadataFile:
     def __init__(self, fname):
         self.fname = fname
-        with gzip.open(fname, 'rt') as f:
+        with open_gz_or_plain(fname, 'rt') as f:
             try:
                 self.data = json.load(f)
             except json.JSONDecodeError: # known problem where I forgot to put it in a list with commas
@@ -60,6 +92,9 @@ class MetadataFile:
                 s = f.read()
                 s = '[' + s.replace('}{', '},{') + ']'
                 self.data = json.loads(s)
+            except UnicodeDecodeError:
+                print('Trying robust load')
+                self.data = list(load_robust(f))
 
         # the final packet contains a timestamp of zero, which we want to get rid of
         if self.data[-1]['timestamp'] == 0:
