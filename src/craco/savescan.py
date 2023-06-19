@@ -33,6 +33,7 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
+    parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -69,7 +70,7 @@ def _main():
     #pol='--pol-sum'
 
     beam = -1 # all beams, tscrucnh
-    beam = 0 # given beam no tscrunch
+    #beam = 0 # given beam no tscrunch
 
     if beam == -1: # all beams
         beam = '' # all beams
@@ -83,7 +84,7 @@ def _main():
         spi = '--samples-per-integration 32'
 
     card  = '-a 1-12'
-    block = '-b 2-4'
+    block = '-b 3-5'
     fpga = ''
     fpga_mask = ''
 
