@@ -99,7 +99,6 @@ def main():
     #values.uv = myfits
     values.nt = args.nt
     values.ndm = 2
-    values.npix = 512
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
