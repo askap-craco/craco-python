@@ -22,9 +22,20 @@ def plot(f, values):
     for k in d.keys():
         print(k, d[k].shape, d[k].dtype)
 
-    fig,ax = pylab.subplots(2,1)
-    ax[0].plot(d['mean'][0,:,:,0])
-    ax[1].plot(d['stdev'][0,:,:,0])
+    beam = values.beam
+    print(beam)
+    fig,ax = pylab.subplots(3,1)
+    dcm = d['mean'][...,0] + 1j*d['mean'][...,1]
+    ax[0].plot(abs(dcm)[beam,:,:])
+    ax[0].set_ylabel('abs(mean)')
+
+    ax[1].plot(np.angle(dcm)[beam,:,:])
+    ax[1].set_ylabel('angle(mean')
+    
+    ax[2].plot(d['stdev'][beam,:,:,0])
+    ax[2].set_ylabel('stdev of real')
+    ax[2].set_xlabel('channel')
+    fig.suptitle(f'{f} beam={beam}')
     pylab.show()
 
         
@@ -33,6 +44,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('-b','--beam', type=int, help='Beam to plot', default=0)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

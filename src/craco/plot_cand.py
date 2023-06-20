@@ -36,6 +36,8 @@ dtype = np.dtype([('SNR',np.float32),
 
 def load_cands(fname, maxcount=None):
     c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
+    if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
+        c.shape = (1,)
     return c
 
 CandInputFile = namedtuple("CandInputFile", 'filename candidates')
@@ -89,6 +91,7 @@ def _main():
     for f in values.files:
         c = load_cands(f)
         print(f'Loaded {len(c)} candidates from {f}')
+        
         if values.threshold is not None:
             c = c[c['SNR'] >= values.threshold]
 
@@ -100,10 +103,8 @@ def _main():
             c = c[c['dm'] == values.dm]
             
         if len(c) == 0:
+            print(f'{f} contained no candidates after applying thresholds')
             continue
-
-        print(f'plotting {len(c)} candidates from {f}')
-
         candfile = CandInputFile(filename=f, candidates=c)
         dmhist = ax[0,0]
         snhist = ax[0,1]
