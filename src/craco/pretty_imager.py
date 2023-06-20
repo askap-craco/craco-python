@@ -72,6 +72,7 @@ def get_parser():
     parser.add_argument("-nt", type=int, help="nt for the block size", default=64)
     parser.add_argument("-tx", type=int, help="Average in time by a factor of tx", default=1)
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
+    parser.add_argument("-proper", action='store_true', help="Do proper uvw coordinate while gridding", default=False)
     parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     g = parser.add_mutually_exclusive_group()
@@ -151,6 +152,7 @@ def main():
             'CALFILE': str(args.calfile),
             'INJFILE': str(args.injection_params_file),
             'UV': str(py_plan.values.uv),
+            'PROPER': str(args.proper),
 
             'BSCALE': 1.0,
             'BZERO': 0.0,
@@ -165,7 +167,10 @@ def main():
         FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, outblock_type=dict)
         uvdata_source = FV.get_fake_data_block()
     else:
-        uvdata_source = c.uvsource.time_blocks(py_plan.nt)
+        if args.proper:
+            uvdata_source = c.uvsource.time_blocks_with_uvws(py_plan.nt)
+        else:
+            uvdata_source = c.uvsource.time_blocks(py_plan.nt)
 
     if args.ogif:
         images = []
@@ -175,8 +180,13 @@ def main():
         N = 1
     try:
         for iblock, block in enumerate(uvdata_source):
+            if args.proper:
+                block, uvws = block
+                print(f"Splitting the block into uvws and data block of types - {type(uvws), type(block)}")
+                
+            
             print(f"Working on block {iblock}, dtype={type(block)}")
-
+            #IPython.embed()
             if type(block) == dict and block_type != dict:
                 block = bl2array(block)
 
@@ -210,7 +220,10 @@ def main():
                 if args.plot_blocks:
                     plot_block(block, title="The dedispersed block")
 
-            gridded_block = direct_gridder(block)
+            if args.proper:
+                gridded_block = direct_gridder.grid_with_uvws(block, uvws)
+            else:
+                gridded_block = direct_gridder(block)
             for t in range(c.plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.stats_image:
@@ -299,8 +312,8 @@ def main():
                 mean_image_fname = args.injection_params_file + ".mean_image.fits"
                 rms_image_fname = args.injection_params_file + ".rms_image.fits"
             else:
-                mean_image_fname = args.uv + ".mean_image.fits"
-                rms_image_fname = args.uv + ".rms_image.fits"
+                mean_image_fname = args.ofits + ".mean_image.fits"
+                rms_image_fname = args.ofits + ".rms_image.fits"
             print("Saving the stats images in: {0} and {1}".format(mean_image_fname, rms_image_fname))
             useful_info['NSUMMED'] = N
             postprocess.create_header_for_image_data(mean_image_fname, wcs = py_plan.wcs, im_shape = (py_plan.npix, py_plan.npix), dtype=np.dtype('>f4'), kwargs = useful_info, image_data = mean_image)
