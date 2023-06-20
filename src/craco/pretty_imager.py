@@ -201,7 +201,7 @@ def main():
             if args.flag_chans:
                 block = rfi_cleaner.flag_chans(block, args.flag_chans, 0)
             if args.rfi:
-                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
+                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(block, False, False, False, False, True, True)
                 if args.plot_blocks:
                     plot_block(block, title="The cleaned block")
 
