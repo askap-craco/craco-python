@@ -94,8 +94,7 @@ class Craco(EpicsSubsystem):
             for card in range(1, 12+1):
                 if block in blocklist and card in cardlist and icard < maxncard:
                     mask |= 1 << (card - 1)
-
-                icard += 1
+                    icard += 1
 
             block_masks.append(mask)
 
