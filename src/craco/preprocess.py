@@ -272,7 +272,7 @@ class RFI_cleaner:
         Does the IQRM magic
 
         block needs to be a np.ndarray or np.ma.core.MaskedArray
-        Each block data should have shape (nbl, nf, npol, nt) or (nbl, nf, nt) of absolute values (np.abs(block))
+        Each block data should have shape (nbl, nf, npol, nt) or (nbl, nf, nt)
 
         All of the remaining flags need boolean values (True/False)
         maf: Mask auto-corrs in freq (True to enable, False to disable)
@@ -300,7 +300,7 @@ class RFI_cleaner:
         self.isMasked, self.pol_axis_exists, _ = get_isMasked_nPol(block)
 
         if maf or mat:
-            autocorr_masks = self.get_IQRM_autocorr_masks(block, maf, mat)
+            autocorr_masks = self.get_IQRM_autocorr_masks(np.abs(block), maf, mat)
 
             #print("autocorr masks are", autocorr_masks)
         
@@ -314,7 +314,7 @@ class RFI_cleaner:
                     block[ibl].data[baseline_data.mask] = 0  #Zero the data where the data is already flagged, to avoid the IQRM getting too swayed by the bad samples
                 
                 if maf or mat:
-                   block[ibl] = self.clean_bl_using_autocorr_mask(ibl, baseline_data, autocorr_masks, freq=maf, time=mat)
+                   block[ibl] = self.clean_bl_using_autocorr_mask(ibl, np.abs(baseline_data), autocorr_masks, freq=maf, time=mat)
 
 
                 if mcf or mct or mcasf or mcast:
@@ -325,7 +325,7 @@ class RFI_cleaner:
 
                     if mct:
                         #print("Shape of baseline_data = ", baseline_data.shape)
-                        bl_time_mask = self.get_time_mask(baseline_data)
+                        bl_time_mask = self.get_time_mask(np.abs(baseline_data))
                         #print("Shape of time_mask = ", bl_time_mask.shape)
 
                         if self.isMasked:
@@ -337,7 +337,7 @@ class RFI_cleaner:
                         crosscorr_masks[str(ibl) + 't'] = bl_time_mask
 
                     if mcf:
-                        bl_freq_mask = self.get_freq_mask(baseline_data, threshold=5.0)
+                        bl_freq_mask = self.get_freq_mask(np.abs(baseline_data), threshold=5.0)
                         if self.isMasked:
                             baseline_data.data[bl_freq_mask, ...] = 0
                             baseline_data.mask[bl_freq_mask, ...] = True
@@ -352,7 +352,7 @@ class RFI_cleaner:
 
         if mcasf or mcast:
             #Finally find bad samples in the CAS
-            cas_masks['f'] = self.get_freq_mask(cas_sum, threshold=5)  
+            cas_masks['f'] = self.get_freq_mask(np.abs(cas_sum), threshold=5)  
             if self.isMasked:
                 cas_sum.data[cas_masks['f']] = 0
                 cas_sum.mask[cas_masks['f']] = True
@@ -360,7 +360,7 @@ class RFI_cleaner:
                 cas_sum[cas_masks['f']] = 0
 
 
-            cas_masks['t'] = self.get_time_mask(cas_sum)
+            cas_masks['t'] = self.get_time_mask(np.abs(cas_sum))
             #We don't bother zero-ing the cas-sum now since it will not be used any further
             #if self.isMasked:
                 #cas_sum[..., cas_masks['t']].data = 0
