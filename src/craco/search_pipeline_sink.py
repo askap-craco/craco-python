@@ -27,9 +27,11 @@ class VisInfoAdapter:
     Adapts a pipeline info into the thing that pipeline plan needs to make a plan
     Modeled on craft.uvfits
     '''
-    def __init__(self, info):
+    def __init__(self, info, iblk):
         self.info = info
         self.flag_ants = []
+        self.iblk = iblk
+        assert iblk >= 0
 
     def set_flagants(self, flag_ants):
         '''
@@ -54,10 +56,21 @@ class VisInfoAdapter:
         # how does flagants work?
         # bleach. Gross. This requires much thinking
         # for now we just do something brittle and see where it breaks
-        toffset = 0*u.minute # TODO: How far in the future should we compute the UVWs?
-        tbaseline = self.tstart + toffset
+
+        # calculate the block when this VisInfo finishes
+        nblk = self.info.values.update_uv_blocks
+        assert nblk >= 1
+        start_fid = self.info.fid_of_block(self.iblk)  # Frame ID of beginngin of block
+        # fid_mid is the frame ID of hte middle of the block starting at the beginning of iblk
+        # and finishing at the beginning of iblk+nblk
+        end_fid = self.info.fid_of_block(self.iblk+nblk)
+        fid_mid = start_fid + (end_fid - start_fid) // 2
+        mjd_mid = self.info.fid_to_mjd(fid_mid)
+        log.info('Returning baselines for iblk=%s start_fid=%s fid_mid=%s mjd_mid=%s tstart=%s',
+                 self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
+
         # UVW is a np array shape [nant, 3]
-        uvw = self.info.uvw_at_time(tbaseline)
+        uvw = self.info.uvw_at_time(mjd_mid)
         bluvws = {}
 
         for blinfo in self.info.baseline_iter():
@@ -101,9 +114,13 @@ class VisInfoAdapter:
     @property
     def tstart(self):
         '''
-        return start time as astropy time
+        Returns the start time for this visinfo
+        Not necessarily the start time for the whole observation
         '''
-        return self.info.tstart
+        fid = self.info.fid_of_block(self.iblk)
+        mjd = self.info.fid_to_mjd(fid)
+        return mjd
+
 
     @property
     def tsamp(self):
@@ -115,7 +132,8 @@ class VisInfoAdapter:
 class SearchPipelineSink:
     def __init__(self, info):
         self.info = info
-        self.adapter = VisInfoAdapter(self.info)
+        self.iblk = 0
+        self.adapter = VisInfoAdapter(self.info, self.iblk)
 
         devid = info.xrt_device_id
         self.pipeline = None
@@ -140,31 +158,41 @@ class SearchPipelineSink:
         or 
         vishape = (nbl, vis_nc, vis_nt) if np.complex64
         '''
-        if self.pipeline is not None:
-            # TODO: convert input beam data to whatever search_pipeline wants
-            # which is an array of [nbl, nf, nt]
-            # Don't forget, the data itself might need to be blocked into nt=256 which is what the pipeline wants
-            # copy data into local buffer
-            nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
-            assert vis_data.dtype == np.complex64, 'I think we can only handle complex data in this function'
-            output_nt = self.pipeline_data.shape[2]
+        if self.pipeline is None:
+            return
+        
+        # TODO: convert input beam data to whatever search_pipeline wants
+        # which is an array of [nbl, nf, nt]
+        # Don't forget, the data itself might need to be blocked into nt=256 which is what the pipeline wants
+        # copy data into local buffer
+        nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+        assert vis_data.dtype == np.complex64, 'I think we can only handle complex data in this function'
+        output_nt = self.pipeline_data.shape[2]
+        
+        assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
+        assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
+        assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
+        
+        for irx in range(nrx):
+            fstart = irx*vis_nc
+            fend = fstart + vis_nc
+            tstart = self.t
+            tend = tstart + vis_nt
+            self.pipeline_data[:,fstart:fend, tstart:tend] = vis_data[irx, ...]
+            
+        self.t += vis_nt
 
-            assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
-            assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
-            assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
+        # Update UVWs if necessary
+        # Don't do it on block 0 as we've already made one
+        if self.iblk % self.info.values.update_uv_blocks == 0 and self.iblk != 0:
+            self.adapter = VisInfoAdapter(self.info, self.iblk)
+            self.pipeline.update_plan(self.adapter)
 
-            for irx in range(nrx):
-                fstart = irx*vis_nc
-                fend = fstart + vis_nc
-                tstart = self.t
-                tend = tstart + vis_nt
-                self.pipeline_data[:,fstart:fend, tstart:tend] = vis_data[irx, ...]
+        if self.t == output_nt:
+            self.pipeline.write(self.pipeline_data)
+            self.t = 0
 
-            self.t += vis_nt
-
-            if self.t == output_nt:
-                self.pipeline.write(self.pipeline_data)
-                self.t = 0
+        self.iblk += 1
             
         
     def close(self):

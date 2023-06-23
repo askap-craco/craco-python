@@ -359,6 +359,11 @@ class MpiObsInfo:
         return self.main_merger.ccap[0].time_of_frame_id(fid_first)
 
     def fid_of_block(self, iblk):
+        '''
+        Returns the frame ID at the beginning? of the block index indexed by idex
+        idx=0 = first ever block we receive
+        I think the first block is discarded, which is why we have iblk+1 in the code
+        '''
         return self.fid0 + np.uint64(iblk + 1)*np.uint64(NSAMP_PER_FRAME)
 
     @property
@@ -1035,6 +1040,8 @@ def _main():
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
+    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks', type=int, default=256)
+    
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()

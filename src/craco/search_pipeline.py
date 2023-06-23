@@ -59,6 +59,7 @@ NDM_MAX = 1024
 HBM_SIZE = int(256*1024*1024)
 NBINARY_POINT_THRESHOLD = 6
 NBINARY_POINT_FDMTIN    = 5
+GRID_LUT_MAX = 180214 # TODO: work out how to calculate this number
 
 
 def make_fft_config(nplanes:int,
@@ -296,7 +297,7 @@ class Pipeline:
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.ncin, self.plan.nt, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
         #self.inbuf = Buffer((self.plan.fdmt_plan.nuvtotal, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2), np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
-        inbuf_shape = (self.plan.nuvrest, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2)
+        inbuf_shape = (self.plan.nuvrest_max, self.plan.nt, self.plan.ncin, self.plan.nuvwide, 2)
         self.inbuf = Buffer(inbuf_shape, np.int16, device, self.fdmtcu.krnl.group_id(0)).clear()
 
         log.info(f'FDMT input buffer size {np.prod(inbuf_shape)*2/1024/1024} MB')
@@ -346,26 +347,32 @@ class Pipeline:
         self.candidates = Buffer(NDM_MAX*self.plan.nbox*16, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
 
         self.starts = None
-        uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-        self.uv_out  = np.zeros(uv_shape, dtype=np.complex64)
-        self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
         self.cal_solution = calibration.CalibrationSolution(self.plan)
 
-        self.fdmt_config_buf = None
-        self.grid_luts = None
-        self.ddreader_lut = None
+        max_fdmt_config_shape = (plan.nuvrest_max, plan.ncin-1, plan.nuvwide, 2)
+        self.fdmt_config_buf = Buffer(max_fdmt_config_shape, np.uint16, self.device, self.fdmtcu.krnl.group_id(4)).clear()
+        self.grid_luts = [Buffer((GRID_LUT_MAX, ), np.uint16, self.device, g.krnl.group_id(5)).clear() for g in self.grids]
+        ddreader_lut_shape = (len(plan.ddreader_lut),)
+        self.ddreader_lut = Buffer(ddreader_lut_shape, np.uint32, self.device, self.grid_reader.group_id(5)).clear()
+        log.info('CONFIG LUTS: DDREADER shape= %s dtype=%s FDMT: shape=%s dtype=%s GRID: shape=%s dtype=%s',
+                 self.ddreader_lut.shape,
+                 self.ddreader_lut.dtype,
+                 self.fdmt_config_buf.shape,
+                 self.fdmt_config_buf.dtype,
+                 self.grid_luts[0].shape,
+                 self.grid_luts[0].dtype)
+
         self.subtractor = None
-        self.update_lookup_tables(plan) 
+        self.update_plan(plan) 
 
     def _update_grid_lut(self,plan):
         # If we are on new version of pipeline
-        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(self.plan)
+        self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, lut = get_grid_lut_from_plan(plan)
         log.info(f'Grid shape {lut.shape} nuv={self.plan.fdmt_plan.nuvtotal}')
         # small buffer
         # For grid with new version pipeline
-        if self.grid_luts is None:
-            self.grid_luts = [Buffer(lut.shape, np.uint16, self.device, g.krnl.group_id(5)).clear() for g in self.grids]
-        
+        # grid LUT shape never changes size, even when nuv changes
+        assert lut.shape == self.grid_luts[0].shape, f'Unexpected GRID LUT size. Was: {lut.shape} expected {GRID_LUT_MAX}'
         for l in self.grid_luts:
             l.nparr[:] = lut
             l.copy_to_device()
@@ -373,33 +380,34 @@ class Pipeline:
     def _update_fdmt_lut(self, plan):
         # small buffer
         fdmt_luts = plan.fdmt_plan.fdmt_lut
-        if self.fdmt_config_buf is None:
-            self.fdmt_config_buf = Buffer((fdmt_luts.shape), fdmt_luts.dtype, self.device, self.fdmtcu.krnl.group_id(4)).clear()
-            
-        self.fdmt_config_buf.nparr[:] = fdmt_luts
+        assert self.fdmt_config_buf.dtype == fdmt_luts.dtype
+        assert self.fdmt_config_buf.shape[1:] == fdmt_luts.shape[1:], f'Unexpected fdmt config buf shape. was {fdmt_luts.shape} expected {self.fdmt_config_buf.shape}'
+        assert self.fdmt_config_buf.shape[0] >= fdmt_luts.shape[0], f'Unexpected fdmt config buf shape. was {fdmt_luts.shape[0]} expected {self.fdmt_config_buf.shape[0]}'
+        self.fdmt_config_buf.nparr[:] = 0 # reset
+        self.fdmt_config_buf.nparr[:fdmt_luts.shape[0],...] = fdmt_luts
         self.fdmt_config_buf.copy_to_device()
 
     def _update_ddreader_lut(self, plan):
         # DD reader lookup table
-        ddreader_lut_size = len(plan.ddreader_lut)
-        if self.ddreader_lut is None:
-            self.ddreader_lut = Buffer(ddreader_lut_size, np.uint32, self.device, self.grid_reader.group_id(5)).clear()
-
-        log.info('DDREADER lut size: %s dtype=%s', self.ddreader_lut.shape, self.ddreader_lut.dtype)
+        assert plan.ddreader_lut.shape == self.ddreader_lut.shape, f'Unexpected DDREADER lut shape. Was {plan.ddreader_lut.shape} but expected {self.ddreader_lut.shape}'
         self.ddreader_lut.nparr[:] = plan.ddreader_lut
         self.ddreader_lut.copy_to_device()
 
-    def update_lookup_tables(self, plan):
+    def update_plan(self, plan):
         '''
         Copies the lookup tables from the given plan 
         and sets the plan variable.
         Note: you'd better not fiddle with anything like frequencies, or nbl, otherwise we'll have trouble
         '''
-        uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-        assert uv_shape == self.uv_out.shape, 'Mistmached uv shape'
+        #uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
+        #assert uv_shape == self.uv_out.shape, f'Mismached uv shape. Was {uv_shape} expected {self.uv_out.shape}'
         self._update_grid_lut(plan)
         self._update_fdmt_lut(plan)
         self._update_ddreader_lut(plan)
+        self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
+        self.uv_out  = np.zeros(plan.uv_shape, dtype=np.complex64)
+
+        self.plan = plan
         
 
     @property
@@ -465,7 +473,7 @@ class Pipeline:
         assert nuv % 2 == 0
         assert nuv % 8 == 0
         
-        assert nparallel_uv == self.nparallel_uvin, 'The number from pipeline plan should be the same as we calculated based on indexs from pipeline plan'
+        assert nparallel_uv == self.nparallel_uvin, f'The number from pipeline plan should be the same as we calculated based on indexs from pipeline plan. me={nparallel_uv} self={self.nparallel_uvin} nuv={nuv} nurest={nurest}'
 
         # load lookup tables for ddgrid reader- slows thigns down but do it always for now
         load_luts = 1
@@ -699,8 +707,9 @@ class Pipeline:
             input_flat = self.calibrate_input(input_flat, values)
 
         self.fast_baseline2uv(input_flat.data, self.uv_out)
-        self.inbuf.nparr[:,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
-        self.inbuf.nparr[:,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
+        nuvwide = self.uv_out.shape[0]
+        self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
+        self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
         self.inbuf.copy_to_device()
 
         return self
@@ -961,6 +970,16 @@ class PipelineWrapper:
         self.total_candidates = 0
         self.candout = candout
         self.iblk = 0
+
+    def update_plan(self, new_data):
+        '''
+        Literally make an entire new plan out of the data, and shove int ehlookup tables
+        Completley inelegant, but better htan nothing for now
+        '''
+        log.info('Updating plan')
+        self.plan = PipelinePlan(new_data, self.values)
+        self.pipeline.update_plan(self.plan)
+        return self.plan
 
     def write(self, input_flat):
         p = self.pipeline
