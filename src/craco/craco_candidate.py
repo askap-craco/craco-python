@@ -331,8 +331,8 @@ class Candidate:
     
     def __init__(
         self, crow, uvsource, calibration_file,
-        workdir="./", flagauto=True, extractdata=True,
-        loadplan=False, flag_ant=None, padding=50,
+        workdir=None, flagauto=True, extractdata=True,
+        flag_ant=None, padding=50,
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -348,7 +348,8 @@ class Candidate:
         self.padding = padding
 
         # make work dir if not exists
-        if not os.path.exists(workdir): os.makedirs(workdir)
+        if self.workdir is not None:
+            if not os.path.exists(workdir): os.makedirs(workdir)
         
         # get basic information from uvsource
         self._fetch_uvprop(uvsource)
@@ -363,8 +364,8 @@ class Candidate:
         else:
             self._flag_ants(flag_ant)
 
-        if loadplan:
-            self._load_plan()
+        
+        self._load_plan()
             
         # get candidate data from vis...
         if extractdata:
@@ -478,30 +479,33 @@ class Candidate:
         """
         dump burst uvfits data based on the burst range...
         """
-        nbl = _vis2nbl(self.uvsource.vis)
-        tt = self.uvsource.vis.size // nbl
-
-        _sstart, _send = self.burst_range
+        # need to figure out how to do this in the new version of uvfits
+        pass
         
-        ## add padding
-        _sstart = _sstart - padding
-        _send = _send + padding
+        # nbl = _vis2nbl(self.uvsource.vis)
+        # tt = self.uvsource.vis.size // nbl
 
-        # check if there are within the range
-        if _sstart < 0: _sstart = 0
-        if _send >= tt: _send = tt - 1
+        # _sstart, _send = self.burst_range
+        
+        # ## add padding
+        # _sstart = _sstart - padding
+        # _send = _send + padding
 
-        ### extract tables
-        da_table = self.uvsource.hdulist[0]
-        aux_table = self.uvsource.hdulist[1:]
+        # # check if there are within the range
+        # if _sstart < 0: _sstart = 0
+        # if _send >= tt: _send = tt - 1
 
-        ### only extract _sstart, _send data
-        bu_data = da_table.data[_sstart*nbl:_send*nbl]
-        bu_table = fits.GroupsHDU(bu_data, header=da_table.header)
-        bu_table.header["PZERO4"] = bu_data[0]["DATE"]
+        # ### extract tables
+        # da_table = self.uvsource.hdulist[0]
+        # aux_table = self.uvsource.hdulist[1:]
 
-        nhdu = fits.HDUList([bu_table, *aux_table])
-        nhdu.writeto(f"{self.workdir}/{fout}")
+        # ### only extract _sstart, _send data
+        # bu_data = da_table.data[_sstart*nbl:_send*nbl]
+        # bu_table = fits.GroupsHDU(bu_data, header=da_table.header)
+        # bu_table.header["PZERO4"] = bu_data[0]["DATE"]
+
+        # nhdu = fits.HDUList([bu_table, *aux_table])
+        # nhdu.writeto(f"{self.workdir}/{fout}")
     
     def _get_candidate_data(self, buffer=50, uvwave_metrics="mean"):
         """
@@ -515,12 +519,12 @@ class Candidate:
         _send = _send + buffer
         
         # self.visrange = (_sstart, _send)
-        self.burst_data_dict, _burst_uvws, _vis_range = self.uvsource.time_block_with_uvw_range((_sstart, _send))
+        self.burst_data_dict, self._burst_uvws, _vis_range = self.uvsource.time_block_with_uvw_range((_sstart, _send))
         # self.burst_data_dict = self._visdata_padding(
         #     burst_data_dict, visrange=_visrange, finrange=(_sstart, _send)
         # )
         self.visrange = _vis_range # store the visibility range...
-        self.burst_uvw = average_uvws(_burst_uvws, metrics=uvwave_metrics)
+        self.burst_uvw = average_uvws(self._burst_uvws, metrics=uvwave_metrics)
         self.burst_data = bl2array(self.burst_data_dict)
         
     def _load_plan(self):
@@ -528,7 +532,7 @@ class Candidate:
         load craco plan for calibration... this may be removed later...
         """
         # cause we did autoflagging for uvsource, we don't need to do that for plan again
-        self.plan = craco_plan.PipelinePlan(self.uvsource, "--ndm 2")
+        self.plan = craco_plan.PipelinePlan(self.uvsource, "--ndm 2 --npix 256")
 
     def _calibrate_data(self, calibration_file):
         """
@@ -763,7 +767,9 @@ class Candidate:
         nbl, nchan, npol, nt = dedisp_data.shape
         assert npol == 1, f"cannot handle multi polarisations... currently we have {npol}..."
 
-        if nt % 2 != 0: dedisp_data = dedisp_data[..., :-1] # need to make sure nt is even
+        if nt % 2 != 0: 
+            dedisp_data = dedisp_data[..., :-1] # need to make sure nt is even
+            self._burst_uvws = {bl: self._burst_uvws[bl][:, :-1] for bl in self._burst_uvws}
         self.dedisp_data = dedisp_data[..., 0, :] # move polarisation axis
 
     def _image_gridded_data(self, data, imager):
@@ -791,6 +797,7 @@ class Candidate:
         # grid_data with a shape of (npix, npix, nt)
         # here `npix` is the number of gridding on the uv plan
         # `nt` may be not equal to the original `nt`
+        # self.grid_data = self.gridder.grid_with_uvws(self.dedisp_data, self._burst_uvws)
         self.grid_data = self.gridder(self.dedisp_data)
 
         ### TODO: make images each integration, and image for the whole burst
