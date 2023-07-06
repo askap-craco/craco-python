@@ -322,7 +322,7 @@ class Pipeline:
         # Has one DDR in link file, which is 8*1024 MB
         #nt_outbuf = NBLK*self.plan.nt
         #self.mainbuf = Buffer((self.plan.nuvrest, self.plan.ndout, nt_outbuf, self.plan.nuvwide,2), np.int16, device, self.grid_reader.krnl.group_id(0)).clear()
-        mainbuf_shape = (self.plan.nuvrest, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
+        mainbuf_shape = (self.plan.nuvrest_max, self.plan.ndout, NBLK, self.plan.nt, self.plan.nuvwide, 2)
 
         log.info(f'FDMT output buffer size {np.prod(mainbuf_shape)*2/1024/1024/1024} GB')
 

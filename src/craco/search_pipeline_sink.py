@@ -59,12 +59,14 @@ class VisInfoAdapter:
 
         # calculate the block when this VisInfo finishes
         nblk = self.info.values.update_uv_blocks
-        assert nblk >= 1
-        start_fid = self.info.fid_of_block(self.iblk)  # Frame ID of beginngin of block
+        assert nblk >= 0,'Innvalid update uv blocks'
+        start_fid = self.info.fid_of_block(self.iblk)  # Frame ID of beginning
         # fid_mid is the frame ID of hte middle of the block starting at the beginning of iblk
         # and finishing at the beginning of iblk+nblk
         end_fid = self.info.fid_of_block(self.iblk+nblk)
         fid_mid = start_fid + (end_fid - start_fid) // 2
+
+        # nblk == 0 is disabled. fid_mid will be the beginning of the block. You have been warned
         mjd_mid = self.info.fid_to_mjd(fid_mid)
         log.info('Returning baselines for iblk=%s start_fid=%s fid_mid=%s mjd_mid=%s tstart=%s',
                  self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
@@ -184,7 +186,10 @@ class SearchPipelineSink:
 
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
-        if self.iblk % self.info.values.update_uv_blocks == 0 and self.iblk != 0:
+        # Don't do it if disabled with values.update_uv_blocks = 0
+        update_uv_blocks = self.info.values.update_uv_blocks
+        update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
+        if update_now:
             self.adapter = VisInfoAdapter(self.info, self.iblk)
             self.pipeline.update_plan(self.adapter)
 

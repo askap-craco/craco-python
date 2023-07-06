@@ -1040,7 +1040,7 @@ def _main():
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
     parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
-    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks', type=int, default=256)
+    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
     
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
