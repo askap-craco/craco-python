@@ -887,7 +887,7 @@ class Candidate:
                 img.save(f"{zoomdir}/{iimg}.png")
 
     def _make_field_image(
-        self, vmin=None, vmax=None, wwcs=True
+        self, vmin=None, vmax=None, wwcs=True, save=True
     ):
         # this will make the image of the whole field
         # we will take the median of the whole image stack
@@ -923,8 +923,11 @@ class Candidate:
         )
         ax.set_title("std image (log10)")
 
-        fig.savefig(f"{self.workdir}/burst_field_image.jpg", bbox_inches="tight")
-        plt.close()
+        if save:
+            fig.savefig(f"{self.workdir}/burst_field_image.jpg", bbox_inches="tight")
+            plt.close()
+        else:
+            return fig
 
     def _make_detection_images(self, vmin=0, vmax=50):
         """
