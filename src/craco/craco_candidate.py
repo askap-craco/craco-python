@@ -532,7 +532,7 @@ class Candidate:
         load craco plan for calibration... this may be removed later...
         """
         # cause we did autoflagging for uvsource, we don't need to do that for plan again
-        self.plan = craco_plan.PipelinePlan(self.uvsource, "--ndm 2 --npix 256")
+        self.plan = craco_plan.PipelinePlan(self.uvsource, "--ndm 2")
 
     def _calibrate_data(self, calibration_file):
         """
