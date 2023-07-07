@@ -198,7 +198,7 @@ class SearchPipelineSink:
                 self.pipeline.write(self.pipeline_data)
                 self.t = 0
             except:
-                log.except('Error sending data to pipeline. Disabling this pipeline')
+                log.exception('Error sending data to pipeline. Disabling this pipeline')
                 self.pipeline.close()
                 self.pipeline = None
 
