@@ -754,8 +754,9 @@ class UvFitsFileSink:
         self.obs_info = obs_info
         self.blockno = 0
         values = obs_info.values
-        if values.fcm is None or values.metadata is None:
-            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified', values.fcm, values.metadata)
+        if values.fcm is None or values.metadata is None or beamno not in obs_info.values.save_uvfits_beams:
+            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm, values.metadata,
+                     beamno, obs_info.values.save_uvfits_beams)
             self.uvout = None
             return
         
@@ -1038,7 +1039,8 @@ def _main():
     parser.add_argument('--ncards-per-host', type=int, default=None, help='Number of cards to process per host, helpful to match previous cardcap')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
-    parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=[])
+    parser.add_argument('--search-beams', help='Beams to search. e.g. 0-19', type=strrange, default=[])
+    parser.add_argument('--save-uvfits-beams', help='Beams to save UV fits files for. Also requires --metadata and --fcm. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
     parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
     
