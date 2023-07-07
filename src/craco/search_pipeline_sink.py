@@ -149,8 +149,8 @@ class SearchPipelineSink:
                 self.pipeline_data = np.zeros((nbl, nf, nt), dtype=np.complex64)
                 self.t = 0
             except:
-                log.exception(f'Failed to make pipeline for devid={devid}')
-                raise
+                log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
+                self.pipeline = None
             
 
     def write(self, vis_data):
@@ -194,8 +194,13 @@ class SearchPipelineSink:
             self.pipeline.update_plan(self.adapter)
 
         if self.t == output_nt:
-            self.pipeline.write(self.pipeline_data)
-            self.t = 0
+            try:
+                self.pipeline.write(self.pipeline_data)
+                self.t = 0
+            except:
+                log.except('Error sending data to pipeline. Disabling this pipeline')
+                self.pipeline.close()
+                self.pipeline = None
 
         self.iblk += 1
             
