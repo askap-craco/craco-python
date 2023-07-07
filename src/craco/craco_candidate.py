@@ -937,8 +937,8 @@ class Candidate:
         viss = self.visrange[0]
 
         # TODO: check if this make sense
-        imgidx_e = dets - viss + 1
-        imgidx_s = dets - viss - self.search_output["boxc_width"] + 1
+        imgidx_e = dets - viss
+        imgidx_s = dets - viss - self.search_output["boxc_width"]
 
 
         fig = plt.figure(figsize=(24, 3))
