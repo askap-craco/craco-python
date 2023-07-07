@@ -1053,7 +1053,6 @@ class PipelineWrapper:
         
         if pc_filterbank is not None:
             pc_filterbank.fin.close()
-
         
 def _main():
     parser = get_parser()
