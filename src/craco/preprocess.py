@@ -347,7 +347,8 @@ class RFI_cleaner:
                         crosscorr_masks[str(ibl) + 'f'] = bl_freq_mask
 
                     block[ibl] = baseline_data
-                    cas_sum += baseline_data
+                    if mcasf or mcast:
+                        cas_sum += baseline_data
 
 
         if mcasf or mcast:
