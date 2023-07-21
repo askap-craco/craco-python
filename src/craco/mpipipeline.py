@@ -355,7 +355,7 @@ class MpiObsInfo:
         We assume we start on the frame after fid0
         '''
         assert self.__fid0 is not None, 'First frame ID must be set before we can calculate tstart'
-        fid_first = self.fid_of_block(1) # first block is for rescaling 
+        fid_first = self.fid_of_block(0)
         return self.main_merger.ccap[0].time_of_frame_id(fid_first)
 
     def fid_of_block(self, iblk):

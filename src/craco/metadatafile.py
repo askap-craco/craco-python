@@ -261,15 +261,16 @@ def _main():
                     bluvws.append(uvws[:,iant1,:,:] - uvws[:,iant2,:,:])
 
             bluvws = np.array(bluvws)
+            x = (mjds - mjds[0])*24*60*60
             uvws.shape
             for i,lbl in enumerate(('U','V','W')):
-                axs[i].plot(uvws[:,:,beam, i])
+                axs[i].plot(x, uvws[:,:,beam, i])
                 axs[i].set_ylabel(lbl)
 
             flags = mf.flags_at_time(mjds)
-            axs[3].plot(flags)
+            axs[3].plot(x, flags)
             axs[3].set_ylabel('Flagged == 1')
-            axs[3].set_xlabel('Metadata dump')
+            axs[3].set_xlabel(f'seconds after MJD={mjds[0]:0.5f}')
             
 
             print(bluvws.shape)
@@ -283,6 +284,8 @@ def _main():
             axs[0].set_ylabel('VV')
             axs[1].set_ylabel('UU,VV,WW')
             axs[1].set_xlabel('Sample')
+
+            
 
     
             pylab.show()
