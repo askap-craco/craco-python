@@ -846,7 +846,7 @@ class UvFitsFileSink:
                 dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
 
                 assert len(antflags) == info.nant_valid
-                if antflags[ia1] or antflags[ia2]:
+                if antflags[ia1] or antflags[ia2] or np.all(abs(dblk) == 0):
                     weights[:] = 0
                     dblk[:] = 0 # set output to zeros too, just so we can't cheat
                 else:

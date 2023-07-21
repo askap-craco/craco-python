@@ -39,7 +39,7 @@ accumulate_locals = {'v0':real_dtype,
                      'delta2':real_dtype}
 
 @njit(debug=True,cache=True,fastmath=True,parallel=False, locals=accumulate_locals)
-def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ichan, beam_data, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
+def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ichan, beam_data, antenna_mask, vis_valid, vis_fscrunch=1, vis_tscrunch=1):
     '''
     Computes ICS, CAS and averaged visibilities given a block of nt integration packets from a single FPGA
   
@@ -53,6 +53,7 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
     :ichan: Channel number to update
     :beam_data: len(nt) list containing packets
     :antenna_mask: array of bool. Include antenna_mask[iant] in CAS/ICS if sum is True. Corrs not affected (yet)
+    :vis_valid: bool - set to True if you want to update the visibility data. False otherwise
     :vis_fscrunch: Visibility fscrunch factor
     :vis_tscrunch: Visibility tscrunch factor
     
@@ -112,7 +113,9 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                             ics[t,ichan] += va_scaled
                         else:
                             cas[t,ichan] += va_scaled
-                            vis[vis_bl, ochan, otime] += complex(v_real, v_imag)
+                            if vis_valid:
+                                vis[vis_bl, ochan, otime] += complex(v_real, v_imag)
+
                             if pol == npol -1 :# what a mess
                                 vis_bl += 1 
                         
@@ -148,6 +151,16 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
     nmsgs = dshape[0]
     npkt_per_accum = dshape[1]
     nt = output[0]['cas'].shape[0] # assume this is the same as ICS
+
+    # Set visibility output to valid valid only if all FPGAS for this card are valid
+    # this stops you getting into trouble with bright sources and only averaging some of the channels 
+    # see CRACO-130
+    # only worry about this is visibility frequency averaging is enabled
+    if vis_fscrunch == 1:
+        vis_valid = True
+    else:
+        vis_valid  = np.all(valid)
+        
     for beam in range(nbeam):
         for fpga in range(nfpga):
             # TODO: Work out what should do if some data isn't valid.
@@ -175,7 +188,7 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 ichan = chan*nfpga + fpga
 
                 bd = data[didx,:]
-                do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask, vis_fscrunch, vis_tscrunch)
+                do_accumulate(output, rescale_scales, rescale_stats, count[fpga], nant, beam, ichan, bd, antenna_mask, vis_valid, vis_fscrunch, vis_tscrunch)
                 
             count[fpga] += nt # only gets incremented if isvalid == True
 

@@ -146,7 +146,8 @@ class SearchPipelineSink:
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
-                self.pipeline_data = np.zeros((nbl, nf, nt), dtype=np.complex64)
+                shape = (nbl, nf, nt)
+                self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
                 self.t = 0
             except:
                 log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
@@ -181,7 +182,8 @@ class SearchPipelineSink:
             tstart = self.t
             tend = tstart + vis_nt
             self.pipeline_data[:,fstart:fend, tstart:tend] = vis_data[irx, ...]
-            
+            self.pipeline_data.mask[:,fstart:fend, tstart:tend] = abs(vis_data[irx, ...]) == 0 # update mask
+
         self.t += vis_nt
 
         # Update UVWs if necessary
