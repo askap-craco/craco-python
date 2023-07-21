@@ -332,7 +332,7 @@ class Candidate:
     def __init__(
         self, crow, uvsource, calibration_file,
         workdir=None, flagauto=True, extractdata=True,
-        flag_ant=None, padding=50,
+        flag_ant=None, padding=50, planargs="--ndm 2",
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -346,7 +346,7 @@ class Candidate:
         self.calibration_file = calibration_file
         self.workdir = workdir
         self.padding = padding
-
+        self.planargs = planargs
         # make work dir if not exists
         if self.workdir is not None:
             if not os.path.exists(workdir): os.makedirs(workdir)
@@ -532,7 +532,7 @@ class Candidate:
         load craco plan for calibration... this may be removed later...
         """
         # cause we did autoflagging for uvsource, we don't need to do that for plan again
-        self.plan = craco_plan.PipelinePlan(self.uvsource, "--ndm 2 --npix 256")
+        self.plan = craco_plan.PipelinePlan(self.uvsource, self.planargs)
 
     def _calibrate_data(self, calibration_file):
         """
