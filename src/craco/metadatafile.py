@@ -45,6 +45,17 @@ def get_azel(ants):
         
     return azel
 
+def get_par_angle(ants):
+    nants = len(ants.keys())
+    antnames = sorted(ants.keys())
+    azel = np.zeros((nants)) # nants, 2 az,el
+    for iant,antname in enumerate(antnames):
+        u = ants[antname]['par_angle']
+        azel[iant] = u
+        
+    return azel
+
+
 def ts2time(ts):
     return Time(ts/1e6/3600/24, format='mjd', scale='tai')
 
@@ -108,12 +119,22 @@ class MetadataFile:
         self.time_floats = np.array( [d['timestamp']/1e6/3600/24 for d in self.data])
         self.all_uvw = np.array([get_uvw(d['antennas']) for d in self.data])
         self.all_azel = np.array([get_azel(d['antennas']) for d in self.data])
+        self.all_parangle = np.array([get_par_angle(d['antennas']) for d in self.data])
+        
+        self.mainflag = np.array([d['flagged'] for d in self.data]) # top level flag. probably useless
+        self.antflags = np.array([[d['antennas'][a]['flagged'] for a in antnames] for d in self.data]) # antenna based flags
+        self.ant_onsrc = np.array([[d['antennas'][a]['on_source'] for a in antnames] for d in self.data]) # whether antenna is on source
 
-        self.antflags = np.array([[d['antennas'][a]['flagged'] for a in antnames] for d in self.data])
+        # need to OR the flags together to get a correct total flag. See CRACO-132
+        self.anyflag = self.mainflag[:,np.newaxis] | self.antflags | ~self.ant_onsrc
+        
         self.times = Time(self.time_floats, format='mjd', scale='tai')
+        
         self.uvw_interp = interp1d(self.times.value, self.all_uvw,  kind='linear', axis=0, bounds_error=True, copy=False)
-        self.flag_interp = interp1d(self.times.value, self.antflags, kind='previous', axis=0, bounds_error=True, copy=False)
+        self.flag_interp = interp1d(self.times.value, self.anyflag, kind='previous', axis=0, bounds_error=True, copy=False)
         self.index_interp = interp1d(self.times.value, np.arange(len(self.data)), kind='previous', bounds_error=True, copy=False)
+
+        
         self.antnames = antnames
         self._sources_b0 = self.sources(0) # just used for sourcenames
 
@@ -232,7 +253,8 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--plotuv', help='Plot UVW for given beam', type=int)
+    parser.add_argument('--plot-beam', help='Plot UVW for given beam', type=int)
+    parser.add_argument('--xtype', help='Type of data for x data of plot', choices=('mjd','utc','idx'), default='mjd')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -248,10 +270,14 @@ def _main():
             for name, data in mf.sources(b).items():
                 print('beam', b, name, data['skycoord'].to_string('hmsdms'), data['scan_times'][0][0].iso, data['scan_times'][0][1].iso)
 
-        fig, axs = pylab.subplots(4,1, sharex=True)
-        if values.plotuv is not None:
-            beam = values.plotuv
-            mjds = mf.time_floats
+        fig, axs = pylab.subplots(8,1, sharex=True)
+        fig.suptitle(f)
+        if values.plot_beam is not None:
+            beam = values.plot_beam
+            mjds_times = mf.times
+            mjds = mjds_times.tai.value
+            mainflag = mf.mainflag
+
             uvws = mf.uvw_at_time(mjds) # (time, nant, nbeam, 3)
             nant = uvws.shape[1]
             bluvws = []
@@ -261,19 +287,42 @@ def _main():
                     bluvws.append(uvws[:,iant1,:,:] - uvws[:,iant2,:,:])
 
             bluvws = np.array(bluvws)
-            x = (mjds - mjds[0])*24*60*60
+            xtype = values.xtype
+            if xtype == 'mjd':
+                x = (mjds - mjds[0])*24*60*60
+                xlbl = f'seconds after MJD={mjds[0]:0.5f}'
+            elif xtype == 'utc':
+                x = mf.times.utc.datetime
+                xlbl = 'UTC'
+            else:
+                x = np.arange(len(mjds))
+                xlbl = 'Metadata dump number'
             uvws.shape
             for i,lbl in enumerate(('U','V','W')):
                 axs[i].plot(x, uvws[:,:,beam, i])
                 axs[i].set_ylabel(lbl)
 
-            flags = mf.flags_at_time(mjds)
+            flags = mf.antflags
             axs[3].plot(x, flags)
-            axs[3].set_ylabel('Flagged == 1')
-            axs[3].set_xlabel(f'seconds after MJD={mjds[0]:0.5f}')
-            
+            axs[3].plot(x, mainflag, label='Main array flag')
 
-            print(bluvws.shape)
+            axs[3].set_ylabel('Flagged == 1')
+            axs[3].legend()
+
+            axs[4].plot(x, mf.ant_onsrc)
+            axs[4].set_ylabel('onsrc')
+
+            axs[5].plot(x, mf.all_azel[...,0])
+            axs[5].set_ylabel('Aximuth')
+
+            axs[6].plot(x, mf.all_azel[...,1])
+            axs[6].set_ylabel('Elevation')
+
+            axs[7].plot(x, mf.all_parangle)
+            axs[7].set_xlabel(xlbl)
+            axs[7].set_ylabel('Parang')
+
+
             fig2,axs = pylab.subplots(1,2)
             for ibl in range(bluvws.shape[0]):
                 axs[0].plot(bluvws[ibl,:,beam,0], bluvws[ibl,:,beam,1],'o')

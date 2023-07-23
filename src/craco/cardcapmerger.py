@@ -269,6 +269,9 @@ class CcapMerger:
         return self.ccap[0].mainhdr[key]
     
     def fid_to_mjd(self, fid):
+        '''
+        Returns astropy.Time
+        '''
         return self.ccap[0].time_of_frame_id(fid)
 
     def packet_iter(self, frac_finished_threshold=0.9, beam=None, start_fid=None):

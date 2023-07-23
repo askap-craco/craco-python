@@ -370,7 +370,7 @@ class CardcapFile:
 
         return mylen
 
-    def time_of_frame_id(self, frame_id):
+    def time_of_frame_id(self, frame_id) -> Time:
         '''
         Returns an astropy time of the given frame ID
 
