@@ -67,21 +67,19 @@ def plot_block(block, title = None):
 
 def get_parser():
     parser = craco_plan.get_parser()
-    parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file", default=None)
-    parser.add_argument("-if", "--injection_params_file", type=str, help="Path to an injection params file", default=None)
-    parser.add_argument("-nt", type=int, help="nt for the block size", default=64)
-    parser.add_argument("-tx", type=int, help="Average in time by a factor of tx", default=1)
-    parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
-    parser.add_argument("-proper", action='store_true', help="Do proper uvw coordinate while gridding", default=False)
-    parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
+    parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file", default=None)
+    parser.add_argument("--tx", type=int, help="Average in time by a factor of tx", default=1)
+    parser.add_argument("--norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
+    parser.add_argument("--proper", action='store_true', help="Do proper uvw coordinate while gridding", default=False)
+    parser.add_argument("--rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     g = parser.add_mutually_exclusive_group()
-    g.add_argument("-dedm_pccc", type=float, help="De-DM in pc/cc")
-    g.add_argument("-dedm_samps", type=int, help="De-DM in sample units", default=0)
-    parser.add_argument("-plot_blocks", action='store_true', help="Plot the blocks after each pre-processing steps", default=False)
-    parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
-    parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
-    parser.add_argument("-stats_image", action='store_true', help="Generate a mean and rms image out of the data too",default=False)
+    g.add_argument("--dedm_pccc", type=float, help="De-DM in pc/cc")
+    g.add_argument("--dedm_samps", type=int, help="De-DM in sample units", default=0)
+    parser.add_argument("--plot_blocks", action='store_true', help="Plot the blocks after each pre-processing steps", default=False)
+    parser.add_argument("--ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
+    parser.add_argument("--ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
+    parser.add_argument("--stats_image", action='store_true', help="Generate a mean and rms image out of the data too",default=False)
     args = parser.parse_args()
 
     assert args.tx > 0, "Tx has to be > 0"
@@ -125,8 +123,8 @@ def main():
         dm_pccc = 0
 
 
-    if args.calfile:
-        calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+    if args.calibration:
+        calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calibration, baseline_order=py_plan.baseline_order)
     
     if args.rfi or args.flag_chans:
         rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
@@ -148,7 +146,7 @@ def main():
             'NORM': args.norm,
             'BTYPE': block_type.__name__,
             'NT': args.nt,
-            'CALFILE': str(args.calfile),
+            'CALFILE': str(args.calibration),
             'INJFILE': str(args.injection_params_file),
             'UV': str(py_plan.values.uv),
             'PROPER': str(args.proper),
@@ -194,7 +192,7 @@ def main():
             
             if args.plot_blocks:
                 plot_block(block, title="The raw input block")
-            if args.calfile:
+            if args.calibration:
                 block = calibrator.apply_calibration(block)
                 if args.plot_blocks:
                     plot_block(block, title="The calibrated block")
