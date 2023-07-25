@@ -33,6 +33,7 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
+    parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -62,30 +63,30 @@ def _main():
     os.symlink(scandir, targetlink)
     target_file = os.path.join(scandir, 'ccap.fits')
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
-    cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpicardcap.sh'
+    cmdname='mpicardcap.sh'
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
     #pol='--pol-sum'
-    pol = '--dual-pol'
 
-    tscrunch='--tscrunch 32'
-    #tscrunch = '--tscrunch 1'
+    beam = -1 # all beams, tscrucnh
+    #beam = 0 # given beam no tscrunch
 
-    spi='--samples-per-integration 64'
-
-    #beam='--beam 0' # single beam
-    beam = '' # all beams
+    if beam == -1: # all beams
+        beam = '' # all beams
+        pol = '--dual-pol'
+        tscrunch='--tscrunch 32'
+        spi='--samples-per-integration 64'
+    else:
+        beam = f'--beam {beam}' # single beam
+        pol = '--pol-sum'
+        tscrunch = ''
+        spi = '--samples-per-integration 32'
 
     card  = '-a 1-12'
-    block = '-b 2-7'
+    block = '-b 3-5'
     fpga = ''
     fpga_mask = ''
-    
-    #fpga = '-k 2,4,6'
-    #fpga_mask = '--fpga-mask 42'
-    #fpga = '-f 1-6'
-    #max_ncards = '--max-ncards 70'
 
     # 30 cards is about the limit for cardcap
     max_ncards = '--max-ncards 30'

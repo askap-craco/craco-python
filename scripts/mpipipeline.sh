@@ -3,6 +3,7 @@
 rankfile=mpipipeline.rank
 hostfile=mpi_seren.txt
 
+echo "Running $0 with argumnets $@ `pwd` with rankfile=$rankfile hostfile=$hostfile"
 
 # IF HCOLL IS ENABED WITH col-hcoll-enable 1 THEN IT HANGS ON MPI_FINALIZE !!!!
 use_roce=0
@@ -31,9 +32,9 @@ echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 
 
 # save the rankfile
-extra_args="--devices mlx5_1"
+extra_args="--devices mlx5_1 --hostfile $hostfile"
 
-mpipipeline --hostfile $hostfile --dump-rankfile $rankfile $extra_args $@
+mpipipeline --dump-rankfile $rankfile $extra_args $@
 
 retval=$?
 if [ $retval -ne 0 ]; then
@@ -50,7 +51,7 @@ tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mc
 # USE UCX
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
 
-commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST"
+commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT"
 
 # runwith the rankfile
 

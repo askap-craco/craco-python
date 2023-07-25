@@ -25,6 +25,18 @@ def none_next(i):
 
     return b
 
+def empty_iter(fid0):
+    '''
+    Yields blocks of data starting at fid0 that are empty
+    for ever
+    Useful for when you have an empty file
+    '''
+    fidoff = np.uint64(NSAMP_PER_FRAME)
+    fid = np.uint64(fid0)
+    while True:
+        yield (fid, None)
+        fid += fidoff
+
 def frame_id_iter(i, fid0):
     '''
     Generator that yields blocks of data
@@ -68,6 +80,20 @@ def frame_id_iter(i, fid0):
         last_bat = curr_bat
 
 
+def make_iterator(ccap, beam, start_fid):
+    '''
+    Makes an iterator for this cardcap
+    If the cardcap is empty then wwe just return an empty iterator, which will return None forever with the 
+    correct FIDs
+    Otherwise a frame ID iterator which will try to sync up correctly
+    '''
+    if ccap.isempty:
+        it = empty_iter(start_fid)
+    else:
+        it = frame_id_iter(ccap.frame_iter(beam), start_fid)
+
+    return it
+    
 class CcapMerger:
     def __init__(self, fnames, headers=None):
         ''' Need to give it file names or headers
@@ -88,10 +114,6 @@ class CcapMerger:
             assert len(headers[0]) > 0, 'Empty header'
             self.ccap = [CardcapFile.from_header_string(hdr) for hdr in headers]
 
-        isempty = np.array([cc.isempty for cc in self.ccap])
-        if np.all(isempty) and self.fnames is not None:
-            raise ValueError(f'All data is empty for {fnames}')
-        
         nfpga = len(self.ccap[0].fpgas)
         nfiles = len(self.ccap)
         all_freqs = np.zeros((nfiles, nfpga, NCHAN))
@@ -118,6 +140,10 @@ class CcapMerger:
         Some properties won't be available because they need to see the data
         '''
         return CcapMerger(None, headers)
+
+    @property
+    def is_all_empty(self):
+        return all([c.isempty for c in self.ccap])
 
     @property
     def frame_ids(self):
@@ -243,6 +269,9 @@ class CcapMerger:
         return self.ccap[0].mainhdr[key]
     
     def fid_to_mjd(self, fid):
+        '''
+        Returns astropy.Time
+        '''
         return self.ccap[0].time_of_frame_id(fid)
 
     def packet_iter(self, frac_finished_threshold=0.9, beam=None, start_fid=None):
@@ -257,21 +286,27 @@ class CcapMerger:
         if start_fid is None:
             start_fid = self.frame_id0
             
-        iters = [frame_id_iter(c.frame_iter(beam), start_fid) for c in self.ccap]
+        iters = [make_iterator(c, beam, start_fid) for c in self.ccap]
         #packets = List() # TODO: Make NUMBA happy with List rather than  array
 
         assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
-        
         while True:
             packets = []
             finished_array = []
             for iterno, i in enumerate(iters):
                 try:
-                    packets.append(next(i))
-                    finished_array.append(False)
+                    # if cardcap file is empty, then we output None forever and hope
+                    # that some other file terminates the run
+                    # If empty, send None forever
+                    packet = next(i)
+                    finished = False
+
                 except StopIteration:
-                    packets.append((None,None))
-                    finished_array.append(True)
+                    packet = (None, None)
+                    finished = True
+
+                packets.append(packet)
+                finished_array.append(finished)
 
             assert len(packets) == len(iters)
             flagged_array = [p is None or p[1] is None for p in packets]

@@ -67,20 +67,19 @@ def plot_block(block, title = None):
 
 def get_parser():
     parser = craco_plan.get_parser()
-    parser.add_argument("-cf", "--calfile", type=str, help="Path to the calibration file", default=None)
-    parser.add_argument("-if", "--injection_params_file", type=str, help="Path to an injection params file", default=None)
-    parser.add_argument("-nt", type=int, help="nt for the block size", default=64)
-    parser.add_argument("-tx", type=int, help="Average in time by a factor of tx", default=1)
-    parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
-    parser.add_argument("-rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
+    parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file", default=None)
+    parser.add_argument("--tx", type=int, help="Average in time by a factor of tx", default=1)
+    parser.add_argument("--norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
+    parser.add_argument("--proper", action='store_true', help="Do proper uvw coordinate while gridding", default=False)
+    parser.add_argument("--rfi", action='store_true', help="Perform RFI mitigation on the data", default = False)
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     g = parser.add_mutually_exclusive_group()
-    g.add_argument("-dedm_pccc", type=float, help="De-DM in pc/cc")
-    g.add_argument("-dedm_samps", type=int, help="De-DM in sample units", default=0)
-    parser.add_argument("-plot_blocks", action='store_true', help="Plot the blocks after each pre-processing steps", default=False)
-    parser.add_argument("-ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
-    parser.add_argument("-ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
-    parser.add_argument("-stats_image", action='store_true', help="Generate a mean and rms image out of the data too",default=False)
+    g.add_argument("--dedm_pccc", type=float, help="De-DM in pc/cc")
+    g.add_argument("--dedm_samps", type=int, help="De-DM in sample units", default=0)
+    parser.add_argument("--plot_blocks", action='store_true', help="Plot the blocks after each pre-processing steps", default=False)
+    parser.add_argument("--ogif", type=str, help="Name (path) of the output gif. Don't specify if you don't want to save a gif", default=None)
+    parser.add_argument("--ofits", type=str, help="Name of the output fits file. Don't specify if you don't want to save a fits", default=None)
+    parser.add_argument("--stats_image", action='store_true', help="Generate a mean and rms image out of the data too",default=False)
     args = parser.parse_args()
 
     assert args.tx > 0, "Tx has to be > 0"
@@ -98,7 +97,6 @@ def main():
     #values.uv = myfits
     values.nt = args.nt
     values.ndm = 2
-    values.npix = 512
     uvsource = uvfits.open(values.uv)
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
@@ -125,8 +123,8 @@ def main():
         dm_pccc = 0
 
 
-    if args.calfile:
-        calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calfile, baseline_order=py_plan.baseline_order)
+    if args.calibration:
+        calibrator = preprocess.Calibrate(plan = py_plan, block_dtype=block_type, miriad_gains_file=args.calibration, baseline_order=py_plan.baseline_order)
     
     if args.rfi or args.flag_chans:
         rfi_cleaner = preprocess.RFI_cleaner(block_dtype=block_type, baseline_order=py_plan.baseline_order)
@@ -148,9 +146,10 @@ def main():
             'NORM': args.norm,
             'BTYPE': block_type.__name__,
             'NT': args.nt,
-            'CALFILE': str(args.calfile),
+            'CALFILE': str(args.calibration),
             'INJFILE': str(args.injection_params_file),
             'UV': str(py_plan.values.uv),
+            'PROPER': str(args.proper),
 
             'BSCALE': 1.0,
             'BZERO': 0.0,
@@ -165,7 +164,10 @@ def main():
         FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, outblock_type=dict)
         uvdata_source = FV.get_fake_data_block()
     else:
-        uvdata_source = c.uvsource.time_blocks(py_plan.nt)
+        if args.proper:
+            uvdata_source = c.uvsource.time_blocks_with_uvws(py_plan.nt)
+        else:
+            uvdata_source = c.uvsource.time_blocks(py_plan.nt)
 
     if args.ogif:
         images = []
@@ -175,8 +177,13 @@ def main():
         N = 1
     try:
         for iblock, block in enumerate(uvdata_source):
+            if args.proper:
+                block, uvws = block
+                print(f"Splitting the block into uvws and data block of types - {type(uvws), type(block)}")
+                
+            
             print(f"Working on block {iblock}, dtype={type(block)}")
-
+            #IPython.embed()
             if type(block) == dict and block_type != dict:
                 block = bl2array(block)
 
@@ -185,14 +192,14 @@ def main():
             
             if args.plot_blocks:
                 plot_block(block, title="The raw input block")
-            if args.calfile:
+            if args.calibration:
                 block = calibrator.apply_calibration(block)
                 if args.plot_blocks:
                     plot_block(block, title="The calibrated block")
             if args.flag_chans:
                 block = rfi_cleaner.flag_chans(block, args.flag_chans, 0)
             if args.rfi:
-                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(np.abs(block), False, False, False, False, True, True)
+                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(block, False, False, False, False, True, True)
                 if args.plot_blocks:
                     plot_block(block, title="The cleaned block")
 
@@ -210,7 +217,10 @@ def main():
                 if args.plot_blocks:
                     plot_block(block, title="The dedispersed block")
 
-            gridded_block = direct_gridder(block)
+            if args.proper:
+                gridded_block = direct_gridder.grid_with_uvws(block, uvws)
+            else:
+                gridded_block = direct_gridder(block)
             for t in range(c.plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.stats_image:
@@ -299,8 +309,8 @@ def main():
                 mean_image_fname = args.injection_params_file + ".mean_image.fits"
                 rms_image_fname = args.injection_params_file + ".rms_image.fits"
             else:
-                mean_image_fname = args.uv + ".mean_image.fits"
-                rms_image_fname = args.uv + ".rms_image.fits"
+                mean_image_fname = args.ofits + ".mean_image.fits"
+                rms_image_fname = args.ofits + ".rms_image.fits"
             print("Saving the stats images in: {0} and {1}".format(mean_image_fname, rms_image_fname))
             useful_info['NSUMMED'] = N
             postprocess.create_header_for_image_data(mean_image_fname, wcs = py_plan.wcs, im_shape = (py_plan.npix, py_plan.npix), dtype=np.dtype('>f4'), kwargs = useful_info, image_data = mean_image)

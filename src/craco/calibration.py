@@ -67,7 +67,7 @@ def interpolate_gains(gains, from_freqs, to_freqs):
     re_interp = interp1d(from_freqs, gains.real, axis=1, fill_value='extrapolate')
     im_interp = interp1d(from_freqs, gains.imag, axis=1, fill_value='extrapolate')
     out_gains = re_interp(to_freqs) + 1j*im_interp(to_freqs)
-    out_gains = np.ma.masked_where(abs(out_gains) == 0, out_gains)
+    out_gains = np.ma.masked_array(out_gains, mask=abs(out_gains) == 0, shrink=False)
     
     return out_gains
     
@@ -112,7 +112,7 @@ def load_gains(fname):
     note: those sizes may be different than what you asked for
     But nant = 36 always, so we know that the non-existent natennas should be flagged
     '''
-    if os.path.isfile(fname) and fname.endswith('.bin'):
+    if fname.endswith('.bin'):
         bp = plotbp.Bandpass.load(fname)
         g = bp.bandpass[0]
         npol = g.shape[-1]
@@ -150,7 +150,7 @@ def load_gains(fname):
             assert np.all(chan_width == chan_width[0]), f'Channel widths are not all teh same {chan_width} {fname}'
             tb.close()
 
-    elif os.path.isfile(fname) and fname.endswith('.smooth.npy'):
+    elif fname.endswith('.smooth.npy'):
         g = np.load(fname)[0]
         npol = g.shape[-1]
         if npol == 4: # Npol is [XX, XY, YX, YY] just pick out [XX,YY]
@@ -197,7 +197,6 @@ def load_gains(fname):
     g = np.ma.masked_equal(g,0) # This seems to work, even though I can't get the abs to work
     g.set_fill_value(0+0j)
     
-    
     assert g.shape[0] == 36, f'First dimension of gains shoudl be nant=36. Shape was (nant, chan, npol)={g.shape}'
     
     return (g, freqs)
@@ -210,11 +209,13 @@ class CalibrationSolution:
         self.values = values
 
         if values.calibration:
-            gains, freqs = load_gains(values.calibration)
+            gains, freqs = open_calibration_file(values.calibration, plan.beamid)
             log.info('Loaded calibration gains %s from calfile %s', gains.shape, plan.values.calibration)
         else: # make dummy gains
             shape = (self.plan.maxant, self.plan.nf, 2)
             mask = np.zeros(shape, dtype=bool)
+            # Need to have shrink = False otherwise it just sets the mask to a single value (no mask)
+            # which means you can't update the chanel mask later
             gains = np.ma.masked_array(np.ones(shape, dtype=np.complex64), mask=mask)
             freqs = plan.freqs
 
@@ -226,11 +227,13 @@ class CalibrationSolution:
         assert len(freqs) == nchan
         chan_bw_ratio = int(np.round(self.plan.foff / foff))
         
-        log.info('Calibration file: fch1=%s, foff=%s nchan=%d plan: fch1=%s foff=%s nchan=%d chan_bw_ratio=%d gains.shape=%s',
+        log.info('Calibration file: fch1=%s, foff=%s nchan=%d plan: fch1=%s foff=%s nchan=%d chan_bw_ratio=%d gains.shape=%s masktype=%s',
                  fch1, foff, nchan,
                  plan.fmin, plan.foff, plan.nf,
                  chan_bw_ratio,
-                 gains.shape)
+                 gains.shape,
+                 type(gains.mask)
+        )
         assert foff >0, 'Assume freq always increasing, it just makes me feel better'
         assert self.plan.foff > 0, 'Assume freq always incerasing'
         
@@ -300,6 +303,19 @@ class CalibrationSolution:
         # OMFG - if you do g[:,chanrange,:].mask if chanrange if a list of indexes, it doesn't work, but if it's a slice it does work. But if you do g.mask[:,chanrange,:] it works for both
         self.gains.mask[:,chanrange,:] = flagval
         return self.__calc_solarray()
+
+def open_calibration_file(calpath, beamid):
+    '''
+    Try to load calibraiton gains, if not, try to load them in a pathgiven by the beamid instead
+    '''
+    try: 
+        g = load_gains(calpath)
+    except:
+        beam_path = os.path.join(calpath, f'{beamid:02d}/b{beamid:02d}.aver.4pol.smooth.npy')
+        log.info('Calpath %s is not openable as a file. Trying as a multibeam directory with beam=%s', calpath, beam_path)
+        g = load_gains(beam_path)
+
+    return g
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

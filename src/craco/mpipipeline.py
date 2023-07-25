@@ -33,8 +33,12 @@ from craft.parset import Parset
 from craco.search_pipeline_sink import SearchPipelineSink
 from craco.metadatafile import MetadataFile
 from scipy import constants
+from collections import namedtuple
+from craft.craco import ant2bl
+from craco import mpiutil
+from craft.cmdline import strrange
 
-
+    
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
@@ -47,11 +51,61 @@ numprocs = comm.Get_size()
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
 
+
+class BaselineIndex:
+    def __init__(self, blidx, a1, a2, ia1, ia2):
+        '''
+        blidx - index into an array that's had flagged antenans removed
+        a1 - 1 based antenna number
+        a2 - 1 based antenna number
+        ia1 = index into an array of antennas that's had the flagged antennas removed
+        ia2 = index into an array of antennas that's had the flagged antennas removed
+        '''
+        assert a1 > 0 and a2 > 0
+        self.blidx = blidx
+        self.a1 = a1
+        self.a2 = a2
+        self.ia1 = ia1
+        self.ia2 = ia2
+
+    @property
+    def blid(self):
+        '''
+        Returns the baseline ID (FITS formatted) of this index
+        '''
+        return ant2bl((self.a1, self.a2))
+
+    def __str__(self):
+        s = f'BaselineIndex blidx={self.blidx} {self.a1}-{self.a2} idx={self.ia1}-{self.ia2} blid={self.blid}'
+        return s
+
+    __repr__ = __str__
+        
+
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
 CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
 
+class BeamRankInfo(namedtuple('BeamProcInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
+    @property
+    def rank_file_str(self):
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} xrtdevid={self.xrt_device_id}'
+        return s
+
+class ReceiverRankInfo(namedtuple('ReceiverInfo', ['rxid','rank','host','slot','core','block','card','fpga'])):
+    @property
+    def rank_file_str(self):
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
+        return s
+
+
 class MpiPipelineInfo:
     def __init__(self, values):
+        '''
+        TODO - integrate this in with a nice way of doing dump hostfile
+        '''
+        self.hosts = mpiutil.parse_hostfile(values.hostfile)
+        self.beam_ranks = []
+        self.receiver_ranks = []
 
         if values.max_ncards is None:
             ncards = len(values.block)*len(values.card)
@@ -62,7 +116,7 @@ class MpiPipelineInfo:
         self.nrx = nrx
         self.ncards = ncards
 
-            # yuck. This is just yuk.
+        # yuck. This is just yuk.
         if values.beam is None:
             values.nbeams = 36
         else:
@@ -95,6 +149,14 @@ class MpiPipelineInfo:
     def beamid(self):
         assert self.is_beam_processor, 'Requested beam ID of non beam processor'
         return self.world_rank
+
+    def beam_rank_info(self, beamid):
+        '''
+        Returns the rank info for the given beam
+        '''
+        
+        rank_info = next(filter(lambda info: info.beamid == beamid, self.beam_ranks))
+        return rank_info
 
     @property
     def is_rx_processor(self):
@@ -195,16 +257,18 @@ class MpiObsInfo:
 
     def baseline_iter(self):
         '''
-        Returns an iterator over the valid, unflagged antenna indicies, 0 based
-        Returns an iterator that returns 2-typle (ia1, ia2), 0 based.
+        Returns an iterator over the valid baselines
+        Returns a BaselineIndex whichis info on which baselines are present
         No autocorrelations are returned
         '''
-        for ia1 in range(self.nant):
-            for ia2 in range(ia1+1, self.nant):
-                if ia1+1 in self.values.flag_ants or ia2+1 in self.values.flag_ants:
-                    continue
+        blidx = 0
+        for ia1, a1 in enumerate(self.valid_ants_0based):
+            for a2 in self.valid_ants_0based[ia1+1:]:
+                ia2 = list(self.valid_ants_0based).index(a2)
+                b = BaselineIndex(blidx, a1+1, a2+1, ia1, ia2)
+                yield b
+                blidx += 1
 
-                yield (ia1, ia2)
                 
     @property
     def xrt_device_id(self):
@@ -212,17 +276,11 @@ class MpiObsInfo:
         Returns which device should be used for searcing for this pipeline
         Returns None if this beam processor shouldnt be processing this beam
         '''
-        assert self.pipe_info.is_beam_processor, 'Device id shouldnt be called by non beam processors'
-        search_beams = self.values.search_beams
-        beamid = self.beamid
-        devices = [0,1] # these are the available devices
-        devid = None
-        if beamid in search_beams:
-            bidx = search_beams.index(beamid)
-            devidx = bidx % len(devices)
-            devid = devices[devidx]
-
-        return devid
+        
+        beam_rank_info = self.pipe_info.beam_rank_info(self.beamid)
+        xrtdev = beam_rank_info.xrt_device_id
+        
+        return xrtdev
 
     @property
     def beamid(self):
@@ -297,10 +355,15 @@ class MpiObsInfo:
         We assume we start on the frame after fid0
         '''
         assert self.__fid0 is not None, 'First frame ID must be set before we can calculate tstart'
-        fid_first = self.fid_of_block(1) # first block is for rescaling 
+        fid_first = self.fid_of_block(0)
         return self.main_merger.ccap[0].time_of_frame_id(fid_first)
 
     def fid_of_block(self, iblk):
+        '''
+        Returns the frame ID at the beginning? of the block index indexed by idex
+        idx=0 = first ever block we receive
+        I think the first block is discarded, which is why we have iblk+1 in the code
+        '''
         return self.fid0 + np.uint64(iblk + 1)*np.uint64(NSAMP_PER_FRAME)
 
     @property
@@ -367,7 +430,7 @@ class MpiObsInfo:
 
     @property
     def vis_inttime(self):
-        return self.inttime # do I need to scale by vis_tscrunch? Main merger already has it?
+        return self.inttime*self.values.vis_tscrunch # do I need to scale by vis_tscrunch? Main merger already has it?
 
     @property
     def nt(self):
@@ -492,11 +555,11 @@ class ByteTransposer:
     def all2all(self, dtx):
         nmsgs = self.nmsgs
         t_barrier = MPI.Wtime()
-        log.info('Rank %s waiting', comm.Get_rank())
+        log.debug('Rank %s waiting', comm.Get_rank())
         comm.Barrier()
         t_start = MPI.Wtime()
         t_wait = t_start - t_barrier
-        log.info('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+        log.debug('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
 
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
@@ -602,13 +665,6 @@ def proc_rx(pipe_info):
 
     pktiter = ccap.packet_iter()
     packets, fids = next(pktiter)
-    #assert dummy_packet.shape == packets[0][1].shape, f'Dummy packet shape {dummy_packet.shape} doesnt match real packet {packets[0][1].shape}'
-    #log.debug('packets %s %s %s %s %s %s %s', len(packets),type(packets),type(packets[0]), type(packets[0][0]), type(packets[0][1]), packets[0][1].shape, packets[0][1].dtype)
-    # packets is list a list of 6 entires - 1 per FPGA
-    # each entry contains a tuple of (fid, data)
-    # if nbeam == 1 from file the the data shape = (128)
-    # if nbeam == 36 data shape = (144,32)
-    # Maybe should fix that
 
     averaged = averager.accumulate_packets(packets)
     averaged = averager.output
@@ -627,10 +683,6 @@ def proc_rx(pipe_info):
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
         expected_fid = info.fid_of_block(ibuf) 
-        #for ifpga, (pkt, fid) in enumerate(zip(packets, fids)):
-        #    if pkt is not None:
-        #        diff = int(expected_fid) - int(fid)
-        #        assert diff==0, f'Invalid fid. Expected {expected_fid} but got {fid} diff={diff} for rank={rank} ibuf={ibuf} card={cardidx} ifpga={ifpga} start_fid={start_fid}'
 
         best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
@@ -664,8 +716,8 @@ class FilterbankSink:
         hdr = {'nbits':32,
                'nchans':vis_source.nchan,
                'nifs':npol, 
-               'src_raj':pos.ra.deg,
-               'src_dej':pos.dec.deg,
+               'src_raj_deg':pos.ra.deg,
+               'src_dej_deg':pos.dec.deg,
                'tstart':vis_source.tstart.utc.mjd,
                'tsamp':vis_source.inttime.to(u.second).value,
                'fch1':vis_source.fch1,
@@ -702,8 +754,9 @@ class UvFitsFileSink:
         self.obs_info = obs_info
         self.blockno = 0
         values = obs_info.values
-        if values.fcm is None or values.metadata is None:
-            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified', values.fcm, values.metadata)
+        if values.fcm is None or values.metadata is None or beamno not in obs_info.values.save_uvfits_beams:
+            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm, values.metadata,
+                     beamno, obs_info.values.save_uvfits_beams)
             self.uvout = None
             return
         
@@ -761,29 +814,39 @@ class UvFitsFileSink:
         assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
         # TODO: Check timestamp convention for for FID and mjd.
         # I think this is right
-        fid_mid = fid_start + info.nt // 2
+        # fid_start goes up by NSAMP_PER_FRAME = 2048 every block
+        # We'll calculate the same UVWs for everything in this block. A bit lazy but not rediculous
+        fid_mid = fid_start + np.uint64(NSAMP_PER_FRAME//2)
         mjd = info.fid_to_mjd(fid_mid)
         sourceidx = md.source_index_at_time(mjd)
-        #sourcename = md.source_name_at_time(mjd.value)
         uvw = md.uvw_at_time(mjd)
         antflags = md.antflags_at_time(mjd)
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
-        inttime = info.inttime.to(u.second).value
+        inttime = info.inttime.to(u.second).value*info.vis_tscrunch
+        assert NSAMP_PER_FRAME % vis_nt == 0
+        samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
 
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
-            blidx = 0
-            mjd = info.fid_to_mjd(fid_start + itime)
-            for (ia1, ia2) in info.baseline_iter():
+            # FID is for the beginning of the block.
+            # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
+            fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
+            mjd = info.fid_to_mjd(fid_itime)
+            log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
+            for blinfo in info.baseline_iter():
+                ia1 = blinfo.ia1
+                ia2 = blinfo.ia2
+                a1 = blinfo.a1
+                a2 = blinfo.a2
                 uvwdiff = uvw[ia1, :] - uvw[ia2, :]
                 # TODO: channel-dependent weights - somehow
-                dblk = dreshape[itime, blidx, ...] # should be (nchan, npol)
+                dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
 
                 assert len(antflags) == info.nant_valid
-                if antflags[ia1] or antflags[ia2]:
+                if antflags[ia1] or antflags[ia2] or np.all(abs(dblk) == 0):
                     weights[:] = 0
                     dblk[:] = 0 # set output to zeros too, just so we can't cheat
                 else:
@@ -791,11 +854,11 @@ class UvFitsFileSink:
                     
                 # fits convention has source index with starting value of 1
                 fits_sourceidx = sourceidx + 1
-                self.uvout.put_data(uvwdiff, mjd.value, ia1, ia2, inttime, dblk, weights, fits_sourceidx)
-                blidx += 1
+                # put_data wants 0-based antenna numbers
+                self.uvout.put_data(uvwdiff, mjd.value, a1-1, a2-1, inttime, dblk, weights, fits_sourceidx)
         
         self.uvout.fout.flush()
-        print(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
+        log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
         self.blockno += 1
 
 
@@ -857,9 +920,34 @@ def proc_beam(pipe_info):
         pipeline_sink.close()
 
 
-def dump_rankfile(values, fpga_per_rx=3):
+def parse_host_devices(hosts, devstr, devices):
+    '''
+    Get host devices from device string
+    :hosts: list of host names
+    :devstr: string like 'seren-01:1,seren-04:0,seren-5:0-1' of 'host:strrange' list of devices
+    :devices: Tuple of devices that are normally allowed, e.g. (0,1)
+    '''
+
+    dead_cards = [dc.split(':') for dc in devstr.split(',')]
+    host_cards = {}
+    for h in hosts:
+        my_devices = devices[:]
+        my_bad_devices = [strrange(dc[1]) for dc in dead_cards if dc[0] == h]
+        all_bad_devices = set()
+        for bd in my_bad_devices:
+            all_bad_devices.update(bd)
+
+
+        host_cards[h] = tuple(sorted(set(devices) - all_bad_devices))
+        
+    return host_cards
+
+def dump_rankfile(pipe_info, fpga_per_rx=3):
     from craco import mpiutil
-    hosts = mpiutil.parse_hostfile(values.hostfile)
+    values = pipe_info.values
+    fpga_per_rx = values.nfpga_per_rx
+    hosts = pipe_info.hosts
+    
     log.debug("Hosts %s", hosts)
     total_cards = len(values.block)*len(values.card)
     
@@ -876,44 +964,67 @@ def dump_rankfile(values, fpga_per_rx=3):
     log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
-    with open(values.dump_rankfile, 'w') as fout:
-        # add all the beam processes
-        for beam in range(nbeams):
-            hostidx = beam % len(hosts)
-            host = hosts[hostidx]
-            slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
-            core='1-2'
-            s = f'rank {rank}={host} slot={slot}:{core} # Beam {beam}\n'
-            fout.write(s)
-            rank += 1
+    host_search_beams = {}
+    devices = (0,1)
+    host_cards = parse_host_devices(hosts, values.dead_cards, devices)
+    
+    for beam in range(nbeams):
+        hostidx = beam % len(hosts)
+        assert hostidx < len(hosts), f'Invalid hostidx beam={beam} hostidx={hostidx} lenhosts={len(hosts)}'
+        host = hosts[hostidx]
+        slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
+        core='1-2'
+        devices = host_cards[host]
+        this_host_search_beams = host_search_beams.get(host,[])
+        host_search_beams[host] = this_host_search_beams
+        if beam in values.search_beams:
+            this_host_search_beams.append(beam)
+            
+        devid = None
+        if beam in this_host_search_beams:
+            devid = this_host_search_beams.index(beam)
+            if devid not in devices:
+                devid = None
 
-        rxrank = 0
-        cardno = 0
-        for block in values.block:
-            for card in values.card:
-                cardno += 1
-                if values.max_ncards is not None and cardno >= values.max_ncards + 1:
-                    break
-                for fpga in values.fpga[::fpga_per_rx]:
-                    hostidx = rxrank // nrx_per_host
-                    hostrank = rxrank % nrx_per_host
-                    host = hosts[hostidx]
-                    slot = 1 # fixed because both cards are on NUMA=1
-                    # Put different FPGAs on differnt cores
-                    evenfpga = fpga % 2 == 0
-                    ncores = 10
-                    icore = (hostrank % 5)*2
-                    core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
-                    core='0-9'
-                    slot = 1 # where the network cards are
-                    s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
-                    fout.write(s)
-                    rank += 1
-                    rxrank += 1
+        log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
+        rank_info = BeamRankInfo(beam, rank, host, slot, core, devid)
+        pipe_info.beam_ranks.append(rank_info)
+        rank += 1
+
+    rxrank = 0
+    cardno = 0
+    for block in values.block:
+        for card in values.card:
+            cardno += 1
+            if values.max_ncards is not None and cardno >= values.max_ncards + 1:
+                break
+            for fpga in values.fpga[::fpga_per_rx]:
+                hostidx = rxrank // nrx_per_host
+                hostrank = rxrank % nrx_per_host
+                host = hosts[hostidx]
+                slot = 1 # fixed because both cards are on NUMA=1
+                # Put different FPGAs on differnt cores
+                evenfpga = fpga % 2 == 0
+                ncores = 10
+                icore = (hostrank % 5)*2
+                core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
+                core='0-9'
+                slot = 1 # where the network cards are
+                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
+                pipe_info.receiver_ranks.append(rank_info)
+                rank += 1
+                rxrank += 1
+
+        if values.dump_rankfile:
+            with open(values.dump_rankfile, 'w') as fout:
+                for rank_info in pipe_info.beam_ranks:
+                    fout.write(rank_info.rank_file_str+'\n')
+                for rank_info in pipe_info.receiver_ranks:
+                    fout.write(rank_info.rank_file_str+'\n')
+
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    from craft.cmdline import strrange
     from craco import search_pipeline
     
     cardcap_parser = cardcap.get_parser()
@@ -927,37 +1038,61 @@ def _main():
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
     parser.add_argument('--ncards-per-host', type=int, default=None, help='Number of cards to process per host, helpful to match previous cardcap')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
-    parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
     parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
-    parser.add_argument('--search-beams', help='Beams to search', type=strrange, default=None)
+    parser.add_argument('--search-beams', help='Beams to search. e.g. 0-19', type=strrange, default=[])
+    parser.add_argument('--save-uvfits-beams', help='Beams to save UV fits files for. Also requires --metadata and --fcm. e.g. 0-19', type=strrange, default=[])
+    parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
+    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
+    
     parser.add_argument(dest='files', nargs='*')
-
-
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
-    FORMAT = '%(asctime)s (%(process)d) %(module)s %(message)s'
+    
+    import platform
+
+    class HostnameFilter(logging.Filter):
+        hostname = platform.node()
+        def filter(self, record):
+            record.hostname = HostnameFilter.hostname
+            record.rank = rank
+            return True
 
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG, format=FORMAT)
+        level = logging.DEBUG
     else:
-        logging.basicConfig(level=logging.INFO, format=FORMAT)
+        level = logging.INFO
 
+    FORMAT = '%(asctime)s [%(hostname)s:%(process)d] r%(rank)d %(module)s %(message)s'
+    handler = logging.StreamHandler()
+    handler.addFilter(HostnameFilter())
+    handler.setFormatter(logging.Formatter(FORMAT))
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    logger.setLevel(level)
 
-    pipe_info = MpiPipelineInfo(values)
+    try :
+        pipe_info = MpiPipelineInfo(values)
+        
+        dump_rankfile(pipe_info) # always dump the rankfile - just need to do this to setup pipe_info
+        if values.dump_rankfile:
+            sys.exit(0)
+            
+        if pipe_info.is_beam_processor:
+            proc_beam(pipe_info)
+        else:
+            proc_rx(pipe_info)
 
-    if values.dump_rankfile:
-        dump_rankfile(pipe_info.values, values.nfpga_per_rx)
-        sys.exit(0)
+        log.info(f'Rank {rank}/{numprocs} complete. Waiting for everythign')
+        #comm.Barrier()
+    except:
+        log.exception('Exception running pipeline')
+        raise # raise it again so the interpreter dies and MPIRUN cleans it up
 
-    if pipe_info.is_beam_processor:
-        proc_beam(pipe_info)
-    else:
-        proc_rx(pipe_info)
+    
+    if rank == 0:
+        log.info('Pipeline complete')
 
-    comm.Barrier()
-    print(f'Rank {rank}/{numprocs} complete')
-
-                  
+#    raise StopIteration('Im raising a stop so it tears down the whole shebang. Perahps a bad idea. Maybe we should look at sending null form the receivers so the beams know theyre done and can shutdown clean')
     
 
 if __name__ == '__main__':
