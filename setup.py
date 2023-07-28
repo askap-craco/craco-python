@@ -93,7 +93,8 @@ if __name__ == '__main__':
                                 'pltrescale=craco.pltrescale:_main',
                                 'pltccap=craco.pltccap:_main',
                                 'tab_filterbank=craco.tab_filterbank:_main',
-                                'pretty_imager=craco.pretty_imager:main'
+                                'pretty_imager=craco.pretty_imager:main',
+                                'candpipe=craco.candpipe.candpipe:_main',
                                 
             ],
         },
