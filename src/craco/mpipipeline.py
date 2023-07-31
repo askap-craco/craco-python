@@ -22,7 +22,7 @@ import craco.card_averager
 from craco.card_averager import Averager
 from craco.cardcapmerger import CcapMerger
 from craco.mpiutil import np2array
-from craco.vissource import VisSource,open_source
+from craco.vissource import VisSource,open_source, VisBlock
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 import astropy.units as u
@@ -797,7 +797,7 @@ class UvFitsFileSink:
             fout.write(str(self.uvout.dtype.itemsize) + '\n')
             
 
-    def write(self, vis_data):
+    def write(self, vis_block):
         '''
         vis_data has len(nrx) and shape inner shape
         vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
@@ -806,21 +806,18 @@ class UvFitsFileSink:
         '''
         if self.uvout is None:
             return
-        
+
+        vis_data = vis_block.data
         info = self.obs_info
         md = self.obs_info
-        fid_start = info.fid_of_block(self.blockno)
+        fid_start = vis_block.fid_start
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
         assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
-        # TODO: Check timestamp convention for for FID and mjd.
-        # I think this is right
-        # fid_start goes up by NSAMP_PER_FRAME = 2048 every block
-        # We'll calculate the same UVWs for everything in this block. A bit lazy but not rediculous
-        fid_mid = fid_start + np.uint64(NSAMP_PER_FRAME//2)
-        mjd = info.fid_to_mjd(fid_mid)
-        sourceidx = md.source_index_at_time(mjd)
-        uvw = md.uvw_at_time(mjd)
-        antflags = md.antflags_at_time(mjd)
+        fid_mid = vis_block.fid_mid
+        mjd = vis_block.mjd_mid
+        sourceidx = vis_block.source_index
+        uvw = vis_block.uvw
+        antflags = vis_block.antflags
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
@@ -829,6 +826,7 @@ class UvFitsFileSink:
         assert NSAMP_PER_FRAME % vis_nt == 0
         samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
 
+        blflags = vis_block.baseline_flags
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             # FID is for the beginning of the block.
@@ -842,15 +840,15 @@ class UvFitsFileSink:
                 a1 = blinfo.a1
                 a2 = blinfo.a2
                 uvwdiff = uvw[ia1, :] - uvw[ia2, :]
-                # TODO: channel-dependent weights - somehow
                 dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
 
                 assert len(antflags) == info.nant_valid
-                if antflags[ia1] or antflags[ia2] or np.all(abs(dblk) == 0):
+                if blflags[blinfo.blidx]:
                     weights[:] = 0
                     dblk[:] = 0 # set output to zeros too, just so we can't cheat
                 else:
                     weights[:] = 1
+                    weights[abs(dblk) == 0] = 0
                     
                 # fits convention has source index with starting value of 1
                 fits_sourceidx = sourceidx + 1
@@ -904,14 +902,20 @@ def proc_beam(pipe_info):
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
     pipeline_sink = SearchPipelineSink(info)
+    iblk = 0
 
     try:
         while True:
             beam_data = transposer.recv()
             cas_filterbank.write(beam_data['cas'])
             ics_filterbank.write(beam_data['ics'])
-            vis_file.write(beam_data['vis'])
-            pipeline_sink.write(beam_data['vis'])
+            
+            vis_block = VisBlock(beam_data['vis'], iblk, info)
+            vis_file.write(vis_block)
+            pipeline_sink.write(vis_block)
+            
+            iblk += 1
+
     finally:
         print(f'Closing beam files for {beamid}')
         cas_filterbank.close()

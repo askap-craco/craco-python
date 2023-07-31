@@ -179,34 +179,58 @@ class VisBlock:
     All baselines
     Block of NT integrations
     '''
-    def __init__(self):
-        pass
+    def __init__(self, data, iblk, info):
+        self._d = data
+        self.iblk = iblk
+        self.info = info
 
     @property
     def data(self):
         return self._d
 
     @property
+    def fid_start(self):
+        '''
+        Returns frame ID of the first sample in this block
+        '''
+        return self.info.fid_of_block(self.iblk)
+
+    @property
+    def fid_mid(self):
+        '''
+        returns frame ID for middle of this block
+        '''
+        # TODO: Check timestamp convention for for FID and mjd.
+        # I think this is right
+        # fid_start goes up by NSAMP_PER_FRAME = 2048 every block
+        # We'll calculate the same UVWs for everything in this block. A bit lazy but not rediculous
+
+        return self.fid_start + np.uint64(NSAMP_PER_FRAME//2)
+
+    @property
+    def mjd_mid(self):
+        return self.info.fid_to_mjd(self.fid_mid)
+
+    @property
     def uvw(self):
-        # TODO: calculate if appropriate
-        return self._uvw
+        return self.info.uvw_at_time(self.mjd_mid)
 
     @property
-    def mjd(self):
-        return self._mjd
+    def source_index(self):
+        return self.info.source_index_at_time(self.mjd_mid)
 
     @property
-    def bat(self):
-        return self._bat
+    def antflags(self):
+        return self.info.antflags_at_time(self.mjd_mid)
 
     @property
-    def beam(self):
-        return self._beam
-
-    @property
-    def nt(self):
-        return self._nt
-    
+    def baseline_flags(self):
+        '''
+        Returns  a length nbl array of bool. True if antenna is flagged
+        '''
+        af = self.antflags
+        blflags = np.array([af[blinfo.ia1] | af[blinfo.ia2] for blinfo in self.info.baseline_iter()])
+        return blflags
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

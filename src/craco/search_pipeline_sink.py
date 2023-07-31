@@ -154,7 +154,7 @@ class SearchPipelineSink:
                 self.pipeline = None
             
 
-    def write(self, vis_data):
+    def write(self, vis_block):
         '''
         vis_data has len(nrx) and shape inner shape
         vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
@@ -163,6 +163,8 @@ class SearchPipelineSink:
         '''
         if self.pipeline is None:
             return
+
+        vis_data = vis_block.data
         
         # TODO: convert input beam data to whatever search_pipeline wants
         # which is an array of [nbl, nf, nt]
@@ -175,14 +177,21 @@ class SearchPipelineSink:
         assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
         assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
         assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
-        
+
+        info = self.info
+        blflags = vis_block.baseline_flags[:,np.newaxis,np.newaxis]
+
+        tstart = self.t
+        tend = tstart + vis_nt
+
+        # loop through each card
         for irx in range(nrx):
             fstart = irx*vis_nc
             fend = fstart + vis_nc
-            tstart = self.t
-            tend = tstart + vis_nt
+            chanmask = abs(vis_data[irx, ...]) == 0
+
             self.pipeline_data[:,fstart:fend, tstart:tend] = vis_data[irx, ...]
-            self.pipeline_data.mask[:,fstart:fend, tstart:tend] = abs(vis_data[irx, ...]) == 0 # update mask
+            self.pipeline_data.mask[:,fstart:fend, tstart:tend] = chanmask | blflags
 
         self.t += vis_nt
 

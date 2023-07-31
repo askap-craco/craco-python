@@ -14,6 +14,7 @@ import logging
 from collections import namedtuple
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+import pandas as pd
 
 log = logging.getLogger(__name__)
 
@@ -34,11 +35,47 @@ dtype = np.dtype([('SNR',np.float32),
                   ('ra_deg', np.float64),
                   ('dec_deg', np.float64)])
 
-def load_cands(fname, maxcount=None):
-    c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
-    if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
-        c.shape = (1,)
+def load_cands(fname, maxcount=None, fmt='numpy'):
+    '''
+    Load candidates from file
+    if fmt=='numpy' (default) returns numpy structured array.
+    if fmt=='pandas' returns pandas dataframe
+    '''
+
+    if fmt == 'numpy':
+        c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
+        if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
+            c.shape = (1,)
+            
+    elif fmt == 'pandas':
+        c = load_cands_pandas(fname, maxcount)
+    else:
+        raise ValueError(f'Unknown format {fmt}')
+    
     return c
+
+def load_cands_pandas(fname, maxcount=None):
+    '''
+    Loads candidate file as pandas dadtaframe
+    '''
+    colnames = ['SNR',
+                 'lpix',
+                'mpix',
+                 'boxc_width',
+                'blank','time',
+                 'dm',
+                 'iblk',
+                'rawsn',
+                'total_sample',
+                'obstime_sec',
+                'mjd',
+                'dm_pccm3',
+                'ra_deg',
+                'dec_deg']
+    df = pd.read_csv(fname, delimiter='\t', comment='#',names=colnames, nrows=maxcount)
+    # delete blank column which is there because of piece of junk writer - yeah KB tidy it up kids
+    df = df.drop('blank', axis=1)
+    return df
 
 CandInputFile = namedtuple("CandInputFile", 'filename candidates')
 CandfileArtist = namedtuple("CandfileArtist", 'candfile artist')
