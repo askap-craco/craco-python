@@ -1006,6 +1006,7 @@ def _main():
         primary = True
         log.exception('MPI setup failed. Falling back to vanilla goodness of wonderment')
         my_values = values
+        assert len(values.card) == 1 and len(values.block) ==1, 'Can only do one card at a time in vanilla mode'
         my_values.card = values.card[0]
         my_values.block = values.block[0]
         ccap = CardCapturer(my_values, primary)

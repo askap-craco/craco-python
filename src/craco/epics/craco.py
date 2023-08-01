@@ -195,7 +195,7 @@ class Craco(EpicsSubsystem):
         start CRACO
         """
         en = self.read('enableCraco', cache=False)
-        if en != 1 and self._prefix == 'ak':
+        if en != 1:
             raise ValueError('CRACO not enabled in EPICS. Ask someone to enable it via CSS or add it to an SB parset and schedule another block. Sorry kids. No dice')
         
         self.previous_start_bat = self.read_start_bat()
