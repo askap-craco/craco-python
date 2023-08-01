@@ -105,10 +105,10 @@ def main():
         tsamp = tmp.tsamp
         ss = int(args.seek_s / tsamp)
     elif args.seek_samps:
-        ss = args.seek_samps
+        ss = int(args.seek_samps)
 
+    assert ss < tmp.vis.size, f"Can't seek to {ss} samps which is beyond the nsamps in file {tmp.size}"
     del tmp
-    assert ss < tmp.size, f"Can't seek to {ss} samps which is beyond the nsamps in file {tmp.size}"
     uvsource = uvfits.open(values.uv, skip_blocks=ss)
 
     py_plan = craco_plan.PipelinePlan(uvsource, values)
@@ -119,7 +119,6 @@ def main():
     else:
         block_type = np.ma.core.MaskedArray
     #block_type = np.ndarray
-    c = CracoPipeline(values)
     #gridder_obj = FdmtGridder(uvsource, py_plan, values)
     direct_gridder = Gridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
@@ -178,9 +177,9 @@ def main():
         uvdata_source = FV.get_fake_data_block()
     else:
         if args.proper:
-            uvdata_source = c.uvsource.time_blocks_with_uvws(py_plan.nt)
+            uvdata_source = uvsource.time_blocks_with_uvws(py_plan.nt)
         else:
-            uvdata_source = c.uvsource.time_blocks(py_plan.nt)
+            uvdata_source = uvsource.time_blocks(py_plan.nt)
 
     if args.ogif:
         images = []
@@ -234,7 +233,7 @@ def main():
                 gridded_block = direct_gridder.grid_with_uvws(block, uvws)
             else:
                 gridded_block = direct_gridder(block)
-            for t in range(c.plan.nt // 2):
+            for t in range(py_plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.stats_image:
                     Qi = Qi + (N -1)/N * (imgout.real - Ai)**2
