@@ -20,6 +20,7 @@ from craft import uvfits
 from craft import craco
 from craco import calibration
 from craco.vis_subtractor import VisSubtractor
+from craco.vis_flagger import VisFlagger
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -266,7 +267,7 @@ def get_grid_lut_from_plan(plan):
 class Pipeline:
     def __init__(self, device, xbin, plan, alloc_device_only_buffers=False):
         '''
-        Make the search pipelien bound to the hardware
+        Make the search pipeline bound to the hardware
         
         :device: XRT device
         :xbin: XCLBIN object
@@ -363,6 +364,8 @@ class Pipeline:
                  self.grid_luts[0].dtype)
 
         self.subtractor = None
+        values = plan.values
+        self.flagger = VisFlagger(values.dflag_fradius, values.dflag_tradius, values.dflag_threshold, values.dflag_tblk)
         self.update_plan(plan) 
 
     def _update_grid_lut(self,plan):
@@ -675,6 +678,12 @@ class Pipeline:
         return input_flat
 
 
+    def flag_input(self, input_flat, cas, ics):
+        '''
+        Update input flagging mask based on running CAS and ICS and IQRM standard deviation
+        '''
+        return self.flagger(input_flat, cas, ics)
+
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
         Calculates the expected signal and noise levels at the images
@@ -847,6 +856,10 @@ def get_parser():
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
+    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-tblk', help='Dynamif flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
@@ -981,15 +994,22 @@ class PipelineWrapper:
         self.pipeline.update_plan(self.plan)
         return self.plan
 
-    def write(self, input_flat):
+    def write(self, input_flat, cas=None, ics=None):
+        '''
+        cas, and ics if specified help with flagging
+        '''
+        
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
         candout = self.candout
         iblk = self.iblk
         values = self.values
         plan = self.plan
-        
+
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
+
+        input_flat = p.flag_input(input_flat, cas, ics)
+        
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
