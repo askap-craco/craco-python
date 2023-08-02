@@ -68,6 +68,8 @@ def plot_block(block, title = None):
 def get_parser():
     parser = craco_plan.get_parser()
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file", default=None)
+    parser.add_argument("--seek_s", type=float, help="Seek (in seconds) into the file (def:0)", default=None)
+    parser.add_argument("--seek_samps", type=float, help="Seek (in samps) into the file (def:0)", default=None)
     parser.add_argument("--tx", type=int, help="Average in time by a factor of tx", default=1)
     parser.add_argument("--norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("--proper", action='store_true', help="Do proper uvw coordinate while gridding", default=False)
@@ -97,7 +99,18 @@ def main():
     #values.uv = myfits
     values.nt = args.nt
     values.ndm = 2
-    uvsource = uvfits.open(values.uv)
+    ss = 0
+    tmp = uvfits.open(values.uv)
+    if args.seek_s:
+        tsamp = tmp.tsamp
+        ss = int(args.seek_s / tsamp)
+    elif args.seek_samps:
+        ss = int(args.seek_samps)
+
+    assert ss < tmp.vis.size, f"Can't seek to {ss} samps which is beyond the nsamps in file {tmp.size}"
+    del tmp
+    uvsource = uvfits.open(values.uv, skip_blocks=ss)
+
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
     if args.injection_params_file:
@@ -106,7 +119,6 @@ def main():
     else:
         block_type = np.ma.core.MaskedArray
     #block_type = np.ndarray
-    c = CracoPipeline(values)
     #gridder_obj = FdmtGridder(uvsource, py_plan, values)
     direct_gridder = Gridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
@@ -165,9 +177,9 @@ def main():
         uvdata_source = FV.get_fake_data_block()
     else:
         if args.proper:
-            uvdata_source = c.uvsource.time_blocks_with_uvws(py_plan.nt)
+            uvdata_source = uvsource.time_blocks_with_uvws(py_plan.nt)
         else:
-            uvdata_source = c.uvsource.time_blocks(py_plan.nt)
+            uvdata_source = uvsource.time_blocks(py_plan.nt)
 
     if args.ogif:
         images = []
@@ -221,7 +233,7 @@ def main():
                 gridded_block = direct_gridder.grid_with_uvws(block, uvws)
             else:
                 gridded_block = direct_gridder(block)
-            for t in range(c.plan.nt // 2):
+            for t in range(py_plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.stats_image:
                     Qi = Qi + (N -1)/N * (imgout.real - Ai)**2
