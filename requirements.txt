@@ -32,4 +32,4 @@ dill
 iqrm
 
 # vivek's candidate plotter
-git+https://github.com/vivgastro/candplotter.git
+#candploter @ git+https://github.com/vivgastro/candplotter.git
