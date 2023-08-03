@@ -13,6 +13,8 @@ pyepics
 
 numpy
 h5py
+scipy
+numba
 iqrm
  matplotlib
  astropy
