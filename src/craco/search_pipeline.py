@@ -366,6 +366,7 @@ class Pipeline:
         self.subtractor = None
         values = plan.values
         self.flagger = VisFlagger(values.dflag_fradius, values.dflag_tradius, values.dflag_threshold, values.dflag_tblk)
+        self.first_tstart = plan.tstart
         self.update_plan(plan) 
 
     def _update_grid_lut(self,plan):
@@ -757,12 +758,12 @@ def print_candidates(candidates, npix, iblk, plan=None):
     for candidate in candidates:
         print(cand2str(candidate, npix, iblk))
 
-def cand2str_wcs(c, iblk, plan, raw_noise_level):
+def cand2str_wcs(c, iblk, plan, first_tstart, raw_noise_level):
     s1 = cand2str(c, plan.npix, iblk, raw_noise_level)
     total_sample = iblk*plan.nt + c['time']
     tsamp_s = plan.tsamp_s
     obstime_sec = total_sample*plan.tsamp_s
-    mjd = plan.tstart.utc.mjd + obstime_sec.value/3600/24
+    mjd = first_tstart.utc.mjd + obstime_sec.value/3600/24
     dmdelay_ms = c['dm']*tsamp_s.to(units.millisecond)
     dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
     lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
@@ -1031,7 +1032,7 @@ class PipelineWrapper:
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
+            candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
         candout.flush()
 
         if values.print_dm0_stats:
