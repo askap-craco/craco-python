@@ -203,7 +203,7 @@ class RFI_cleaner:
                 block[ibl][chanrange, ...] = flagval
         return block
 
-    def get_freq_mask(self, baseline_data, threshold=3.0):
+    def get_freq_mask(self, baseline_data, threshold=5.0):
         #Take the mean along the pol axis and rms along the time axis
 
         if self.pol_axis_exists:
@@ -211,7 +211,7 @@ class RFI_cleaner:
         else:
             rms = baseline_data.std(axis=-1).squeeze()
 
-        mask, votes = iqrm_mask(rms, radius = len(rms) / 10, threshold=threshold)
+        mask, votes = iqrm_mask(rms, radius = len(rms), threshold=threshold)
         return mask
 
     def get_time_mask(self, baseline_data, threshold = 5.0):
@@ -236,7 +236,7 @@ class RFI_cleaner:
                 continue
             
             if freq:
-                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=10)
+                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=5)
                 autocorr_masks[str(a1) + 'f'] = autocorr_freq_mask 
             if time:
                 autocorr_time_mask = self.get_time_mask(baseline_data)
@@ -385,6 +385,11 @@ class RFI_cleaner:
 
 
 def get_dm_delays(dm_samps, freqs):
+    '''
+    Returns delays for each freq in freqs array
+    dm_samps is the total delay across the whole band
+    delay for fmin will be zero
+    '''
     fmin = np.min(freqs)
     fmax = np.max(freqs)
     delay = dm_samps * (1 / fmin**2 - 1 / freqs**2)  / (1 / fmin**2 - 1 / fmax**2)
@@ -412,9 +417,7 @@ def get_dm_samps(freqs, dm_pccc, tsamp):
     delays_s = 4.15 * 1e-3 * dm_pccc * (1 / fmin**2 - 1 / fmax**2)
     
     delays_samps = np.round(delays_s / tsamp).astype(int)
-    #dm_samps = np.max(delays_samps) - np.min(delays_samps)
     dm_samps = delays_samps
-    #print(f"Delays_s are", delays_s, delays_samps, dm_samps)
     return dm_samps
 
 class Dedisp:
@@ -457,16 +460,10 @@ class Dedisp:
             rolled_block[:, ichan, ...] = np.roll(attached_block[:, ichan, ...], self.delays_samps[ichan])
 
         self.dm_history = attached_block[..., -self.dm:]
-        #import IPython
         
         if type(inblock) == dict:
             for ibl, blid in enumerate(self.baseline_order):
-                #print(ibl,blid, inblock[blid].shape, attached_block[ibl, ..., self.dm:].shape)
-                #print(inblock[blid].mask)
                 inblock[blid] = rolled_block[ibl, ..., self.dm:]
-                #print(f"Type of the output vis array is -- {type(inblock[blid])}")
-                #print(inblock[blid].mask)
-            #IPython.embed()
             return inblock
 
         return rolled_block[..., self.dm:]
