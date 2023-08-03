@@ -910,7 +910,7 @@ def proc_beam(pipe_info):
             cas_filterbank.write(beam_data['cas'])
             ics_filterbank.write(beam_data['ics'])
             
-            vis_block = VisBlock(beam_data['vis'], iblk, info)
+            vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
             vis_file.write(vis_block)
             pipeline_sink.write(vis_block)
             

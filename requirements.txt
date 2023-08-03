@@ -29,3 +29,7 @@ iqrm
 
 grpcio
 dill
+iqrm
+
+# vivek's candidate plotter
+git+https://github.com/vivgastro/candplotter.git
