@@ -211,7 +211,7 @@ def main():
             if args.flag_chans:
                 block = rfi_cleaner.flag_chans(block, args.flag_chans, 0)
             if args.rfi:
-                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(block, False, False, False, False, True, True)
+                block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(block, False, False, False, False, True, False)
                 if args.plot_blocks:
                     plot_block(block, title="The cleaned block")
 
@@ -228,6 +228,9 @@ def main():
                 block = brute_force_dedipserser.dedisperse(iblock, block)
                 if args.plot_blocks:
                     plot_block(block, title="The dedispersed block")
+
+            #We should fill the masked values with 0s before starting to grid the data
+            block = preprocess.fill_masked_values(block)
 
             if args.proper:
                 gridded_block = direct_gridder.grid_with_uvws(block, uvws)

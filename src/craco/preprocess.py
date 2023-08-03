@@ -348,7 +348,7 @@ class RFI_cleaner:
 
                     block[ibl] = baseline_data
                     if mcasf or mcast:
-                        cas_sum += baseline_data
+                        cas_sum += np.abs(baseline_data)
 
 
         if mcasf or mcast:
@@ -382,6 +382,24 @@ class RFI_cleaner:
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
 
+def fill_masked_values(block):
+    '''
+    Fill the masked elements with their fill_values
+    If the there is no mask, then the same block is returned
+    '''
+    if type(block) == dict:
+        for ibl, bldata in block.items():
+            if type(bldata) == np.ma.core.MaskedArray:
+                block[ibl] = bldata.filled()
+            else:
+                pass
+        return block
+
+    elif type(block) == np.ndarray:
+        return block
+
+    elif type(block) == np.ma.core.MaskedArray:
+        return block.filled()
 
 
 def get_dm_delays(dm_samps, freqs):
