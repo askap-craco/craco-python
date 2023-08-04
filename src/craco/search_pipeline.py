@@ -239,7 +239,9 @@ def instructions2pad_lut(instructions, npix):
     return location
     
 def get_grid_lut_from_plan(plan):
-    
+
+    # Hack - get fdmt plan to set values
+    fplan = plan.fdmt_plan
     upper_instructions = plan.upper_instructions
     lower_instructions = plan.lower_instructions
 
