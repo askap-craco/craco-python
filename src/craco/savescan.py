@@ -84,7 +84,7 @@ def _main():
         spi = '--samples-per-integration 32'
 
     card  = '-a 1-12'
-    block = '-b 3-5'
+    block = '-b 5-7'
     fpga = ''
     fpga_mask = ''
 
