@@ -382,14 +382,16 @@ class RFI_cleaner:
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
 
-def fill_masked_values(block):
+def fill_masked_values(block, fill_value = None):
     '''
-    Fill the masked elements with their fill_values
+    Fill the masked elements with their fill_values, or the provided fill_value
     If the there is no mask, then the same block is returned
     '''
     if type(block) == dict:
         for ibl, bldata in block.items():
             if type(bldata) == np.ma.core.MaskedArray:
+                if fill_value is not None:
+                    block.fill_value = fill_value
                 block[ibl] = bldata.filled()
             else:
                 pass
@@ -399,6 +401,8 @@ def fill_masked_values(block):
         return block
 
     elif type(block) == np.ma.core.MaskedArray:
+        if fill_value is not None:
+            block.fill_value = fill_value
         return block.filled()
 
 

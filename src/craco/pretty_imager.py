@@ -219,6 +219,9 @@ def main():
                 block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
                 if args.plot_blocks:
                     plot_block(block, title="The normalised block")
+            
+            #We should fill the masked values with 0s before processing the data further
+            block = preprocess.fill_masked_values(block, fill_value = 0)
 
             block = preprocess.average_pols(block, keepdims=False)
             if args.plot_blocks:
@@ -229,8 +232,6 @@ def main():
                 if args.plot_blocks:
                     plot_block(block, title="The dedispersed block")
 
-            #We should fill the masked values with 0s before starting to grid the data
-            block = preprocess.fill_masked_values(block)
 
             if args.proper:
                 gridded_block = direct_gridder.grid_with_uvws(block, uvws)
