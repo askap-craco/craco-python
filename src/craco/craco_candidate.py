@@ -113,11 +113,11 @@ def average_uvws(bluvws, metrics="mean"):
     assert metrics in ["mean", "start", "end"], "please select metrics from `mean`, `start` and `end`"
 
     if metrics == "mean":
-        return {blid: bluvws[blid].mean(axis=-1) for blid in bluvws}
+        return {blid: bluvws[blid].mean(axis=-1, keepdims=True) for blid in bluvws}
     if metrics == "start":
-        return {blid: bluvws[blid][:, 0] for blid in bluvws}
+        return {blid: bluvws[blid][:, [0]] for blid in bluvws}
     if metrics == "end":
-        return {blid: bluvws[blid][:, -1] for blid in bluvws}
+        return {blid: bluvws[blid][:, [-1]] for blid in bluvws}
 
 def filterbank_roll(tf, dm, freqs, tint, tstart=0, keepnan=True):
     """
@@ -363,13 +363,11 @@ class Candidate:
             self._flag_ants()
         else:
             self._flag_ants(flag_ant)
-
-        
-        self._load_plan()
             
         # get candidate data from vis...
-        if extractdata:
-            self._get_candidate_data(buffer=self.padding)
+        # if extractdata:
+        self._get_candidate_data(buffer=self.padding)
+        self._load_plan()
 
         self.coord = SkyCoord(
                 self.search_output["ra_deg"],
@@ -421,59 +419,7 @@ class Candidate:
                 find_flag(self.uvsource)
             )
         else:
-            self.uvsource = self.uvsource.set_flagants(flag_ant)
-
-    # def _visdata_padding(self, vis, visrange, finrange):
-    #     """
-    #     Note: this function is not used anymore
-    #     padding zeros to the visibility data given the range
-
-    #     Params
-    #     ----------
-    #     vis: dict or numpy.ndarray
-    #         visibility data to be modified
-    #     visrange: (int, int)
-    #         visibility range in terms of indices
-    #     finrange: (int, int)
-    #         final timestamp range we want to achieve, 
-    #         usually this range should be wider (at least equal) to the visrange
-
-    #     Returns
-    #     ----------
-    #     """
-    #     vis_ = vis.copy() # just in case it perform modification on the raw data...
-
-    #     vis_start, vis_end = visrange
-    #     fin_start, fin_end = finrange
-
-    #     t_pre = vis_start - fin_start
-    #     t_app = fin_end - vis_end
-
-    #     assert t_pre >= 0 and t_app >= 0, "finrange is shorted than the visrange, aborted..."
-
-    #     if isinstance(vis, dict):
-    #         # ifthe visibility data is a dictionary...
-    #         for bl in vis:
-    #             visbl = vis[bl]
-    #             nchan, npol, _ = visbl.shape
-    #             ### values here
-    #             vis_pre = np.zeros((nchan, npol, t_pre), dtype=complex)
-    #             vis_app = np.zeros((nchan, npol, t_app), dtype=complex)
-
-    #             finvis = np.concatenate(
-    #                 [vis_pre, visbl, vis_app], axis=-1
-    #             )
-
-    #             if isinstance(finvis, np.ma.core.MaskedArray):
-    #                 finvis[..., t_pre].mask = 1.
-    #                 finvis[..., -t_app-1:].mask = 1.
-
-    #             vis_[bl] = finvis
-
-    #         return vis_
-
-    #     # other cases, numpy.ndarray or numpy.ma.core.MaskedArray
-    #     raise NotImplementedError("Currently array is not supported...")     
+            self.uvsource = self.uvsource.set_flagants(flag_ant)   
         
     def dump_burst_uvfits(self, padding=50, fout="burst.uvfits"):
         """
@@ -532,7 +478,14 @@ class Candidate:
         load craco plan for calibration... this may be removed later...
         """
         # cause we did autoflagging for uvsource, we don't need to do that for plan again
-        self.plan = craco_plan.PipelinePlan(self.uvsource, self.planargs)
+        if hasattr(self, "visrange"):
+            self.burstuvsource = uvfits.open(self.uvsource.filename, skip_blocks=self.visrange[0])
+            self.burstplan = craco_plan.PipelinePlan(self.burstuvsource, self.planargs)
+            self.plan = self.burstplan
+        else:
+            self.plan = craco_plan.PipelinePlan(self.uvsource, self.planargs)
+            self.burstplan = self.plan
+
 
     def _calibrate_data(self, calibration_file):
         """
@@ -791,8 +744,8 @@ class Candidate:
         perform gridding and imaging the data
         """
         ### make gridder and imager
-        self.gridder = Gridder(self.uvsource, self.plan, "") # no values to be parsed
-        self.imager = Imager(self.uvsource, self.plan, "") # no values to be parsed
+        self.gridder = Gridder(self.burstuvsource, self.burstplan, self.burstplan.values) # no values to be parsed
+        self.imager = Imager(self.burstuvsource, self.burstplan, self.burstplan.values) # no values to be parsed
 
         # grid_data with a shape of (npix, npix, nt)
         # here `npix` is the number of gridding on the uv plan
