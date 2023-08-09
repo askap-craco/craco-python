@@ -525,13 +525,17 @@ class Candidate:
         by default, we will normalise the phase rotated data (i.e., target is True)
         """
         if target==True:
-            self.norm_data = preprocess.normalise(
+            norm_data = preprocess.normalise(
                 self.rotate_data, target_input_rms=target_input_rms
             )
+            ### fill in masked value
+            self.norm_data = preprocess.fill_masked_values(norm_data, fill_value=0)
 
-        self.norm_data_pc = preprocess.normalise(
+
+        norm_data_pc = preprocess.normalise(
             self.cal_data, target_input_rms=target_input_rms,
         )
+        self.norm_data_pc = preprocess.fill_masked_values(norm_data_pc, fill_value=0)
 
     def _load_burst_filterbank(
             self, norm=True, 
