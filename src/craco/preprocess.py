@@ -86,8 +86,8 @@ def average_pols(block, keepdims = True):
     '''
     _, nPol, _ = get_isMasked_nPol(block)
     if nPol > 1:
-        raise RuntimeError(f"AAaaaaaaah! I cannot process blocks with nPol > 1, found - {nPol)"
-    if keepdims = True:
+        raise RuntimeError(f"AAaaaaaaah! I cannot process blocks with nPol > 1, found - {nPol}")
+    if keepdims == True:
         #This is under the assumption that there is only 1 pol in the block
         return block
 
