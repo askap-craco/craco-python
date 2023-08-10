@@ -85,20 +85,30 @@ def average_pols(block, keepdims = True):
 
     '''
     _, nPol, _ = get_isMasked_nPol(block)
+    if nPol > 1:
+        raise RuntimeError(f"AAaaaaaaah! I cannot process blocks with nPol > 1, found - {nPol}")
+    if keepdims == True:
+        #This is under the assumption that there is only 1 pol in the block
+        return block
+
     if nPol == 0:
         print("No pol axis to scrunch, returning the block as it is")
         return block
     if type(block) == dict:
         for ibl, bldata in block.items():
             assert bldata.ndim == 3, f"Exptected 3 dimensions (nf, npol, nt), but got {bldata.ndim}, shape={bldata.shape}"#, block = {block},\n bldata= {bldata}"
-            block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
-            if not keepdims:
-                block[ibl] = block[ibl].squeeze()
+            block[ibl] = bldata[:, 0, ...]
+            #Commenting out the lines belwo assuming there will only be 1 pol in the data, see CRACO-154
+            #block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
+            #if not keepdims:
+            #    block[ibl] = block[ibl].squeeze()
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
-        block = block.mean(axis=2, keepdims=keepdims)
-        if not keepdims:
-            block = block.squeeze()
+        block = block[:, :, 0, :]
+        #Commenting out the lines below assuming that there will only be 1 pol in the data, see CRACO-154
+        #block = block.mean(axis=2, keepdims=keepdims)
+        #if not keepdims:
+        #    block = block.squeeze()
     return block
 
 
@@ -382,14 +392,16 @@ class RFI_cleaner:
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
 
-def fill_masked_values(block):
+def fill_masked_values(block, fill_value = None):
     '''
-    Fill the masked elements with their fill_values
+    Fill the masked elements with their fill_values, or the provided fill_value
     If the there is no mask, then the same block is returned
     '''
     if type(block) == dict:
         for ibl, bldata in block.items():
             if type(bldata) == np.ma.core.MaskedArray:
+                if fill_value is not None:
+                    block.fill_value = fill_value
                 block[ibl] = bldata.filled()
             else:
                 pass
@@ -399,6 +411,8 @@ def fill_masked_values(block):
         return block
 
     elif type(block) == np.ma.core.MaskedArray:
+        if fill_value is not None:
+            block.fill_value = fill_value
         return block.filled()
 
 
