@@ -17,7 +17,10 @@ import time
 import socket
 
 
+
 from craft.fitswriter import FitsTableWriter
+
+log = logging.getLogger(__name__)
 
 try:
     import roce_packetizer
@@ -38,8 +41,6 @@ from craco import leapseconds
 from craco.utils import ibc2beamchan
 from craco.cardcapfile import * 
 
-
-log = logging.getLogger(__name__)
 hostname = socket.gethostname()
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
