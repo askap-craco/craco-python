@@ -439,7 +439,7 @@ class CardcapFile:
 
                         next_offset = self.hdr_nbytes + (iframe+1)*frame_size_bytes
                         # Tell Kernel we're going to need the next block.
-                        os.posix_fadvise(f.fileno(), offset=next_offset, len=frame_size_bytes, advice=os.POSIX_FADV_WILLNEED)
+                        os.posix_fadvise(f.fileno(), next_offset, frame_size_bytes, os.POSIX_FADV_WILLNEED)
 
                         # do a little check
                         assert packets['beam_number'][0] == 0, f"Expected first beam to be zero. It was {packets['beam_number'][0]}"
