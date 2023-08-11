@@ -483,7 +483,7 @@ class Candidate:
         self.burst_uvw = average_uvws(self._burst_uvws, metrics=uvwave_metrics)
         self.burst_data = bl2array(self.burst_data_dict)
 
-    def _data_flag_chans(self)
+    def _data_flag_chans(self):
         ### add flagger...
         self.rfi_cleaner = preprocess.RFI_cleaner(
             block_dtype=np.ma.core.MaskedArray,
