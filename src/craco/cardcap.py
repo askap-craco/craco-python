@@ -41,10 +41,7 @@ from craco import leapseconds
 from craco.utils import ibc2beamchan
 from craco.cardcapfile import * 
 
-<<<<<<< HEAD
 
-=======
->>>>>>> 58efc2eb961cf1a1399cd1d8cbafb5419ceef569
 hostname = socket.gethostname()
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
