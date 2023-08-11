@@ -16,14 +16,19 @@ import copy
 import time
 import socket
 
-import roce_packetizer
+
 from craft.fitswriter import FitsTableWriter
 
-from rdma_transport import RdmaTransport
-from rdma_transport import runMode
-from rdma_transport import ibv_wc
-from rdma_transport import ibv_wc_status
-import rdma_transport
+try:
+    import roce_packetizer
+    from rdma_transport import RdmaTransport
+    from rdma_transport import runMode
+    from rdma_transport import ibv_wc
+    from rdma_transport import ibv_wc_status
+    import rdma_transport
+except:
+    log.info('Could not import  rdma transpose and roce_packetiser. They probably arent installed - attempts at real time captures will fail with not found exceptions')
+
 import socket
 from craft.cmdline import strrange
 from craco.epics.craco import Craco as CracoEpics
