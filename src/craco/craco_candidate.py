@@ -5,6 +5,7 @@ from craft.craco_kernels import Gridder, Imager
 from craco import preprocess
 from craft import craco_plan
 from craft import uvfits
+from craft.cmdline import strrange
 
 import logging
 import io 
@@ -333,6 +334,7 @@ class Candidate:
         self, crow, uvsource, calibration_file,
         workdir=None, flagauto=True, extractdata=True,
         flag_ant=None, padding=50, planargs="--ndm 2",
+        flag_chans=None, rfi=True,
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -350,6 +352,13 @@ class Candidate:
         # make work dir if not exists
         if self.workdir is not None:
             if not os.path.exists(workdir): os.makedirs(workdir)
+
+        # check flag_chans
+        if flag_chans is not None:
+            if isinstance(flag_chans, str):
+                flag_chans = strrange(flag_chans)
+        else: self.flag_chans = flag_chans
+        self.rfi = rfi
         
         # get basic information from uvsource
         self._fetch_uvprop(uvsource)
@@ -368,6 +377,7 @@ class Candidate:
         # if extractdata:
         self._get_candidate_data(buffer=self.padding)
         self._load_plan()
+        self._data_flag_chans()
 
         self.coord = SkyCoord(
                 self.search_output["ra_deg"],
@@ -472,6 +482,19 @@ class Candidate:
         self.visrange = _vis_range # store the visibility range...
         self.burst_uvw = average_uvws(self._burst_uvws, metrics=uvwave_metrics)
         self.burst_data = bl2array(self.burst_data_dict)
+
+    def _data_flag_chans(self):
+        ### add flagger...
+        self.rfi_cleaner = preprocess.RFI_cleaner(
+            block_dtype=np.ma.core.MaskedArray,
+            baseline_order=self.plan.baseline_order
+        )
+        if self.flag_chans is not None:
+            self.burst_data = self.rfi_cleaner.flag_chans(self.burst_data, self.flag_chans, 0)
+        if self.rfi:
+            self.burst_data = self.rfi_cleaner.run_IQRM_cleaning(
+                self.burst_data, False, False, False, False, True, False
+            )
         
     def _load_plan(self):
         """
