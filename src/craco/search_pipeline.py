@@ -814,7 +814,8 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
         # change to wait2 as this is meant to throw a command_error execption
         # https://xilinx.github.io/XRT/master/html/xrt_native.main.html?highlight=wait#classxrt_1_1run_1ab1943c6897297263da86ef998c2e419c
         # see Also CRACO-128
-        result = start.wait2(timeout_ms) # 0 means wait forever
+        # Ah, but wait2 doesn't exist in PYXRT
+        result = start.wait(timeout_ms) # 0 means wait forever
         wait_end = time.perf_counter()
         log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
 
