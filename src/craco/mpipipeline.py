@@ -502,7 +502,7 @@ class DtypeTransposer:
 
     def all2all(self, dtx):
         t_barrier = MPI.Wtime()
-        comm.Barrier()
+        #comm.Barrier()
         t_start = MPI.Wtime()
         s_msg = [dtx,
                  (np2array(self.tx_counts),
