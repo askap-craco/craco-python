@@ -59,6 +59,10 @@ class VisFlagger:
         self.tradius = tradius
         self.threshold = threshold
         self.tblk = tblk
+        self.total_tflag = 0
+        self.total_fflag = 0
+        self.total_tfflag = 0
+        self.total_blocks = 0
 
     def flag_block(self, input_flat, cas, ics):
 
@@ -76,7 +80,13 @@ class VisFlagger:
         fmask = ics_fmask | cas_fmask
         tmask = ics_tmask | cas_tmask
 
-        input_flat.mask |= fmask[np.newaxis,:,np.newaxis] | tmask[np.newaxis,np.newaxis,:]
+        self.total_tflag += sum(tmask)
+        self.total_fflag += sum(fmask)
+
+        tfmask = fmask[:, np.newaxis] | tmask[np.newaxis, :]
+        self.total_tfflag = tfmask.sum()
+
+        input_flat.mask |= tfmask[np.newaxis, :, :]
 
         return input_flat
         
@@ -101,11 +111,31 @@ class VisFlagger:
         assert nt % tblk == 0, f'Invalid tblk={tblk} or nt ={nt}'
         nblk = nt //tblk
 
+        tflag0, fflag0, tfflag0  = self.total_tflag, self.total_fflag, self.total_tfflag
+
         for iblk in range(nblk):
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
             self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
+
+
+        tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag
+        tflagd = tflag1 - tflag0
+        fflagd = fflag1 - fflag0
+        tfflagd = tfflag1 - tfflag0
+
+        tflagpc = tflagd/nt*100
+        fflagpc = fflagd/nf*100
+        self.total_blocks += 1
+        cum_tflagpc = self.total_tflag / (nt * self.total_blocks) *100
+        cum_fflagpc = self.total_fflag / (nf * self.total_blocks) *100
+
+
+        log.info('Flagging block %d T Flagged %d/%d=%0.1f  F Flagged %d/%d=%0.1f TF Flag %d/%d=%0.1f. Cumulative T flag: %0.1f Cumulative F flag=%0.1f',
+                 self.total_blocks-1,
+                 tflagd, nt, tflagpc, fflagd, nf, fflagpc, tfflagd, nt*nf, tfflagd/(nt*nf)*100, cum_tflagpc, cum_fflagpc)
+
 
         return input_flat
         
