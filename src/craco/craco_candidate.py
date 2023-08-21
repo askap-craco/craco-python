@@ -334,7 +334,7 @@ class Candidate:
         self, crow, uvsource, calibration_file,
         workdir=None, flagauto=True, extractdata=True,
         flag_ant=None, padding=50, planargs="--ndm 2",
-        flag_chans=None, rfi=True,
+        flag_chans=None, rfi=False,
     ):
         """
         initiate the Candidate object with candidate row from the pipeline output
@@ -357,7 +357,7 @@ class Candidate:
         if flag_chans is not None:
             if isinstance(flag_chans, str):
                 flag_chans = strrange(flag_chans)
-        else: self.flag_chans = flag_chans
+        self.flag_chans = flag_chans
         self.rfi = rfi
         
         # get basic information from uvsource
@@ -492,7 +492,7 @@ class Candidate:
         if self.flag_chans is not None:
             self.burst_data = self.rfi_cleaner.flag_chans(self.burst_data, self.flag_chans, 0)
         if self.rfi:
-            self.burst_data = self.rfi_cleaner.run_IQRM_cleaning(
+            self.burst_data, _, _, _ = self.rfi_cleaner.run_IQRM_cleaning(
                 self.burst_data, False, False, False, False, True, False
             )
         
@@ -599,6 +599,9 @@ class Candidate:
 
         filterbank_plot, trange_ = self._dedisperse2tf(dm=dm, norm=norm, keepnan=keepnan)
 
+        ### make 0 value to NaN
+        filterbank_plot[filterbank_plot == 0.] = np.nan
+
         grid = mpl.gridspec.GridSpec(
             nrows=5, ncols=5, wspace=0., hspace=0.
         )
@@ -615,7 +618,7 @@ class Candidate:
         ax1.imshow(
             filterbank_plot, 
             aspect="auto", origin="lower", 
-            extent=extent,
+            extent=extent, interpolation="none"
         )
 
         ax1.set_xlabel("Time since the observation (s)")
@@ -653,9 +656,9 @@ class Candidate:
             self._load_burst_filterbank(norm=norm, target_input_rms=1)
         
         if dm is None or dm == 0.0:
-            return self.filterbank[:, 0, :].data, self.visrange
+            return self.filterbank[:, 0, :], self.visrange
         return filterbank_roll(
-            tf=self.filterbank[:, 0, :].data, dm=dm,
+            tf=self.filterbank[:, 0, :], dm=dm,
             freqs=self.freqs, tint=self.tsamp,
             tstart=self.visrange[0], keepnan=keepnan,
         )

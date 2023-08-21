@@ -119,8 +119,8 @@ def run(f, values):
         'nbits':32,
         'nchans':plan.freqs.shape[0],
         'nifs':npol, 
-        'src_raj':coord.ra.deg,
-        'src_dej':coord.dec.deg,
+        'src_raj_deg':coord.ra.deg,
+        'src_dej_deg':coord.dec.deg,
         'tstart':plan.tstart.utc.mjd,
         'tsamp':plan.tsamp_s.value, # in the unit of second
         'fch1':plan.fmin / 1e6,
