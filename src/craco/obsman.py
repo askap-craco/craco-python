@@ -153,12 +153,19 @@ class Obsman:
         
 
     def poll_process(self):
+        '''
+        Called to check proces is running
+        If it quits by itself, it's cleaned up and restarted
+        '''
         if self.process is not None:
             retcode = self.process.poll()
             log.debug('Process pid=%s running with return code %s', self.process.pid, retcode)
             if retcode is not None:
-                log.info('Process terminated with return code %s. Cleaning up', retcode)
+                log.info('Process DIED UNPROVOKED with return code %s. Cleaning up and restarting', retcode)
+                scanid = self.curr_scanid
                 self.terminate_process()
+                log.info('Process terminated. Restarting scanid %s', scanid)
+                self.start_process(scanid)
 
     def shutdown(self):
         log.info('Shutting down process')
