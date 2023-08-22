@@ -640,7 +640,7 @@ def proc_rx(pipe_info):
 
     dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
     log.info('made packet %s this is a thing', dummy_packet.shape)
-    rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/') if pipe_info.values.cardcap_dir is not None else None
+    rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/') if pipe_info.values.save_rescale else None
 
     averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.flag_ants, rescale_output_path=rsout)
     log.info('made averager')
@@ -1047,31 +1047,19 @@ def _main():
     parser.add_argument('--save-uvfits-beams', help='Beams to save UV fits files for. Also requires --metadata and --fcm. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
     parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
+    parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
     
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     
-    import platform
-
-    class HostnameFilter(logging.Filter):
-        hostname = platform.node()
-        def filter(self, record):
-            record.hostname = HostnameFilter.hostname
-            record.rank = rank
-            return True
-
     if values.verbose:
         level = logging.DEBUG
     else:
         level = logging.INFO
 
-    FORMAT = '%(asctime)s [%(hostname)s:%(process)d] r%(rank)d %(module)s %(message)s'
-    handler = logging.StreamHandler()
-    handler.addFilter(HostnameFilter())
-    handler.setFormatter(logging.Formatter(FORMAT))
     logger = logging.getLogger()
-    logger.addHandler(handler)
+    logger.addHandler(mpiutil.make_log_handler(comm))
     logger.setLevel(level)
 
     try :
