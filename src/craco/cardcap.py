@@ -911,10 +911,15 @@ class MpiCardcapController:
         ccap = self.ccap
         comm = self.comm
         rank = self.rank
+        log.info('Stop called. Waiting for barrier')
 
+        # Due to 
         comm.Barrier()
+
+        log.info('Barrier complete')
         
         if rank == 0:
+            log.info('Rank 0 complete - stopping')
             ccap.stop()
 
         ncomplete = -1 if ccap is None else ccap.total_completions[0]
