@@ -70,7 +70,7 @@ def _main():
     shutil.copy(hostfile, scandir)
     #pol='--pol-sum'
 
-    beam = -1 # all beams, tscrucnh
+    beam = values.beam # all beams, tscrucnh
     #beam = 0 # given beam no tscrunch
 
     if beam == -1: # all beams
