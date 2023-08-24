@@ -1074,7 +1074,8 @@ def _main():
         else:
             proc_rx(pipe_info)
 
-        log.info(f'Rank {rank}/{numprocs} complete. Waiting for everythign')
+        log.info(f'Rank {rank}/{numprocs} complete. Waiting for everything')
+        raise StopError('Throwing a stop error so we can bring down the pipeline')
         #comm.Barrier()
     except:
         log.exception('Exception running pipeline')
