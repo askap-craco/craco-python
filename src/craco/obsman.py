@@ -105,7 +105,7 @@ class Obsman:
         # start new process group and use it to kill all subprocesses. on exit
         # I love you so much Alexandra
         # https://alexandra-zaharia.github.io/posts/kill-subprocess-and-its-children-on-timeout-python/
-        self.process = Popen(self.cmd, shell=True, start_new_session=True)
+        self.process = Popen(self.cmd, shell=False, start_new_session=True)
         pgid = os.getpgid(self.process.pid)
         self.start_time = datetime.datetime.now()
         log.info(f'Started process {self.cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode}')
