@@ -56,6 +56,11 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
 
     if sum_pols is True, npol=1, nint=2
     if sum_pols is False, npol=2, nint=1
+
+    :nbl: number of baselines
+    :enable_debug_hdr: Add debug header
+    :sum_pols: as above
+    :override_nint: default None. Otherwise overrides nint as above - useful for when tscrunch is happening
     
     '''
 
@@ -122,6 +127,8 @@ class CardcapFile:
         If you don't supply a file, some values won't work
         '''
         self.fname = fname
+        self.workaround_craco63 = workaround_craco63
+        
         if fname is not None:
             hdr1  = fits.getheader(fname)
             mainhdr = fits.getheader(fname, 1)
@@ -131,14 +138,25 @@ class CardcapFile:
 
         self.hdr1 = hdr1
         hdr_nbytes = len(str(hdr1)) + len(str(mainhdr))
+        self.mainhdr = mainhdr
+        self.hdr_nbytes = hdr_nbytes
+
         self.nbl = mainhdr.get('NBL', 465)
         self.debughdr = int(mainhdr.get('DEBUGHDR')) == 1
         self.polsum = int(mainhdr.get('POLSUM')) == 1
-        self.dtype = get_single_packet_dtype(self.nbl, self.debughdr, self.polsum)
-        self.mainhdr = mainhdr
-        self.hdr_nbytes = hdr_nbytes
-        self.workaround_craco63 = workaround_craco63
-        if self.mainhdr.get('NTOUTPFM', None) == 0:
+        self.ntoutpfm = self.mainhdr.get('NTOUTPFM', None)
+
+        # this is an aweful hack
+        # basically if there's only 1 integration per frame, then the dtype
+        # must have only 1 integration and there is only 1 integration per beamformer frame too.
+        # I hope this ends up being sensible overall
+        override_nint = None
+        if self.ntoutpfm == 1:
+            override_nint = 1
+
+        self.dtype = get_single_packet_dtype(self.nbl, self.debughdr, self.polsum, override_nint)
+
+        if self.ntoutpfm == 0:
             warnings.warn(f'File {fname} has tscrunch/polsum bug. Will tscrunch final integrations')
             self.tscrunch_bug = True
         else:
@@ -184,15 +202,15 @@ class CardcapFile:
 
     @property
     def target(self):
-        return self.mainhdr['TARGET']
+        return self.mainhdr.get('TARGET','UNKNOWN')
 
     @property
     def sbid(self):
-        return self.mainhdr['SBID']
+        return self.mainhdr.get('SBID', 'UNKNOWN')
 
     @property
     def scanid(self):
-        return self.mainhdr['SCANID']
+        return self.mainhdr.get('SCANID', 'UNKNOWN')
 
     @property
     def card_frequencies(self):

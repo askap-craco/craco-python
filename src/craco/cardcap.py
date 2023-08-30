@@ -398,14 +398,20 @@ class FpgaCapturer:
 
             if self.ccap.values.tscrunch != 1:
                 # BUG: When tscrunch != and polsum, we average over the packest, but not inside the packet, by accident.
-                # THis will need to be fixed, but no time now. It's Xmas!
-                # OK this is slow, but it works
-                dout = np.empty(d.shape[0], dtype=d.dtype)
+                # The output is the average of all the data in the frame
+                # the header is the first header of all the headers
+                # make dtype with 1 integration per packet
+                dout = np.empty(d.shape[0], dtype=self.ccap.tscrunch_dtype)
+
+                # set header values to the first header value in the frame
                 for field in ('frame_id','bat','beam_number','sample_number','channel_number','fpga_id','nprod','flags','zero1','version','zero3'):
                     dout[field] = d[field][:,0]
 
-                dout['data'] = d['data'].mean(axis=1, dtype=np.float32).astype(np.int16)
+                # average over the first 2 time axes always
+                dout['data'] = d['data'].mean(axis=(1,2), dtype=np.float32).astype(np.int16)[:, np.newaxis, :, :]
+                print('d', d.shape, d['data'].shape, 'dout', dout.shape, dout['data'].shape)
                 d = dout
+
 
             if beam is not None:
                 assert 0 <= beam < 36, f'Invalid beam {beam}'
@@ -469,10 +475,11 @@ class CardCapturer:
         if include_autos:
             nbl += nant
 
+        self.nbl = nbl
+
         if values.pol_sum: # if polsum is enabled, we get 2 integrations per set of debug headers
             nint_per_packet = 2
             #assert values.tscrunch == 1, 'Dont support polsum and tscrunch - we make a mistake on the tscrunching'
-            warnings.warn('Dont support polsum and tscrunch - we make a mistake on the tscrunching')
         else:
             nint_per_packet = 1
 
@@ -482,6 +489,14 @@ class CardCapturer:
         enable_debug_header = values.debug_header
         packet_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum)
         self.packet_dtype = packet_dtype
+        
+        self.tscrunch_dtype = get_single_packet_dtype(nbl, enable_debug_header, values.pol_sum, override_nint=1)# averages to nint=1
+
+        if values.tscrunch > 1:
+            self.output_dtype = self.tscrunch_dtype
+        else:
+            self.output_dtype = self.packet_dtype
+
         msg_size = packet_dtype.itemsize*npacket_per_msg
         num_blks = values.num_blks
         num_cmsgs = values.num_cmsgs
@@ -493,7 +508,8 @@ class CardCapturer:
         self.nint_per_frame = nint_per_frame
         self.nint_per_packet = nint_per_packet
         self.nintpacket_per_frame = nintpacket_per_frame
-        self.nintout_per_frame = nintpacket_per_frame // self.values.tscrunch
+        self.nintout_per_frame = nint_per_frame // self.values.tscrunch
+        assert self.nintout_per_frame > 0, 'Invalid nintout'
 
         assert self.values.tscrunch == 1 or self.values.tscrunch * self.values.samples_per_integration == nsamp_per_frame, 'Invalid tscrunch - it must be 1 or multiply SPI to 2048'
         self.msg_shape = (num_cmsgs, self.nbeam_per_message*self.nchan_per_message, self.nintpacket_per_frame)
@@ -620,7 +636,7 @@ class CardCapturer:
         if values.prefix != 'ma':
             self.pvhdr('md2:targetName_O', 'TARGET','Target name from metadata')
             self.pvhdr('md2:scanId_O', 'SCANID','Scan ID from metadata')
-            self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID rom metadata')
+            self.pvhdr('md2:schedulingblockId_O', 'SBID','SBID from metadata')
             self.pvhdr('F_options:altFirmwareDir_O', 'FWDIR', 'Alternate firmware directory')
 
         log.info(f'Shelf {shelf} card {card} Receiving data from {len(values.fpga)} fpgas: {values.fpga}')
@@ -634,7 +650,7 @@ class CardCapturer:
             if len(thedir.strip()) > 0:
                 os.makedirs(thedir, exist_ok=True)
 
-            self.fitsout = FitsTableWriter(self.values.outfile, self.packet_dtype, self.byteswap, self.hdr)
+            self.fitsout = FitsTableWriter(self.values.outfile, self.output_dtype, self.byteswap, self.hdr)
         else:
             self.fitsout = None
 
