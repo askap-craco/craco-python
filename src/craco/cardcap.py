@@ -16,14 +16,22 @@ import copy
 import time
 import socket
 
-import roce_packetizer
+
+
 from craft.fitswriter import FitsTableWriter
 
-from rdma_transport import RdmaTransport
-from rdma_transport import runMode
-from rdma_transport import ibv_wc
-from rdma_transport import ibv_wc_status
-import rdma_transport
+log = logging.getLogger(__name__)
+
+try:
+    import roce_packetizer
+    from rdma_transport import RdmaTransport
+    from rdma_transport import runMode
+    from rdma_transport import ibv_wc
+    from rdma_transport import ibv_wc_status
+    import rdma_transport
+except:
+    log.info('Could not import  rdma transpose and roce_packetiser. They probably arent installed - attempts at real time captures will fail with not found exceptions')
+
 import socket
 from craft.cmdline import strrange
 from craco.epics.craco import Craco as CracoEpics
@@ -34,7 +42,6 @@ from craco.utils import ibc2beamchan
 from craco.cardcapfile import * 
 
 
-log = logging.getLogger(__name__)
 hostname = socket.gethostname()
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
@@ -920,10 +927,15 @@ class MpiCardcapController:
         ccap = self.ccap
         comm = self.comm
         rank = self.rank
+        log.info('Stop called. Waiting for barrier')
 
+        # Due to 
         comm.Barrier()
+
+        log.info('Barrier complete')
         
         if rank == 0:
+            log.info('Rank 0 complete - stopping')
             ccap.stop()
 
         ncomplete = -1 if ccap is None else ccap.total_completions[0]

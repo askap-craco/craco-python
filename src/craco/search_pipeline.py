@@ -20,6 +20,7 @@ from craft import uvfits
 from craft import craco
 from craco import calibration
 from craco.vis_subtractor import VisSubtractor
+from craco.vis_flagger import VisFlagger
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -238,7 +239,9 @@ def instructions2pad_lut(instructions, npix):
     return location
     
 def get_grid_lut_from_plan(plan):
-    
+
+    # Hack - get fdmt plan to set values
+    fplan = plan.fdmt_plan
     upper_instructions = plan.upper_instructions
     lower_instructions = plan.lower_instructions
 
@@ -266,7 +269,7 @@ def get_grid_lut_from_plan(plan):
 class Pipeline:
     def __init__(self, device, xbin, plan, alloc_device_only_buffers=False):
         '''
-        Make the search pipelien bound to the hardware
+        Make the search pipeline bound to the hardware
         
         :device: XRT device
         :xbin: XCLBIN object
@@ -363,6 +366,9 @@ class Pipeline:
                  self.grid_luts[0].dtype)
 
         self.subtractor = None
+        values = plan.values
+        self.flagger = VisFlagger(values.dflag_fradius, values.dflag_tradius, values.dflag_threshold, values.dflag_tblk)
+        self.first_tstart = plan.tstart
         self.update_plan(plan) 
 
     def _update_grid_lut(self,plan):
@@ -675,6 +681,12 @@ class Pipeline:
         return input_flat
 
 
+    def flag_input(self, input_flat, cas, ics):
+        '''
+        Update input flagging mask based on running CAS and ICS and IQRM standard deviation
+        '''
+        return self.flagger(input_flat, cas, ics)
+
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
         Calculates the expected signal and noise levels at the images
@@ -748,12 +760,12 @@ def print_candidates(candidates, npix, iblk, plan=None):
     for candidate in candidates:
         print(cand2str(candidate, npix, iblk))
 
-def cand2str_wcs(c, iblk, plan, raw_noise_level):
+def cand2str_wcs(c, iblk, plan, first_tstart, raw_noise_level):
     s1 = cand2str(c, plan.npix, iblk, raw_noise_level)
     total_sample = iblk*plan.nt + c['time']
     tsamp_s = plan.tsamp_s
     obstime_sec = total_sample*plan.tsamp_s
-    mjd = plan.tstart.utc.mjd + obstime_sec.value/3600/24
+    mjd = first_tstart.utc.mjd + obstime_sec.value/3600/24
     dmdelay_ms = c['dm']*tsamp_s.to(units.millisecond)
     dm_pccm3 = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
     lpix,mpix = location2pix(c['loc_2dfft'], plan.npix)
@@ -784,7 +796,13 @@ def waitall(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
 
-def wait_for_starts(starts, call_start, timeout=0):
+def wait_for_starts(starts, call_start, timeout_ms: int=1000):
+    '''
+    Wait for all the runs.
+    call_start is a timestamp so we can debug how long it took to run
+    timeout_ms is a timeout in milliseconds (int)
+    '''
+
     log.info('Waiting for %d starts', len(starts))
     # I don't know why this helps, but it does, and I don't like it!
     # It was really reliable when it was in there, lets see if its still ok when we remove it.
@@ -793,9 +811,13 @@ def wait_for_starts(starts, call_start, timeout=0):
     wait_start = time.perf_counter()
     for istart, start in enumerate(starts):
         log.debug(f'Waiting for istart={istart} start={start}')
-        start.wait(timeout) # 0 means wait forever
+        # change to wait2 as this is meant to throw a command_error execption
+        # https://xilinx.github.io/XRT/master/html/xrt_native.main.html?highlight=wait#classxrt_1_1run_1ab1943c6897297263da86ef998c2e419c
+        # see Also CRACO-128
+        # Ah, but wait2 doesn't exist in PYXRT
+        result = start.wait(timeout_ms) # 0 means wait forever
         wait_end = time.perf_counter()
-        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start}')
+        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -847,6 +869,10 @@ def get_parser():
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
+    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-tblk', help='Dynamif flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
@@ -892,7 +918,7 @@ class VisSource:
             log.info('Reading data from fits %s', self.fitsfile)
         else:
             log.info('Injecting data described by %s', values.injection_file)
-            self.fv = FakeVisibility(plan, values.injection_file, int(1e6))
+            self.fv = FakeVisibility(plan, values.injection_file, vis_source = fitsfile)
 
     def __fits_file_iter(self):
         for input_data in self.fitsfile.time_blocks(self.plan.nt):
@@ -903,7 +929,8 @@ class VisSource:
         if self.fv is None:
             myiter = self.__fits_file_iter()
         else:
-            myiter = self.fv.get_fake_data_block()
+            #myiter = self.fv.get_fake_data_block()
+            myiter = self.__fits_file_iter()
 
         return myiter
 
@@ -981,18 +1008,28 @@ class PipelineWrapper:
         self.pipeline.update_plan(self.plan)
         return self.plan
 
-    def write(self, input_flat):
+    def write(self, input_flat, cas=None, ics=None):
+        '''
+        cas, and ics if specified help with flagging
+        '''
+        
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
         candout = self.candout
         iblk = self.iblk
         values = self.values
         plan = self.plan
-        
+
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
+
+        input_flat = p.flag_input(input_flat, cas, ics)
+        
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+        
+        if values.injection_file:
+            input_flat_cal = self.vis_source.fv.inject_frb_in_data_block(input_flat_cal, iblk, plan)
 
         if pc_filterbank is not None:
             d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
@@ -1011,7 +1048,7 @@ class PipelineWrapper:
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
         for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan, p.last_bc_noise_level)+'\n')
+            candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
         candout.flush()
 
         if values.print_dm0_stats:
@@ -1071,6 +1108,7 @@ def _main():
     pipeline_wrapper = PipelineWrapper(f, values, values.device)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
+    pipeline_wrapper.vis_source = vis_source
 
     if values.wait:
         input('Press any key to continue...')

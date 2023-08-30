@@ -148,8 +148,14 @@ class SearchPipelineSink:
                 nbl = self.adapter.nbl
                 shape = (nbl, nf, nt)
                 self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
+
+                nfcas = info.nchan
+                cas_shape = (nfcas, nt)
+                self.cas_data = np.zeros(cas_shape, dtype=np.float32)
+                self.ics_data = self.cas_data.copy()
+                
                 self.t = 0
-            except:
+            except RuntimeError: # usually XRT error
                 log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
             
@@ -193,6 +199,12 @@ class SearchPipelineSink:
             self.pipeline_data[:,fstart:fend, tstart:tend] = vis_data[irx, ...]
             self.pipeline_data.mask[:,fstart:fend, tstart:tend] = chanmask | blflags
 
+
+            cas_fslice = slice(fstart*6,fend*6)
+            self.cas_data[cas_fslice, tstart:tend] = vis_block.cas[irx,...].T
+            self.ics_data[cas_fslice, tstart:tend] = vis_block.ics[irx,...].T
+
+
         self.t += vis_nt
 
         # Update UVWs if necessary
@@ -206,9 +218,9 @@ class SearchPipelineSink:
 
         if self.t == output_nt:
             try:
-                self.pipeline.write(self.pipeline_data)
+                self.pipeline.write(self.pipeline_data, self.cas_data, self.ics_data)
                 self.t = 0
-            except:
+            except RuntimeError: # usuall XRT error
                 log.exception('Error sending data to pipeline. Disabling this pipeline')
                 self.pipeline.close()
                 self.pipeline = None

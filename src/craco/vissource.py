@@ -179,13 +179,18 @@ class VisBlock:
     All baselines
     Block of NT integrations
     '''
-    def __init__(self, data, iblk, info):
+    def __init__(self, data, iblk, info, cas=None, ics=None):
         self._d = data
         self.iblk = iblk
         self.info = info
+        self.cas = cas
+        self.ics = ics
 
     @property
     def data(self):
+        '''
+        Returns visibilities
+        '''
         return self._d
 
     @property

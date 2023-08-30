@@ -13,6 +13,7 @@ import time
 import signal
 import atexit
 import re
+import datetime
 
 log = logging.getLogger(__name__)
 
@@ -106,6 +107,7 @@ class Obsman:
         # https://alexandra-zaharia.github.io/posts/kill-subprocess-and-its-children-on-timeout-python/
         self.process = Popen(self.cmd, shell=True, start_new_session=True)
         pgid = os.getpgid(self.process.pid)
+        self.start_time = datetime.datetime.now()
         log.info(f'Started process {self.cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode}')
         
     def terminate_process(self):
@@ -120,7 +122,7 @@ class Obsman:
         if exit_code is None: #process is still running
             try:
                pgid = os.getpgid(proc.pid) # get process group ID - which we got our own when we started the session
-               timeout = self.values.timeout
+               timeout = self.values.death_timeout
                log.info(f'sending SIGINT processes from PID={proc.pid} PGID={pgid}and waiting {timeout} seconds')
                proc.send_signal(signal.SIGINT)
                os.killpg(pgid, signal.SIGINT)
@@ -153,12 +155,21 @@ class Obsman:
         
 
     def poll_process(self):
+        '''
+        Called to check proces is running
+        If it quits by itself, it's cleaned up and restarted
+        '''
         if self.process is not None:
             retcode = self.process.poll()
-            log.debug('Process pid=%s running with return code %s', self.process.pid, retcode)
-            if retcode is not None:
-                log.info('Process terminated with return code %s. Cleaning up', retcode)
+            now = datetime.datetime.now()
+            minutes = (now - self.start_time).total_seconds()/60
+            log.debug('Process pid=%s running with return code %s for %{0.1f} minutes', self.process.pid, retcode, minutes)
+            if retcode is not None or minutes > self.values.timeout:
+                log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting', retcode, minutes, self.values.timeout)
+                scanid = self.curr_scanid
                 self.terminate_process()
+                log.info('Process terminated. Restarting scanid %s', scanid)
+                self.start_process(scanid)
 
     def shutdown(self):
         log.info('Shutting down process')
@@ -190,7 +201,8 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--timeout', type=int, help='Timeout to wait after sending signal before killing process', default=10)
+    parser.add_argument('--death-timeout', type=int, help='Timeout to wait after sending signal before killing process', default=10)
+    parser.add_argument('--timeout', type=float, help='Number of minutes to wait before killing process', default=15)
     parser.add_argument('-R','--target-regex', help='Regex to apply to target name. If match then we start a scan')
     parser.add_argument(dest='cmd', nargs='+')
     parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')

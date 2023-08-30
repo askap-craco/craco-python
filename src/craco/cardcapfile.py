@@ -437,6 +437,7 @@ class CardcapFile:
 
         packets_per_frame = self.npackets_per_frame
         packet_size_bytes = self.dtype.itemsize
+        frame_size_bytes = packets_per_frame*packet_size_bytes
 
         if beam is None or beam == -1:
             nbeam_out = self.nbeam
@@ -453,6 +454,10 @@ class CardcapFile:
                         packets = np.fromfile(f, dtype=self.dtype, count=packets_per_frame) # just reads sequentially
                         if len(packets) != packets_per_frame:
                             break
+
+                        next_offset = self.hdr_nbytes + (iframe+1)*frame_size_bytes
+                        # Tell Kernel we're going to need the next block.
+                        os.posix_fadvise(f.fileno(), next_offset, frame_size_bytes, os.POSIX_FADV_WILLNEED)
 
                         # do a little check
                         assert packets['beam_number'][0] == 0, f"Expected first beam to be zero. It was {packets['beam_number'][0]}"

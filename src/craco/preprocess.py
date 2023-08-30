@@ -85,20 +85,30 @@ def average_pols(block, keepdims = True):
 
     '''
     _, nPol, _ = get_isMasked_nPol(block)
+    if nPol > 1:
+        raise RuntimeError(f"AAaaaaaaah! I cannot process blocks with nPol > 1, found - {nPol}")
+    if keepdims == True:
+        #This is under the assumption that there is only 1 pol in the block
+        return block
+
     if nPol == 0:
         print("No pol axis to scrunch, returning the block as it is")
         return block
     if type(block) == dict:
         for ibl, bldata in block.items():
             assert bldata.ndim == 3, f"Exptected 3 dimensions (nf, npol, nt), but got {bldata.ndim}, shape={bldata.shape}"#, block = {block},\n bldata= {bldata}"
-            block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
-            if not keepdims:
-                block[ibl] = block[ibl].squeeze()
+            block[ibl] = bldata[:, 0, ...]
+            #Commenting out the lines belwo assuming there will only be 1 pol in the data, see CRACO-154
+            #block[ibl] = bldata.mean(axis=1, keepdims=keepdims)
+            #if not keepdims:
+            #    block[ibl] = block[ibl].squeeze()
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         assert block.ndim == 4, f"Expected 4 dimensions (nbl, nf, npol, nt), but got {bldata.ndim}"
-        block = block.mean(axis=2, keepdims=keepdims)
-        if not keepdims:
-            block = block.squeeze()
+        block = block[:, :, 0, :]
+        #Commenting out the lines below assuming that there will only be 1 pol in the data, see CRACO-154
+        #block = block.mean(axis=2, keepdims=keepdims)
+        #if not keepdims:
+        #    block = block.squeeze()
     return block
 
 
@@ -203,7 +213,7 @@ class RFI_cleaner:
                 block[ibl][chanrange, ...] = flagval
         return block
 
-    def get_freq_mask(self, baseline_data, threshold=3.0):
+    def get_freq_mask(self, baseline_data, threshold=5.0):
         #Take the mean along the pol axis and rms along the time axis
 
         if self.pol_axis_exists:
@@ -211,7 +221,7 @@ class RFI_cleaner:
         else:
             rms = baseline_data.std(axis=-1).squeeze()
 
-        mask, votes = iqrm_mask(rms, radius = len(rms) / 10, threshold=threshold)
+        mask, votes = iqrm_mask(rms, radius = len(rms), threshold=threshold)
         return mask
 
     def get_time_mask(self, baseline_data, threshold = 5.0):
@@ -236,7 +246,7 @@ class RFI_cleaner:
                 continue
             
             if freq:
-                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=10)
+                autocorr_freq_mask = self.get_freq_mask(baseline_data, threshold=5)
                 autocorr_masks[str(a1) + 'f'] = autocorr_freq_mask 
             if time:
                 autocorr_time_mask = self.get_time_mask(baseline_data)
@@ -348,7 +358,7 @@ class RFI_cleaner:
 
                     block[ibl] = baseline_data
                     if mcasf or mcast:
-                        cas_sum += baseline_data
+                        cas_sum += np.abs(baseline_data)
 
 
         if mcasf or mcast:
@@ -382,9 +392,36 @@ class RFI_cleaner:
 
         return block, autocorr_masks, crosscorr_masks, cas_masks
 
+def fill_masked_values(block, fill_value = None):
+    '''
+    Fill the masked elements with their fill_values, or the provided fill_value
+    If the there is no mask, then the same block is returned
+    '''
+    if type(block) == dict:
+        for ibl, bldata in block.items():
+            if type(bldata) == np.ma.core.MaskedArray:
+                if fill_value is not None:
+                    block.fill_value = fill_value
+                block[ibl] = bldata.filled()
+            else:
+                pass
+        return block
+
+    elif type(block) == np.ndarray:
+        return block
+
+    elif type(block) == np.ma.core.MaskedArray:
+        if fill_value is not None:
+            block.fill_value = fill_value
+        return block.filled()
 
 
 def get_dm_delays(dm_samps, freqs):
+    '''
+    Returns delays for each freq in freqs array
+    dm_samps is the total delay across the whole band
+    delay for fmin will be zero
+    '''
     fmin = np.min(freqs)
     fmax = np.max(freqs)
     delay = dm_samps * (1 / fmin**2 - 1 / freqs**2)  / (1 / fmin**2 - 1 / fmax**2)
@@ -412,18 +449,15 @@ def get_dm_samps(freqs, dm_pccc, tsamp):
     delays_s = 4.15 * 1e-3 * dm_pccc * (1 / fmin**2 - 1 / fmax**2)
     
     delays_samps = np.round(delays_s / tsamp).astype(int)
-    #dm_samps = np.max(delays_samps) - np.min(delays_samps)
     dm_samps = delays_samps
-    #print(f"Delays_s are", delays_s, delays_samps, dm_samps)
     return dm_samps
 
 class Dedisp:
-    def __init__(self, freqs, tsamp, baseline_order, dm_samps = None, dm_pccc = None):
+    def __init__(self, freqs, tsamp,  dm_samps = None, dm_pccc = None):
         self.fch1 = freqs[0]
         self.foff = np.abs(freqs[1] - freqs[0])
         self.freqs = freqs
         self.nchans = len(self.freqs)
-        self.baseline_order = baseline_order
         if dm_samps is None:
             if dm_pccc is None:
                 raise ValueError("You need to specify either dm_samps or dm_pccc")
@@ -436,13 +470,10 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-
-        if type(inblock) == dict:
-            block = bl2array(inblock)
-        elif type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
+        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
             block = inblock
         else:
-            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray or dict, but got {type(block)}")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -457,17 +488,6 @@ class Dedisp:
             rolled_block[:, ichan, ...] = np.roll(attached_block[:, ichan, ...], self.delays_samps[ichan])
 
         self.dm_history = attached_block[..., -self.dm:]
-        #import IPython
-        
-        if type(inblock) == dict:
-            for ibl, blid in enumerate(self.baseline_order):
-                #print(ibl,blid, inblock[blid].shape, attached_block[ibl, ..., self.dm:].shape)
-                #print(inblock[blid].mask)
-                inblock[blid] = rolled_block[ibl, ..., self.dm:]
-                #print(f"Type of the output vis array is -- {type(inblock[blid])}")
-                #print(inblock[blid].mask)
-            #IPython.embed()
-            return inblock
 
         return rolled_block[..., self.dm:]
         

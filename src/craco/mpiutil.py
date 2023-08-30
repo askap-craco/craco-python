@@ -53,6 +53,25 @@ class MpiPipeline:
         self.__root_processes.append(func)
 
 
+
+import platform
+FORMAT = '%(asctime)s [%(hostname)s:%(process)d] r%(rank)d %(module)s %(message)s'
+class HostnameFilter(logging.Filter):
+    hostname = platform.node()
+    def __init__(self, comm):
+        self.rank =  comm.Get_rank()
+    
+    def filter(self, record):
+        record.hostname = HostnameFilter.hostname
+        record.rank = self.rank
+        return True
+
+def make_log_handler(comm):
+    handler = logging.StreamHandler()
+    handler.addFilter(HostnameFilter(comm))
+    handler.setFormatter(logging.Formatter(FORMAT))
+    return handler
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)

@@ -34,6 +34,7 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
+    parser.add_argument('--scan-minutes', type=float, help='Number of minutes to record for', default=15)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -69,7 +70,7 @@ def _main():
     shutil.copy(hostfile, scandir)
     #pol='--pol-sum'
 
-    beam = -1 # all beams, tscrucnh
+    beam = values.beam # all beams, tscrucnh
     #beam = 0 # given beam no tscrunch
 
     if beam == -1: # all beams
@@ -84,14 +85,20 @@ def _main():
         spi = '--samples-per-integration 32'
 
     card  = '-a 1-12'
-    block = '-b 3-5'
+    block = '-b 5-7'
     fpga = ''
     fpga_mask = ''
 
     # 30 cards is about the limit for cardcap
     max_ncards = '--max-ncards 30'
 
-    num_msgs = '-N 10000000'
+    if values.scan_minutes is not None:
+        scan_nminutes = values.scan_minutes
+        nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
+        num_msgs = f'-N {nmsg}'
+    else:
+        num_msgs = ''
+        
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
 
