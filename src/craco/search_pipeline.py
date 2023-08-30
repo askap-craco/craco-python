@@ -918,7 +918,7 @@ class VisSource:
             log.info('Reading data from fits %s', self.fitsfile)
         else:
             log.info('Injecting data described by %s', values.injection_file)
-            self.fv = FakeVisibility(plan, values.injection_file, int(1e6))
+            self.fv = FakeVisibility(plan, values.injection_file, vis_source = fitsfile)
 
     def __fits_file_iter(self):
         for input_data in self.fitsfile.time_blocks(self.plan.nt):
@@ -929,7 +929,8 @@ class VisSource:
         if self.fv is None:
             myiter = self.__fits_file_iter()
         else:
-            myiter = self.fv.get_fake_data_block()
+            #myiter = self.fv.get_fake_data_block()
+            myiter = self.__fits_file_iter()
 
         return myiter
 
@@ -1028,6 +1029,9 @@ class PipelineWrapper:
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+        
+        if values.injection_file:
+            input_flat_cal = self.vis_source.fv.inject_frb_in_data_block(input_flat_cal, iblk, plan)
 
         if pc_filterbank is not None:
             d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
@@ -1106,6 +1110,7 @@ def _main():
     pipeline_wrapper = PipelineWrapper(f, values, values.device)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
+    pipeline_wrapper.vis_source = vis_source
 
     if values.wait:
         input('Press any key to continue...')

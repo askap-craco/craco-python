@@ -123,11 +123,11 @@ def main():
     direct_gridder = Gridder(uvsource, py_plan, values)
     imager_obj = Imager(uvsource, py_plan, values)
     if args.dedm_pccc:
-        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_pccc=args.dedm_pccc)
+        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, dm_pccc=args.dedm_pccc)
         dm_samps = brute_force_dedipserser.dm
         dm_pccc = brute_force_dedipserser.dm_pccc
     elif args.dedm_samps:
-        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, baseline_order = py_plan.baseline_order, dm_samps=args.dedm_samps)
+        brute_force_dedipserser = preprocess.Dedisp(freqs = py_plan.freqs, tsamp = py_plan.tsamp_s.value, dm_samps=args.dedm_samps)
         dm_samps = brute_force_dedipserser.dm
         dm_pccc = brute_force_dedipserser.dm_pccc
     else:

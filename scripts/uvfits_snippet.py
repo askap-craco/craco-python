@@ -6,6 +6,19 @@ import numpy as np
 
 from astropy.io import fits
 
+def make_par(arr):
+    """
+    take numpy array to make it parameter etc for fits GroupData
+    """
+    par_name = []; par_data = []
+    for name in arr.dtype.names:
+        if name == "DATA":
+            continue
+        ### else
+        par_name.append(name)
+        par_data.append(arr[name])
+    return par_name, par_data
+
 def uvfits_snippet(uvpath, tstart, tend, outpath=None):
     """
     note: tend not included...

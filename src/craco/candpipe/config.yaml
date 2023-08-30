@@ -1,0 +1,22 @@
+
+# for clustering 
+min_samples: 1 
+
+# eps params for time/dm clustering
+eps:
+  total_sample: 3
+  dm: 5
+  boxc_width: 4
+
+# eps params for space clustering (second layer)
+eps2:
+  lpix: 3
+  mpix: 3
+
+# candidates classify 
+threshold:
+  lpix_rms: 2 # minimum threshold for a RFI clustering 
+  mpix_rms: 2
+  num_samps: 2 # number of samples for each cluster - one metric for RFI classification
+  num_spatial: 2 # number of spatially coherent clusteres in each space/time clusters
+  max_snr: 10 # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric 
