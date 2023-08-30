@@ -35,6 +35,9 @@ def _main():
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
     parser.add_argument('--scan-minutes', type=float, help='Number of minutes to record for', default=15)
+    parser.add_argument('--pol-sum', help='Sum pol mode', action='store_true', dest='pol_sum', default=True)
+    parser.add_argument('--dual-pol', help='Dual pol mode', action='store_false', dest='pol_sum', default=False)
+    
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -72,15 +75,18 @@ def _main():
 
     beam = values.beam # all beams, tscrucnh
     #beam = 0 # given beam no tscrunch
+    if values.pol_sum:
+        pol = '--pol-sum'
+    else:
+        pol = '--dual-pol'
+    
 
     if beam == -1: # all beams
         beam = '' # all beams
-        pol = '--dual-pol'
         tscrunch='--tscrunch 32'
         spi='--samples-per-integration 64'
     else:
         beam = f'--beam {beam}' # single beam
-        pol = '--pol-sum'
         tscrunch = ''
         spi = '--samples-per-integration 32'
 
