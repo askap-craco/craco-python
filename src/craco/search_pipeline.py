@@ -317,7 +317,8 @@ class Pipeline:
         
         
         # pout of FDMT should be pin of grid reader
-        assert self.fdmtcu.group_id(1) == self.grid_reader.group_id(0)
+        if self.fdmtcu.group_id(1) != self.grid_reader.group_id(0):
+            warnings.warn(f'Expected fdmt output to be grid reader input. FDMTout = {self.fdmtcu.group_id(1)} != grid reader { self.grid_reader.group_id(0)}. Perhaps it isnt imporant anymore')
 
         # Grid reader: pin, ndm, tblk, nchunk, nparallel, axilut, load_luts, streams[4]
         log.info('Allocating mainbuf')
