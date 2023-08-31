@@ -113,9 +113,9 @@ def run(f, values):
     block_dtype = np.ma.core.MaskedArray
     
 
-    uvsource = open_after_seeking(values.uv, seek_samps = args.seek_samps)
+    uvsource = open_after_seeking(values.uv, seek_samps = values.seek_samps)
     nsamps_total = int(uvsource.vis.size // uvsource.nbl)
-    nsamps_to_process = args.process_samps
+    nsamps_to_process = values.process_samps
 
     if nsamps_to_process < 0 or nsamps_to_process > nsamps_total:
         nsamps_to_process = nsamps_total
