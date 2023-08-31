@@ -161,7 +161,7 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
     else:
         vis_valid  = np.all(valid)
         
-    for beam in range(nbeam):
+    for beam in prange(nbeam):
         for fpga in range(nfpga):
             # TODO: Work out what should do if some data isn't valid.
             # do we Just not add it, do we note it somewhere in some arrays ... what should we do?

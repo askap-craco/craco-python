@@ -815,6 +815,7 @@ class UvFitsFileSink:
         self.uvout.an_table(self.uvout.antennas).writeto(fileout+'.an_table', overwrite=True)
         self.uvout.su_table(self.uvout.sources).writeto(fileout+'.su_table', overwrite=True)
         self.uvout.hdr.totextfile(fileout+'.header', overwrite=True)
+        self.blids = [bl.blid for bl in self.obs_info.baseline_iter()]
 
         with open(fileout+'.groupsize', 'w') as fout:
             fout.write(str(self.uvout.dtype.itemsize) + '\n')
@@ -843,13 +844,31 @@ class UvFitsFileSink:
         antflags = vis_block.antflags
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
-        weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
         inttime = info.inttime.to(u.second).value*info.vis_tscrunch
         assert NSAMP_PER_FRAME % vis_nt == 0
         samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
-
         blflags = vis_block.baseline_flags
+
+        weights = np.ones((vis_nt, nbl, self.total_nchan, self.npol), dtype=np.float32)
+        weights[abs(dreshape) == 0] = 0 # flag channels that have zero amplitude
+        uvw_baselines = np.empty((nbl, 3))
+
+        # fits convention has source index with starting value of 1
+        fits_sourceidx = sourceidx + 1
+
+        for blinfo in info.baseline_iter():
+            ia1 = blinfo.ia1
+            ia2 = blinfo.ia2
+            a1 = blinfo.a1
+            a2 = blinfo.a2
+            ibl = blinfo.blidx
+            uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+            if blflags[ibl]:
+                weights[:, ibl, ...] = 0
+                dreshape[:, ibl,...] = 0 # set output to zeros too, just so we can't cheat
+        
+
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             # FID is for the beginning of the block.
@@ -857,26 +876,7 @@ class UvFitsFileSink:
             fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
             mjd = info.fid_to_mjd(fid_itime)
             log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
-            for blinfo in info.baseline_iter():
-                ia1 = blinfo.ia1
-                ia2 = blinfo.ia2
-                a1 = blinfo.a1
-                a2 = blinfo.a2
-                uvwdiff = uvw[ia1, :] - uvw[ia2, :]
-                dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
-
-                assert len(antflags) == info.nant_valid
-                if blflags[blinfo.blidx]:
-                    weights[:] = 0
-                    dblk[:] = 0 # set output to zeros too, just so we can't cheat
-                else:
-                    weights[:] = 1
-                    weights[abs(dblk) == 0] = 0
-                    
-                # fits convention has source index with starting value of 1
-                fits_sourceidx = sourceidx + 1
-                # put_data wants 0-based antenna numbers
-                self.uvout.put_data(uvwdiff, mjd.value, a1-1, a2-1, inttime, dblk, weights, fits_sourceidx)
+            self.uvout.put_data_block(uvw_baselines, mjd.value, self.blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
         
         self.uvout.fout.flush()
         log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
