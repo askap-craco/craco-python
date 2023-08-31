@@ -1004,7 +1004,9 @@ class PipelineWrapper:
         Completley inelegant, but better htan nothing for now
         '''
         log.info('Updating plan')
-        self.plan = PipelinePlan(new_data, self.values)
+        old_plan = self.plan
+        assert old_plan is not None
+        self.plan = PipelinePlan(new_data, self.values, prev_plan=old_plan)
         self.pipeline.update_plan(self.plan)
         return self.plan
 

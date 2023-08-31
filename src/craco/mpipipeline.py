@@ -420,8 +420,12 @@ class MpiObsInfo:
         # to work out which source is being used,
         # then load the source table and get the skycoord
         tstart = self.tstart
-        source = self.md.source_at_time(self.pipe_info.beamid, tstart.mjd)
-        coord = source['skycoord']
+        if self.md is None: # return a default onne in case metadata not set - just for filterbanks
+            coord = SkyCoord('00h00m00s +00d00m00s' )
+        else:
+            source = self.md.source_at_time(self.pipe_info.beamid, tstart.mjd)
+            coord = source['skycoord']
+            
         return coord
 
     @property

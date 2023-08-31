@@ -19,6 +19,7 @@ def _main():
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('--type', help='Chose what type of header you want to show', choices=('timestamp','fits'), default='fits')
+    parser.add_argument('--npackets', '-N', help='Number of packets to print', default=1, type=int)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -40,22 +41,23 @@ def _main():
                 print(f'{f} {hcard}'.strip())
 
         else:
-            s = f"{f} {len(cc)} 0x{cc.syncbat:x} {cc.sbid}/{cc.scanid} {cc.target} {cc.mjd0} {cc.nant} {cc.nbeam} {cc.npol} {cc.dtype['data'].shape} {len(cc)} "
-
-            try:
-                f1 = next(cc.packet_iter())
-                fid = int(f1['frame_id'])
-                bat = int(f1['bat'])
-                if first_fid is None:
-                    first_fid = fid
-                    first_bat  = bat
+            pktiter = cc.packet_iter()
+            for i in range(values.npackets):
+                s = f"{f} {len(cc)} 0x{cc.syncbat:x} {cc.sbid}/{cc.scanid} {cc.target} {cc.mjd0} {cc.nant} {cc.nbeam} {cc.npol} {cc.dtype['data'].shape} {len(cc)} "
+                try:
+                    f1 = next(pktiter)
+                    fid = int(f1['frame_id'])
+                    bat = int(f1['bat'])
+                    if first_fid is None:
+                        first_fid = fid
+                        first_bat  = bat
                     
-                s += f"{fid} {fid-first_fid} {bat} {hex(bat)} {bat-first_bat} {fid % 2048}"
+                    s += f"{fid} {fid-first_fid} {bat} {hex(bat)} {bat-first_bat} {fid % 2048} {f1['channel_number']} {f1['beam_number']}"
                     
-            except StopIteration:
-                s += 'EMPTY'
+                except StopIteration:
+                    s += 'EMPTY'
         
-            print(s)
+                print(s)
         
 
 

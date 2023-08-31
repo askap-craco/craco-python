@@ -10,6 +10,7 @@ import pylab
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 import os
 import sys
 import logging
@@ -50,8 +51,9 @@ class ProcessingStep:
         '''
         pass
 
+
 class Pipeline:
-    def __init__(self, candfile, args):
+    def __init__(self, candfile, args, config):
         self.args = args
         self.cand_fname= candfile
         self.beamno = int(candfile.replace('candidates.txtb',''))
@@ -60,6 +62,7 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
+        self.config = config
 
         self.steps = [steps.cluster.Step(self),
                       steps.time_space_filter.Step(self),
@@ -81,7 +84,7 @@ class Pipeline:
             log.warning('Expected input file doesnt exist %s', full_path)
 
         return full_path
-
+    
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
@@ -127,8 +130,12 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
+    config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(config_file, 'r') as yaml_file:
+        config = yaml.safe_load(yaml_file)
+
     for f in args.files:
-        p = Pipeline(f, args)
+        p = Pipeline(f, args, config)
         p.run()
 
     

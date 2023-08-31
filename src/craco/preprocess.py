@@ -453,12 +453,11 @@ def get_dm_samps(freqs, dm_pccc, tsamp):
     return dm_samps
 
 class Dedisp:
-    def __init__(self, freqs, tsamp, baseline_order, dm_samps = None, dm_pccc = None):
+    def __init__(self, freqs, tsamp,  dm_samps = None, dm_pccc = None):
         self.fch1 = freqs[0]
         self.foff = np.abs(freqs[1] - freqs[0])
         self.freqs = freqs
         self.nchans = len(self.freqs)
-        self.baseline_order = baseline_order
         if dm_samps is None:
             if dm_pccc is None:
                 raise ValueError("You need to specify either dm_samps or dm_pccc")
@@ -471,13 +470,10 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-
-        if type(inblock) == dict:
-            block = bl2array(inblock)
-        elif type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
+        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
             block = inblock
         else:
-            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray or dict, but got {type(block)}")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -492,11 +488,6 @@ class Dedisp:
             rolled_block[:, ichan, ...] = np.roll(attached_block[:, ichan, ...], self.delays_samps[ichan])
 
         self.dm_history = attached_block[..., -self.dm:]
-        
-        if type(inblock) == dict:
-            for ibl, blid in enumerate(self.baseline_order):
-                inblock[blid] = rolled_block[ibl, ..., self.dm:]
-            return inblock
 
         return rolled_block[..., self.dm:]
         
