@@ -91,11 +91,35 @@ def get_ant_idx(nbl, flag_ant=None):
         return (~np.isin(blant[:, 0], flag_ant)) & (~np.isin(blant[:, 1], flag_ant))
 
 
+def open_after_seeking(fname, seek_sec = None, seek_samps = None):
+    tmp = uvfits.open(fname)
+    nsamps_total = int(tmp.vis.size // tmp.nbl)
+
+    if seek_sec is not None:
+        tsamp = tmp.tsamp.value
+        seek_samps = int(np.round(seek_sec / tsamp))
+    
+    assert seek_samps < nsamps_total, "Requested seek_samps ({seek_samps}) is bigger than total_nsamps ({nsamps_total})"
+
+    tmp.close()
+
+    f = uvfits.open(fname, skip_blocks=seek_samps)
+
+    return f
+
+
 def run(f, values):
     # we assume we are not using simulated data...
     block_dtype = np.ma.core.MaskedArray
+    
 
-    uvsource = uvfits.open(values.uv)
+    uvsource = open_after_seeking(values.uv, seek_samps = values.seek_samps)
+    nsamps_total = int(uvsource.vis.size // uvsource.nbl)
+    nsamps_to_process = values.process_samps
+
+    if nsamps_to_process < 0 or nsamps_to_process > nsamps_total:
+        nsamps_to_process = nsamps_total
+
     ## check if this need to change...
     # plan = craco_plan.PipelinePlan(uvsource, values)
     plan_arg = f"--ndm {values.ndm} --max-nbl {values.max_nbl}" # --flag-ant {values.flag_ant}"
@@ -128,7 +152,7 @@ def run(f, values):
         'source_name':vis_source.target_name,
     }
 
-    foutname = f+'.fil'
+    foutname = f+'.fil' if not f.endswith(".fil") else f
     fout = sigproc.SigprocFile(foutname, 'wb', hdr)
 
     calibrator = preprocess.Calibrate(
@@ -143,6 +167,7 @@ def run(f, values):
     )
 
     iblk = 0
+    nblocks_to_process = int(nsamps_to_process / values.nt)
     for blk, bluvw in uvsource.time_blocks_with_uvws(values.nt):
         try:
             iblk += 1
@@ -199,6 +224,10 @@ def run(f, values):
             # data[mask] = np.nan
 
             out_tf.tofile(fout.fin)
+
+            if iblk >= nblocks_to_process:
+                raise KeyboardInterrupt
+
         except KeyboardInterrupt:
             fout.fin.close()
             os.system("rm uv_data*.txt")
@@ -219,6 +248,8 @@ def _main():
     # parser.add_argument("-w", "--weighted-snr", type=str, help="snr weighted bandpass...", default=None)
     parser.add_argument("-norm", action='store_true', help="Normalise the data (baseline subtraction and rms setting to 1)",default = False)
     parser.add_argument("--target_input_rms", type=int, default=1)
+    parser.add_argument("--seek_samps", type=int, help="Seek x samps in to the file", default=0)
+    parser.add_argument("--process_samps", type=int, help="Process only x samples in the file (say -1 to process until the end of the file)",  default=-1)
     parser.add_argument("--ndm", type=int, default=2)
     parser.add_argument("--max-nbl", type=int, default=465)
     parser.add_argument("--flag-ant", type=str, )
