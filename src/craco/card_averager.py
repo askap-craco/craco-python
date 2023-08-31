@@ -196,10 +196,21 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
 def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.complex64):
 
     nbl = nant*(nant-1)//2
-    assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
-    assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
     vis_nt = nt // vis_tscrunch
     vis_nc = nc // vis_fscrunch
+
+    assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
+    assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
+    assert nbeam > 0
+    assert nant > 0
+    assert nc > 0
+    assert nt > 0
+    assert vis_fscrunch >= 0
+    assert vis_tscrunch >= 0
+    assert vis_nt > 0
+    assert vis_nc > 0
+    assert rdtype in (np.float32, np.int16)
+    
     if cdtype == np.complex64:
         vishape = (nbl, vis_nc, vis_nt)
     else: # assumed real type
@@ -208,6 +219,8 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     dt = np.dtype([('ics', rdtype, (nt, nc)),
                    ('cas', rdtype, (nt, nc)),
                    ('vis', cdtype, vishape)])
+
+    assert dt.itemsize > 0, f'Averaged dtype is equal to zero dt={dt}  vishape={vishape}'
 
     return dt
                 

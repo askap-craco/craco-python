@@ -37,6 +37,7 @@ from collections import namedtuple
 from craft.craco import ant2bl
 from craco import mpiutil
 from craft.cmdline import strrange
+from craco.timer import Timer
 
     
 log = logging.getLogger(__name__)
@@ -655,7 +656,6 @@ def proc_rx(pipe_info):
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
-    t_start = MPI.Wtime()
 
     log.info('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
@@ -677,6 +677,8 @@ def proc_rx(pipe_info):
     start_fid = info.fid_of_block(1)
     log.info(f'rank={rank} fid0={fid0} {start_fid} {type(start_fid)}')
     best_avg_time = 1e6
+    
+    t_start = MPI.Wtime()
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         now = MPI.Wtime()
@@ -700,10 +702,27 @@ def proc_rx(pipe_info):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
+        transpose_end = MPI.Wtime()
+        transpose_time = transpose_end - avg_end
+        
         if cardidx == 0:
+            read_size_bytes = dummy_packet.nbytes*NFPGA
             size_bytes = averaged.size * averaged.itemsize
-            rate_gbps = size_bytes * 8/1e9/avg_time
-            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, size=%s rate=%0.1fGbps',transposer.last_latency, avg_time*1e3, averager.last_nvalid, averaged.shape, averaged.dtype, size_bytes, rate_gbps)
+            transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
+            read_rate = read_size_bytes/1e6 / read_time
+            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose latency=%0.1fms time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
+                     ibuf,
+                     read_time*1e3,
+                     read_rate,
+                     transposer.last_latency,
+                     transpose_time*1e3,
+                     transpose_rate_gbps,
+                     avg_time*1e3,
+                     averager.last_nvalid,
+                     averaged.shape,
+                     averaged.dtype,
+                     size_bytes,
+                     read_size_bytes)
 
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
@@ -910,13 +929,22 @@ def proc_beam(pipe_info):
 
     try:
         while True:
+            t = Timer()
             beam_data = transposer.recv()
+            t.tick('transposer')
             cas_filterbank.write(beam_data['cas'])
+            t.tick('cas')
             ics_filterbank.write(beam_data['ics'])
-            
+            t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+            t.tick('visblock')
             vis_file.write(vis_block)
+            t.tick('visfile')
             pipeline_sink.write(vis_block)
+            t.tick('pipeline')
+
+            if beamid == 0:
+                log.info('Beam processing time %s', t)
             
             iblk += 1
 
@@ -1079,7 +1107,7 @@ def _main():
             proc_rx(pipe_info)
 
         log.info(f'Rank {rank}/{numprocs} complete. Waiting for everything')
-        raise StopError('Throwing a stop error so we can bring down the pipeline')
+        raise StopIteration('Throwing a stop error so we can bring down the pipeline')
         #comm.Barrier()
     except:
         log.exception('Exception running pipeline')

@@ -286,7 +286,7 @@ class CardcapFile:
         if self.npol == 2:
             nint = 1
         else:
-            if self.tscrunch_bug: # We'll scrunch them together
+            if self.tscrunch_bug or self.ntoutpfm: # We'll scrunch them together
                 nint = 1
             else:
                 nint = 2
@@ -339,8 +339,13 @@ class CardcapFile:
     def ntpkt_per_frame(self):
         if self.tscrunch_bug:
             ntpkt = 1
+        elif self.tscrunch > 1:
+            ntpkt = 1
+            assert self.ntoutpfm == 1, 'Headers are wrong. I hate this'
         else:
-            ntpkt = self.mainhdr['NTPKFM'] // self.tscrunch
+            ntpkt = self.mainhdr['NTPKFM']
+
+        assert ntpkt > 0, f'Invalid ntpkt {ntpkt}'
 
         return ntpkt
 
