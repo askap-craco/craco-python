@@ -19,6 +19,7 @@ from craft import sigproc
 from craft import uvfits
 from craft import craco
 from craco import calibration
+from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
 
@@ -1014,7 +1015,8 @@ class PipelineWrapper:
         '''
         cas, and ics if specified help with flagging
         '''
-        
+        t = Timer()
+        self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
         candout = self.candout
@@ -1025,27 +1027,38 @@ class PipelineWrapper:
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
 
         input_flat = p.flag_input(input_flat, cas, ics)
+        t.tick('flag')
         
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
+        t.tick('calibrate')
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+            t.tick('dump input')
         
         if values.injection_file:
             input_flat_cal = self.vis_source.fv.inject_frb_in_data_block(input_flat_cal, iblk, plan)
+            t.tick('inject')
 
         if pc_filterbank is not None:
             d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
+            t.tick('PC filterbank')
 
         p.copy_input(input_flat_cal, values, calibrate=False) # take the input into the device
+        t.tick('copy')
         
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
+            t.tick('dump uv')
 
-        p.run(iblk, values).wait() # Run pipeline
+        runs = p.run(iblk, values)
+        t.tick('run')
+        runs.wait() # Run pipeline
+        t.tick('wait')
         
         candidates = p.get_candidates().copy()
+        t.tick('get candidates')
 
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
@@ -1053,28 +1066,39 @@ class PipelineWrapper:
             candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
         candout.flush()
 
+        t.tick('Write candidates')
+
         if values.print_dm0_stats:
             bc = p.boxcar_history.copy_from_device().nparr
             s = 'DM0 image stats' + printstats(bc[0,...]) + f'shape={bc.shape}'
             print(s)
             log.info(s)
+            t.tick('Print DM0 stats')
 
         if len(candidates) > 0 and values.show_candidate_grid is not None:
             img = grid_candidates(candidates, values.show_candidate_grid, npix=256)
             imshow(img, aspect='auto', origin='lower')
             show()
+            t.tick('grid candidates')
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
+            t.tick('dump candidates')
         if do_dump(values.dump_mainbufs, iblk):
             for ib, mainbuf in enumerate(p.all_mainbufs):
                 mainbuf.saveto(f'mainbuf_iblk{iblk}_ib{ib}.npy')
 
+            t.tick('dump mainbuf')
+
         if do_dump(values.dump_fdmt_hist_buf, iblk):
             p.fdmt_hist_buf.saveto(f'fdmt_hist_buf_iblk{iblk}.npy')
+            t.tick('dump fdmt hist')
 
         if do_dump(values.dump_boxcar_hist_buf, iblk):
             p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
+            t.tick('dump boxcar')
+
+        logging.info('Write for iblk %d timer: %s', t)
 
         self.iblk += 1
 

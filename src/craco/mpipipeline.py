@@ -559,12 +559,9 @@ class ByteTransposer:
 
     def all2all(self, dtx):
         nmsgs = self.nmsgs
-        t_barrier = MPI.Wtime()
-        log.debug('Rank %s waiting', comm.Get_rank())
+        t = Timer()
         comm.Barrier()
-        t_start = MPI.Wtime()
-        t_wait = t_start - t_barrier
-        log.debug('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+        t.tick('barrier')
 
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
@@ -581,14 +578,8 @@ class ByteTransposer:
             #print('RMSG', r_msg[1:])
             comm.Alltoallv(s_msg, r_msg)
             
-        t_end = MPI.Wtime()
-        latency = (t_end - t_start)*1e3
-        self.last_latency = latency
-            
-        #if rank == 0:
-        #print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
-
-        #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
+        t.tick('transpose')
+        self.last_timer = t
 
         return self.drx
 
@@ -710,11 +701,11 @@ def proc_rx(pipe_info):
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
             read_rate = read_size_bytes/1e6 / read_time
-            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose latency=%0.1fms time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
+            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
                      ibuf,
                      read_time*1e3,
                      read_rate,
-                     transposer.last_latency,
+                     transposer.last_timer,
                      transpose_time*1e3,
                      transpose_rate_gbps,
                      avg_time*1e3,
@@ -944,7 +935,7 @@ def proc_beam(pipe_info):
             t.tick('pipeline')
 
             if beamid == 0:
-                log.info('Beam processing time %s', t)
+                log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
             
             iblk += 1
 

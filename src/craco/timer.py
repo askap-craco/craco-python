@@ -6,6 +6,7 @@ Copyright (C) CSIRO 2022
 """
 import logging
 import time
+from collections import OrderedDict
 
 log = logging.getLogger(__name__)
 
@@ -13,35 +14,55 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class Timestamp:
     def __init__(self, perf, process):
-        self.perf = perf
-        self.process = process
+        self.perf = perf # does not include time spent in sleep
+        self.process = process # includes time spent in sleep
 
     @staticmethod
     def now():
         return Timestamp(time.perf_counter(), time.process_time())
 
+
+    @property
+    def sleep(self):
+        '''
+        Returns the amoutn of time spent sleeping'''
+        s = self.perf - self.process
+        return s
+
     def __sub__(self, ts):
         return Timestamp(self.perf - ts.perf, self.process - ts.process)
 
     def __str__(self):
-        s = f'Perf {self.perf*1e3:0.1f}ms Proc {self.process*1e3:0.1f}ms'
+        s = f'{self.process*1e3:0.1f}ms CPU + {self.sleep*1e3:0.1f}ms sleep'
         return s
 
 class Timer:
     def __init__(self):
         self.last_ts = Timestamp.now()
         self.init_ts = self.last_ts
-        self.ticks = []
+        self.ticks = OrderedDict()
 
     def tick(self, name):
         ts = Timestamp.now()
-        self.ticks.append((name, ts - self.last_ts))
+        tdiff = ts - self.last_ts
+        self.ticks[name] = tdiff
         self.last_ts = ts
+        
+        return tdiff
+
+    @property
+    def total(self):
+        '''
+        Returns last minus first timestamp
+        '''
+        t = self.last_ts - self.init_ts
+        return t
+        
 
     def __str__(self):
-        return ' '.join([f'{tick[0]}:{tick[1]}' for tick in self.ticks])
-        
-        
+        s = '. '.join([f'{tick[0]}:{tick[1]}' for tick in self.ticks.items()])
+        s += f'. Total: {self.total}'
+        return s
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

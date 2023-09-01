@@ -21,9 +21,13 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 def test_timer():
     t = Timer()
-    t.tick('before')
     time.sleep(1)
-    t.tick('after')
+    t.tick('sleep only')
+
+    time.sleep(1)
+    for i in range(200):
+        np.arange(1000000)
+    t.tick('proc and sleep')
     print(str(t))
     
 
