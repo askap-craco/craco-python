@@ -37,6 +37,7 @@ from collections import namedtuple
 from craft.craco import ant2bl
 from craco import mpiutil
 from craft.cmdline import strrange
+from craco.timer import Timer
 
     
 log = logging.getLogger(__name__)
@@ -558,12 +559,9 @@ class ByteTransposer:
 
     def all2all(self, dtx):
         nmsgs = self.nmsgs
-        t_barrier = MPI.Wtime()
-        log.debug('Rank %s waiting', comm.Get_rank())
+        t = Timer()
         comm.Barrier()
-        t_start = MPI.Wtime()
-        t_wait = t_start - t_barrier
-        log.debug('Rank %s finished barrier. Wait=%0.1f ms', comm.Get_rank(), t_wait*1000)
+        t.tick('barrier')
 
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
@@ -580,14 +578,8 @@ class ByteTransposer:
             #print('RMSG', r_msg[1:])
             comm.Alltoallv(s_msg, r_msg)
             
-        t_end = MPI.Wtime()
-        latency = (t_end - t_start)*1e3
-        self.last_latency = latency
-            
-        #if rank == 0:
-        #print(f'RANK0 Barrier wait: {(t_start - t_barrier)*1e3}ms Transpose latency = {latency}ms')
-
-        #print(f'all2all COMPLETE {rank}/{numprocs} latency={latency} ms {t_start} {t_end}')
+        t.tick('transpose')
+        self.last_timer = t
 
         return self.drx
 
@@ -655,7 +647,6 @@ def proc_rx(pipe_info):
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
-    t_start = MPI.Wtime()
 
     log.info('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
@@ -677,6 +668,8 @@ def proc_rx(pipe_info):
     start_fid = info.fid_of_block(1)
     log.info(f'rank={rank} fid0={fid0} {start_fid} {type(start_fid)}')
     best_avg_time = 1e6
+    
+    t_start = MPI.Wtime()
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         now = MPI.Wtime()
@@ -700,10 +693,27 @@ def proc_rx(pipe_info):
             averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
+        transpose_end = MPI.Wtime()
+        transpose_time = transpose_end - avg_end
+        
         if cardidx == 0:
+            read_size_bytes = dummy_packet.nbytes*NFPGA
             size_bytes = averaged.size * averaged.itemsize
-            rate_gbps = size_bytes * 8/1e9/avg_time
-            log.info('RANK0 transpose latency=%0.1fms accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, size=%s rate=%0.1fGbps',transposer.last_latency, avg_time*1e3, averager.last_nvalid, averaged.shape, averaged.dtype, size_bytes, rate_gbps)
+            transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
+            read_rate = read_size_bytes/1e6 / read_time
+            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
+                     ibuf,
+                     read_time*1e3,
+                     read_rate,
+                     transposer.last_timer,
+                     transpose_time*1e3,
+                     transpose_rate_gbps,
+                     avg_time*1e3,
+                     averager.last_nvalid,
+                     averaged.shape,
+                     averaged.dtype,
+                     size_bytes,
+                     read_size_bytes)
 
         t_start = MPI.Wtime()
         if ibuf == values.num_msgs -1:
@@ -796,6 +806,7 @@ class UvFitsFileSink:
         self.uvout.an_table(self.uvout.antennas).writeto(fileout+'.an_table', overwrite=True)
         self.uvout.su_table(self.uvout.sources).writeto(fileout+'.su_table', overwrite=True)
         self.uvout.hdr.totextfile(fileout+'.header', overwrite=True)
+        self.blids = [bl.blid for bl in self.obs_info.baseline_iter()]
 
         with open(fileout+'.groupsize', 'w') as fout:
             fout.write(str(self.uvout.dtype.itemsize) + '\n')
@@ -824,13 +835,31 @@ class UvFitsFileSink:
         antflags = vis_block.antflags
         dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
-        weights = np.ones((self.total_nchan, self.npol), dtype=np.float32)
         nant = info.nant
         inttime = info.inttime.to(u.second).value*info.vis_tscrunch
         assert NSAMP_PER_FRAME % vis_nt == 0
         samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
-
         blflags = vis_block.baseline_flags
+
+        weights = np.ones((vis_nt, nbl, self.total_nchan, self.npol), dtype=np.float32)
+        weights[abs(dreshape) == 0] = 0 # flag channels that have zero amplitude
+        uvw_baselines = np.empty((nbl, 3))
+
+        # fits convention has source index with starting value of 1
+        fits_sourceidx = sourceidx + 1
+
+        for blinfo in info.baseline_iter():
+            ia1 = blinfo.ia1
+            ia2 = blinfo.ia2
+            a1 = blinfo.a1
+            a2 = blinfo.a2
+            ibl = blinfo.blidx
+            uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+            if blflags[ibl]:
+                weights[:, ibl, ...] = 0
+                dreshape[:, ibl,...] = 0 # set output to zeros too, just so we can't cheat
+        
+
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             # FID is for the beginning of the block.
@@ -838,26 +867,7 @@ class UvFitsFileSink:
             fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
             mjd = info.fid_to_mjd(fid_itime)
             log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
-            for blinfo in info.baseline_iter():
-                ia1 = blinfo.ia1
-                ia2 = blinfo.ia2
-                a1 = blinfo.a1
-                a2 = blinfo.a2
-                uvwdiff = uvw[ia1, :] - uvw[ia2, :]
-                dblk = dreshape[itime, blinfo.blidx, ...] # should be (nchan, npol)
-
-                assert len(antflags) == info.nant_valid
-                if blflags[blinfo.blidx]:
-                    weights[:] = 0
-                    dblk[:] = 0 # set output to zeros too, just so we can't cheat
-                else:
-                    weights[:] = 1
-                    weights[abs(dblk) == 0] = 0
-                    
-                # fits convention has source index with starting value of 1
-                fits_sourceidx = sourceidx + 1
-                # put_data wants 0-based antenna numbers
-                self.uvout.put_data(uvwdiff, mjd.value, a1-1, a2-1, inttime, dblk, weights, fits_sourceidx)
+            self.uvout.put_data_block(uvw_baselines, mjd.value, self.blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
         
         self.uvout.fout.flush()
         log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
@@ -910,13 +920,22 @@ def proc_beam(pipe_info):
 
     try:
         while True:
+            t = Timer()
             beam_data = transposer.recv()
+            t.tick('transposer')
             cas_filterbank.write(beam_data['cas'])
+            t.tick('cas')
             ics_filterbank.write(beam_data['ics'])
-            
+            t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+            t.tick('visblock')
             vis_file.write(vis_block)
+            t.tick('visfile')
             pipeline_sink.write(vis_block)
+            t.tick('pipeline')
+
+            if beamid == 0:
+                log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
             
             iblk += 1
 
@@ -1079,7 +1098,7 @@ def _main():
             proc_rx(pipe_info)
 
         log.info(f'Rank {rank}/{numprocs} complete. Waiting for everything')
-        raise StopError('Throwing a stop error so we can bring down the pipeline')
+        raise StopIteration('Throwing a stop error so we can bring down the pipeline')
         #comm.Barrier()
     except:
         log.exception('Exception running pipeline')

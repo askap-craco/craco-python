@@ -22,6 +22,32 @@ __author__ = '''Keith Bannister <keith.bannister@csiro.au>;
                 Yuanming Wang <yuanmingwang@swin.edu.au>'''
 
 
+
+str_dt_craco_save    =   np.dtype([('SNR', np.float64),\
+                              ('lpix', np.float64),\
+                              ('mpix', np.float64),\
+                              ('boxc_width', np.float64),\
+                              ('time', np.float64),\
+                              ('dm', np.float64),\
+                              ('iblk', np.float64),\
+                              ('rawsn', np.float64),\
+                              ('total_sample', np.float64),\
+                              ('obstime_sec', np.float64),\
+                              ('mjd', np.float64),\
+                              ('dm_pccm3', np.float64),\
+                              ('ra_deg', np.float64),\
+                              ('dec_deg', np.float64),\
+                               ('lpix_rms', np.float64),\
+                              ('mpix_rms', np.float64),\
+                              ('num_samps', np.float64),\
+                              ('centl', np.float64),\
+                              ('centm', np.float64),\
+                            ])
+
+labels_cluster  =    ['SNR',  'lpix', 'mpix', 'boxc_width',  'time', 'dm','iblk', 'rawsn', 'total_sample', 'obstime_sec', 'mjd', 'dm_pccm3', 'ra_deg' ,'dec_deg', 'cluster_id']
+
+idx_key         =   'SNR'
+
 def get_parser():
     '''
     Create and return an argparse.ArgumentParser with the arguments you need on the commandline
@@ -66,8 +92,6 @@ class Step(ProcessingStep):
         outd = self.classify(candidates)
 
         # apply command line argument for minimum S/N and only return those values
-        # outd = ind
-
         if self.pipeline.args.cluster_min_sn is not None:
             outd = outd[outd['SNR'] > self.pipeline.args.cluster_min_sn]
         
@@ -100,59 +124,37 @@ class Step(ProcessingStep):
     def dbscan(self, data):
 
         # rescale data
+        # => rescaled_data is numpy.ndarray; 
         rescaled_data, reference_eps_param = self.rescale_data(data, self.pipeline.config['eps'])
 
-        cls         =   DBSCAN(eps=reference_eps_param, 
-                               min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
+        cls = DBSCAN(eps=reference_eps_param, 
+                     min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
         
         # ======================
         # YM didn't test below 
         # ======================
-        cands_out   =   cls.labels_
+        cands_out   =   cls.labels_ # numpy.ndarray contains all clustering id
         unq_cands           =   np.unique(cands_out)
-        unq_cands_arr       =   np.zeros((len(unq_cands)), dtype=header.str_dt_craco_save)
+        unq_cands_arr       =   np.zeros((len(unq_cands)), dtype=str_dt_craco_save)
         lpix_rms            =   np.zeros((len(unq_cands)))
         mpix_rms            =   np.zeros((len(unq_cands)))
 
         for i in range(len(unq_cands)):
-            data_temp           =   self.data[np.where(cands_out==unq_cands[i])[0]][f'{idx_key}']
-            data_temp1          =   self.data[np.where(cands_out==unq_cands[i])[0]]
-            idx_val             =   np.argmax(data_temp)
+            data_temp           =   data.iloc[cands_out==unq_cands[i]][idx_key] # only SNR column
+            data_temp1          =   data.iloc[cands_out==unq_cands[i]] # all columns
+            idx_val             =   np.argmax(data_temp) # max SNR value
             for j in range(len(unq_cands_arr.dtype)-5):
-                unq_cands_arr[i][f'{unq_cands_arr.dtype.names[j]}']    =   data_temp1[np.argmax(data_temp)][f'{unq_cands_arr.dtype.names[j]}']#self.data[idx_val]
+                unq_cands_arr[i][unq_cands_arr.dtype.names[j]]    =   data_temp1[np.argmax(data_temp)][unq_cands_arr.dtype.names[j]]#self.data[idx_val]
             unq_cands_arr[i]['lpix_rms']         =   np.std(data_temp1['lpix'])
             unq_cands_arr[i]['mpix_rms']         =   np.std(data_temp1['mpix'])
             unq_cands_arr[i]['num_samps']        =   len(data_temp1)     
             unq_cands_arr[i]['centl']            =   np.mean(data_temp1['lpix'])
             unq_cands_arr[i]['centm']            =   np.mean(data_temp1['mpix'])
-        
-        logging.info(f'Shape_unq_cands - {len(unq_cands)} Shape_X - {self.X.shape}, Shape_cands_out - {cands_out.shape}')
-        logging.info(f'self.X - {self.X}')
-        #logging.info(len(self.X.T), len(cands_out))
-        logging.info(f'cands_out  - {cands_out}')
 
-        if(self.dump):
-            logging.info(f'Dumping max valued'
-                          f' {idx_key} values to {self.fil_out}')
-            np.savetxt(f'{self.fil_out}.dbscan', 
-                       unq_cands_arr, 
-                       fmt='%1.3f', 
-                       header=header.header_craco_save
-                       )
-        
-        if(self.dump_all):
-            save_obj    =   np.vstack((self.X, cands_out)).T
-            logging.info(f'save_obj - {save_obj.shape}, {cands_out.shape}')
-            logging.info(f'Dumping all values with keys')
-            np.savetxt(f'{self.fil_out}_dbscan.all', 
-                       save_obj, 
-                       fmt='%1.3f', 
-                       header=header.header
-                       )
-        
-
-        candidates = pd.DataFrame(unq_cands_arr)
-        clustered = pd.DataFrame(save_obj, columns=header.labels_cluster)
+        candidates = pd.DataFrame(unq_cands_arr) # unique candidates
+        # clustered = pd.DataFrame(save_obj, columns=labels_cluster) # should be all candidate
+        clustered = data.copy()
+        clustered["cluster_id"] = cands_out
        
         return candidates, clustered
     # =====================
@@ -198,21 +200,20 @@ class Step(ProcessingStep):
             
             if candidates['num_spatial'][ind] <=0 or candidates['num_spatial'][ind] > config['threshold']['num_spatial']:
                 continue
-            else:
-                for i in range(max(labels[ind])+1):
-                    data = clustered[clustered['cluster_id'] == ind][labels[ind] == i]
-                    # find highest SNR row
-                    cand_ind = data['SNR'].idxmax()
-                    candidates_new.loc[j] = data.loc[cand_ind]
-        #             self.candidates_new.loc[j, 'spatial_id'] = i
-                    candidates_new.loc[j, 'lpix_rms'] = np.std(data['lpix'])
-                    candidates_new.loc[j, 'mpix_rms'] = np.std(data['mpix'])
-                    candidates_new.loc[j, 'num_samps'] = len(data)
-                    candidates_new.loc[j, 'centl'] = np.mean(data['lpix'])
-                    candidates_new.loc[j, 'centm'] = np.mean(data['mpix'])
-                    candidates_new.loc[j, 'num_spatial'] = 0
-                    
-                    j += 1
+            
+            for i in range(max(labels[ind])+1):
+                data = clustered[clustered['cluster_id'] == ind][labels[ind] == i]
+                # find highest SNR row
+                cand_ind = data['SNR'].idxmax()
+                candidates_new.loc[j] = data.loc[cand_ind]
+                candidates_new.loc[j, 'lpix_rms'] = np.std(data['lpix'])
+                candidates_new.loc[j, 'mpix_rms'] = np.std(data['mpix'])
+                candidates_new.loc[j, 'num_samps'] = len(data)
+                candidates_new.loc[j, 'centl'] = np.mean(data['lpix'])
+                candidates_new.loc[j, 'centm'] = np.mean(data['mpix'])
+                candidates_new.loc[j, 'num_spatial'] = 0
+                
+                j += 1
 
         return candidates_new
 

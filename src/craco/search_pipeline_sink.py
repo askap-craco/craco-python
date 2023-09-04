@@ -14,6 +14,7 @@ import logging
 from craft.craco import ant2bl,get_max_uv
 from craft.craco_plan import PipelinePlan
 from craco.search_pipeline import PipelineWrapper
+from craco.timer import Timer
 from astropy import units as u
 import pyxrt
 import scipy
@@ -136,6 +137,7 @@ class SearchPipelineSink:
         self.info = info
         self.iblk = 0
         self.adapter = VisInfoAdapter(self.info, self.iblk)
+        self.last_write_timer = Timer()
 
         devid = info.xrt_device_id
         self.pipeline = None
@@ -170,6 +172,7 @@ class SearchPipelineSink:
         if self.pipeline is None:
             return
 
+        t = Timer()
         vis_data = vis_block.data
         
         # TODO: convert input beam data to whatever search_pipeline wants
@@ -207,6 +210,8 @@ class SearchPipelineSink:
 
         self.t += vis_nt
 
+        t.tick('Copy')
+
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
         # Don't do it if disabled with values.update_uv_blocks = 0
@@ -215,10 +220,13 @@ class SearchPipelineSink:
         if update_now:
             self.adapter = VisInfoAdapter(self.info, self.iblk)
             self.pipeline.update_plan(self.adapter)
+            
+        t.tick('Update plan')
 
         if self.t == output_nt:
             try:
                 self.pipeline.write(self.pipeline_data, self.cas_data, self.ics_data)
+                t.tick('Pipeline write')
                 self.t = 0
             except RuntimeError: # usuall XRT error
                 log.exception('Error sending data to pipeline. Disabling this pipeline')
@@ -226,6 +234,7 @@ class SearchPipelineSink:
                 self.pipeline = None
 
         self.iblk += 1
+        self.last_write_timer = t
             
         
     def close(self):
