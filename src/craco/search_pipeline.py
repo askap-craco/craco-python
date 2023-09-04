@@ -1098,7 +1098,7 @@ class PipelineWrapper:
             p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
             t.tick('dump boxcar')
 
-        logging.info('Write for iblk %d timer: %s', t)
+        logging.info('Write for iblk %d timer: %s', iblk, t)
 
         self.iblk += 1
 
