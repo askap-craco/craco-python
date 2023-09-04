@@ -19,34 +19,8 @@ log = logging.getLogger(__name__)
 
 __author__ = '''Keith Bannister <keith.bannister@csiro.au>; 
                 Pavan Uttarkar <pavan.uttarkar@gmail.com>; 
-                Yuanming Wang <yuanmingwang@swin.edu.au>'''
-
-
-
-str_dt_craco_save    =   np.dtype([('SNR', np.float64),\
-                              ('lpix', np.float64),\
-                              ('mpix', np.float64),\
-                              ('boxc_width', np.float64),\
-                              ('time', np.float64),\
-                              ('dm', np.float64),\
-                              ('iblk', np.float64),\
-                              ('rawsn', np.float64),\
-                              ('total_sample', np.float64),\
-                              ('obstime_sec', np.float64),\
-                              ('mjd', np.float64),\
-                              ('dm_pccm3', np.float64),\
-                              ('ra_deg', np.float64),\
-                              ('dec_deg', np.float64),\
-                               ('lpix_rms', np.float64),\
-                              ('mpix_rms', np.float64),\
-                              ('num_samps', np.float64),\
-                              ('centl', np.float64),\
-                              ('centm', np.float64),\
-                            ])
-
-labels_cluster  =    ['SNR',  'lpix', 'mpix', 'boxc_width',  'time', 'dm','iblk', 'rawsn', 'total_sample', 'obstime_sec', 'mjd', 'dm_pccm3', 'ra_deg' ,'dec_deg', 'cluster_id']
-
-idx_key         =   'SNR'
+                Yuanming Wang <yuanmingwang@swin.edu.au>
+                Ziteng Wang <ztwang201605@gmail.com>'''
 
 def get_parser():
     '''
@@ -123,6 +97,9 @@ class Step(ProcessingStep):
 
     def dbscan(self, data):
 
+        ### reset the index just in case...
+        data = data.reset_index(drop=True)
+
         # rescale data
         # => rescaled_data is numpy.ndarray; 
         rescaled_data, reference_eps_param = self.rescale_data(data, self.pipeline.config['eps'])
@@ -130,36 +107,19 @@ class Step(ProcessingStep):
         cls = DBSCAN(eps=reference_eps_param, 
                      min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
         
-        # ======================
-        # YM didn't test below 
-        # ======================
-        cands_out   =   cls.labels_ # numpy.ndarray contains all clustering id
-        unq_cands           =   np.unique(cands_out)
-        unq_cands_arr       =   np.zeros((len(unq_cands)), dtype=str_dt_craco_save)
-        lpix_rms            =   np.zeros((len(unq_cands)))
-        mpix_rms            =   np.zeros((len(unq_cands)))
+        # data is the original dataframe
+        data["cluster_id"] = cls.labels_
 
-        for i in range(len(unq_cands)):
-            data_temp           =   data.iloc[cands_out==unq_cands[i]][idx_key] # only SNR column
-            data_temp1          =   data.iloc[cands_out==unq_cands[i]] # all columns
-            idx_val             =   np.argmax(data_temp) # max SNR value
-            for j in range(len(unq_cands_arr.dtype)-5):
-                unq_cands_arr[i][unq_cands_arr.dtype.names[j]]    =   data_temp1[np.argmax(data_temp)][unq_cands_arr.dtype.names[j]]#self.data[idx_val]
-            unq_cands_arr[i]['lpix_rms']         =   np.std(data_temp1['lpix'])
-            unq_cands_arr[i]['mpix_rms']         =   np.std(data_temp1['mpix'])
-            unq_cands_arr[i]['num_samps']        =   len(data_temp1)     
-            unq_cands_arr[i]['centl']            =   np.mean(data_temp1['lpix'])
-            unq_cands_arr[i]['centm']            =   np.mean(data_temp1['mpix'])
+        cand_group = data.groupby("cluster_id")
 
-        candidates = pd.DataFrame(unq_cands_arr) # unique candidates
-        # clustered = pd.DataFrame(save_obj, columns=labels_cluster) # should be all candidate
-        clustered = data.copy()
-        clustered["cluster_id"] = cands_out
-       
-        return candidates, clustered
-    # =====================
-    # YM didn't test above 
-    # =====================
+        unique_cand = data.loc[cand_group["SNR"].idxmax()]
+        unique_cand["lpix_rms"] = cand_group["lpix"].std().to_numpy()
+        unique_cand["mpix_rms"] = cand_group["mpix"].std().to_numpy()
+        unique_cand["centl"] = cand_group["lpix"].mean().to_numpy()
+        unique_cand["centm"] = cand_group["mpix"].mean().to_numpy()
+        unique_cand["num_samps"] = cand_group.size().to_numpy()
+
+        return unique_cand, data
 
 
     def spatial_clustering(self, candidates, clustered):
