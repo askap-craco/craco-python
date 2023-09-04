@@ -89,9 +89,6 @@ class Pipeline:
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
         for istep, step in enumerate(self.steps):
-            if istep == 0:
-                print('Skip', step)
-                continue
             cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
             log.debug('Step "%s" produced %d candidates', stepname, len(cand_out))
