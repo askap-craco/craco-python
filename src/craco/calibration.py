@@ -345,11 +345,11 @@ def open_flag_file(fin):
     for irange, (f_low, f_high) in enumerate(freq_ranges):
         assert f_low < f_high, f'Invalid freq range={f_low}-{f_high}'
 
-    if f_low < FMIN:
-        warnings.warn(f'Freq range {irange} f_low={f_low} less than askap band at {FMIN} MHz')
+        if f_low < FMIN:
+            warnings.warn(f'Freq range {irange} f_low={f_low} less than askap band at {FMIN} MHz')
 
-    if f_high > FMAX:
-        warnings.warn(f'Freq range {irange} f_high={f_high} larger than than askap band at {FMAX} MHz')
+        if f_high > FMAX:
+            warnings.warn(f'Freq range {irange} f_high={f_high} larger than than askap band at {FMAX} MHz')
         
     return freq_ranges
 
