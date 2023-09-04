@@ -8,7 +8,7 @@ def main(args):
     f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend)
     print("Instantiating the Dedisp class")
     if args.dm_samps is None:
-        ddp = Dedisp(f.uvsource.freqs, f.uvsource.tsamp.value, dm_pccc = args.dm_pccc)
+        ddp = Dedisp(f.uvsource.channel_frequencies, f.uvsource.tsamp.value, dm_pccc = args.dm_pccc)
     else:
         ddp = Dedisp(f.uvsource.channel_frequencies, f.uvsource.tsamp.value, dm_samps = args.dm_samps)
 
@@ -19,7 +19,7 @@ def main(args):
     print("Swapping the original data with de-dispersed data")
     f.swap_with_data(ddpout)
     print("Saving the data as a uvfits file")
-    f.save(args.uvpath.replace(".uvfits", f"ddp_dm{args.dm_samps}.t{f.start_samp}_{f.end_samp}.uvfits"), True)
+    f.save(args.uvpath.replace(".uvfits", "ddp_dm{dm}.t{ss}_{es}.uvfits".format(dm=args.dm_samps, ss = f.start_samp, es = f.end_samp)), True)
 
 def get_parser():
     a = argparse.ArgumentParser()
