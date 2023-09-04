@@ -304,6 +304,56 @@ class CalibrationSolution:
         self.gains.mask[:,chanrange,:] = flagval
         return self.__calc_solarray()
 
+    def flag_frequency_ranges(self, freq_ranges, flagval:bool):
+        '''
+        Flag the frequency ranges
+        freq_ranges is list of tuples (f_low, f_high) in MHz
+        Ors the flag with the current flag values
+        '''
+        freqs = self.plan.freqs/1e6 # scale to MHz
+        foff = self.plan.foff/1e6 # scale to MHz
+        total_mask = np.zeros(len(freqs), dtype=bool)
+                
+        for irange, (f_low, f_high) in enumerate(freq_ranges):
+            assert f_low < f_high, f'Invalid freq range={f_low}-{f_high}'
+            chan_mask = (freqs >= f_low - foff/2) & (freqs <= f_high - foff/2)
+            nmask = sum(chan_mask)
+            log.debug('Freq range %d %0.1f-%0.1f masks %d channels', irange, f_low, f_high, nmask)
+            total_mask |= chan_mask
+
+
+        log.info('Flagged %d/%d channels from %d frequency ranges', sum(total_mask), len(freqs), len(freq_ranges))
+        self.gains.mask[:, total_mask, :] |= flagval
+        return self.__calc_solarray()
+
+    def flag_frequencies_from_file(self, fname:str, flagval:bool):
+        '''
+        Flag freqecy ranges from given file name
+        '''
+        freq_ranges = open_flag_file(fname)
+        return self.flag_frequency_ranges(freq_ranges, flagval)
+
+
+def open_flag_file(fin):
+    '''
+    Parse a flag frequency file
+    '''
+    freq_ranges = np.loadtxt(fin)
+    FMIN = 700
+    FMAX = 1800
+    assert freq_ranges.shape[1] == 2, f'flag file {fin} must have only 2 columns. Shape={freq_ranges.shape}'
+    for irange, (f_low, f_high) in enumerate(freq_ranges):
+        assert f_low < f_high, f'Invalid freq range={f_low}-{f_high}'
+
+    if f_low < FMIN:
+        warnings.warn(f'Freq range {irange} f_low={f_low} less than askap band at {FMIN} MHz')
+
+    if f_high > FMAX:
+        warnings.warn(f'Freq range {irange} f_high={f_high} larger than than askap band at {FMAX} MHz')
+        
+    return freq_ranges
+
+
 def open_calibration_file(calpath, beamid):
     '''
     Try to load calibraiton gains, if not, try to load them in a pathgiven by the beamid instead

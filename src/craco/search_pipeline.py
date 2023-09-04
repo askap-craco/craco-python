@@ -437,6 +437,13 @@ class Pipeline:
         sets the channel flags. this is done by updating the calibraiton solution
         '''
         return self.cal_solution.set_channel_flags(chanrange, flagval)
+
+    def flag_frequencies_from_file(self, flag_frequency_file:str, flagval:bool):
+        '''
+        Updates channel flags by loading file and oring in new flags
+        '''
+        return self.cal_solution.flag_frequencies_from_file(flag_frequency_file, flagval)
+
     
     def copy_mainbuf(p):
         '''
@@ -870,6 +877,7 @@ def get_parser():
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
+    parser.add_argument('--flag-frequency-file', help='Flag channels based on frequency ranges in this file in MHz. One range per line')
     parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
@@ -989,6 +997,10 @@ class PipelineWrapper:
         if values.flag_chans:
             log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
             p.set_channel_flags(values.flag_chans, True)
+
+        if values.flag_frequency_file:
+            log.info('Flagging channels from file %s', values.flag_frequency_file)
+            p.flag_frequencies_from_file(values.flag_frequency_file, True)
             
         self.pipeline = p
         p.clear_buffers(values)
