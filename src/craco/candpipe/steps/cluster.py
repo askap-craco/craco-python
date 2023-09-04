@@ -92,8 +92,6 @@ class Step(ProcessingStep):
         outd = self.classify(candidates)
 
         # apply command line argument for minimum S/N and only return those values
-        # outd = ind
-
         if self.pipeline.args.cluster_min_sn is not None:
             outd = outd[outd['SNR'] > self.pipeline.args.cluster_min_sn]
         
@@ -129,8 +127,8 @@ class Step(ProcessingStep):
         # => rescaled_data is numpy.ndarray; 
         rescaled_data, reference_eps_param = self.rescale_data(data, self.pipeline.config['eps'])
 
-        cls         =   DBSCAN(eps=reference_eps_param, 
-                               min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
+        cls = DBSCAN(eps=reference_eps_param, 
+                     min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
         
         # ======================
         # YM didn't test below 
@@ -202,21 +200,20 @@ class Step(ProcessingStep):
             
             if candidates['num_spatial'][ind] <=0 or candidates['num_spatial'][ind] > config['threshold']['num_spatial']:
                 continue
-            else:
-                for i in range(max(labels[ind])+1):
-                    data = clustered[clustered['cluster_id'] == ind][labels[ind] == i]
-                    # find highest SNR row
-                    cand_ind = data['SNR'].idxmax()
-                    candidates_new.loc[j] = data.loc[cand_ind]
-        #             self.candidates_new.loc[j, 'spatial_id'] = i
-                    candidates_new.loc[j, 'lpix_rms'] = np.std(data['lpix'])
-                    candidates_new.loc[j, 'mpix_rms'] = np.std(data['mpix'])
-                    candidates_new.loc[j, 'num_samps'] = len(data)
-                    candidates_new.loc[j, 'centl'] = np.mean(data['lpix'])
-                    candidates_new.loc[j, 'centm'] = np.mean(data['mpix'])
-                    candidates_new.loc[j, 'num_spatial'] = 0
-                    
-                    j += 1
+            
+            for i in range(max(labels[ind])+1):
+                data = clustered[clustered['cluster_id'] == ind][labels[ind] == i]
+                # find highest SNR row
+                cand_ind = data['SNR'].idxmax()
+                candidates_new.loc[j] = data.loc[cand_ind]
+                candidates_new.loc[j, 'lpix_rms'] = np.std(data['lpix'])
+                candidates_new.loc[j, 'mpix_rms'] = np.std(data['mpix'])
+                candidates_new.loc[j, 'num_samps'] = len(data)
+                candidates_new.loc[j, 'centl'] = np.mean(data['lpix'])
+                candidates_new.loc[j, 'centm'] = np.mean(data['mpix'])
+                candidates_new.loc[j, 'num_spatial'] = 0
+                
+                j += 1
 
         return candidates_new
 
