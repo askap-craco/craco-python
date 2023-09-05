@@ -19,18 +19,18 @@ threshold:
   mpix_rms: 2
   num_samps: 2 # number of samples for each cluster - one metric for RFI classification
   num_spatial: 2 # number of spatially coherent clusteres in each space/time clusters
-  max_snr: 10 # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric 
+  max_snr: 20 # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric 
 
 
 filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius 
 
 # location for pulsar/RACS catalogue csv
-catpath: ['/fred/oz002/zwang/craco/catalogues/atnf_psrcat_localized.csv', 
-          '/fred/oz002/zwang/craco/catalogues/racs_bright_1.0Jy.csv']
+catpath: ['/data/fast/wan342/dash-craco-cand-dep/data/atnf_psrcat_localized.csv', 
+          '/data/fast/wan342/dash-craco-cand-dep/data/racs_bright_1.0Jy.csv']
 catcols: 
   ra: ['RAJD', 'RA']
   dec: ['DECJD', 'Dec']
   input_colname: ['PSRJ', 'Gaussian_ID']
   output_prefix: ['PSR', 'RACS']
 
-threshold_crossmatch: [30, 30] # in unit of arcsec 
+threshold_crossmatch: [120, 120] # in unit of arcsec 

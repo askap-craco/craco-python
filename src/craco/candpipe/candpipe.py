@@ -67,7 +67,7 @@ class Pipeline:
         self.steps = [
             steps.cluster.Step(self),
             # steps.time_space_filter.Step(self),
-            # steps.catalog_cross_match.Step(self),
+            steps.catalog_cross_match.Step(self),
             # steps.check_filterbanks.Step(self),
             # steps.check_visibilities.Step(self),
         ]

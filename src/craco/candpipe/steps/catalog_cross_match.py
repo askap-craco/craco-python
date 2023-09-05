@@ -12,10 +12,12 @@ import numpy as np
 import os
 import sys
 import logging
-<<<<<<< HEAD
-=======
+
+# <<<<<<< HEAD
+# =======
 # from psrqpy import QueryATNF
->>>>>>> d655d8fa553b1dc470934b768c74d102012ab559
+# >>>>>>> d655d8fa553b1dc470934b768c74d102012ab559
+
 from astropy import wcs
 from astropy.io import fits
 from craco.candpipe.candpipe import ProcessingStep
@@ -150,7 +152,6 @@ class Step(ProcessingStep):
         #add column to candidate list and save as a new file
         colname = col_prefix + '_name'
         sepname = col_prefix + '_sep'
-        new_columns = {colname:[], sepname:[]}
 
         if len(catalogue) == 0:
             new_df = pd.DataFrame(new_columns)
@@ -158,17 +159,24 @@ class Step(ProcessingStep):
             return result_df
 
         cand_radec = SkyCoord(ra=candidates['ra_deg'], dec=candidates['dec_deg'], unit=(units.degree, units.degree), frame='icrs')
+
+        print(cand_radec)
+
         idx, sep2d, sep3d = cand_radec.match_to_catalog_sky(coord)
         combined = [[idx, sep2d.arcsec] if sep2d<threshold else[None, None] for idx, sep2d in zip(idx, sep2d)]
 
+        colname_list = []
+        sepname_list = []
+
         for index, pair in enumerate(combined):
             pulsar_name, pulsar_distance = pair
-            new_columns[colname].append(catalogue[key].iloc[pulsar_name] if pulsar_name is not None else None)
-            new_columns[sepname].append(pulsar_distance)
-        new_df = pd.DataFrame(new_columns)
-        result_df = pd.concat([candidates, new_df],axis=1)
+            colname_list.append(catalogue[key].iloc[pulsar_name] if pulsar_name is not None else None)
+            sepname_list.append(pulsar_distance)
+
+        candidates[colname] = colname_list
+        candidates[sepname] = sepname_list
         
-        return result_df
+        return candidates
 
 
     def close(self):
