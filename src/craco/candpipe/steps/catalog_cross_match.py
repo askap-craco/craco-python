@@ -12,7 +12,6 @@ import numpy as np
 import os
 import sys
 import logging
-from psrqpy import QueryATNF
 from astropy import wcs
 from astropy.io import fits
 from craco.candpipe.candpipe import ProcessingStep

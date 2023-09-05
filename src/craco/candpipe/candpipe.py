@@ -64,11 +64,13 @@ class Pipeline:
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
         self.config = config
 
-        self.steps = [steps.cluster.Step(self),
-                      steps.time_space_filter.Step(self),
-                      steps.catalog_cross_match.Step(self),
-                      steps.check_filterbanks.Step(self),
-                      steps.check_visibilities.Step(self)]
+        self.steps = [
+            steps.cluster.Step(self),
+            # steps.time_space_filter.Step(self),
+            # steps.catalog_cross_match.Step(self),
+            # steps.check_filterbanks.Step(self),
+            # steps.check_visibilities.Step(self),
+        ]
         
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,

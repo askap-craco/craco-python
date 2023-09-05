@@ -134,7 +134,7 @@ class Step(ProcessingStep):
         labels = []
 
         for i in range(len(candidates)):
-            if candidates['lpix_rms'][i] > config['threshold']['lpix_rms'] and candidates['mpix_rms'][i] > config['threshold']['mpix_rms'] :
+            if candidates['lpix_rms'].iloc[i] > config['threshold']['lpix_rms'] and candidates['mpix_rms'].iloc[i] > config['threshold']['mpix_rms'] :
                 data = clustered[clustered['cluster_id'] == i]
                 rescaled_data, reference_eps_param = self.rescale_data(data, config['eps2'])
                 cls = DBSCAN(eps=reference_eps_param, min_samples=config['min_samples']).fit(rescaled_data)  
@@ -158,7 +158,7 @@ class Step(ProcessingStep):
 
         for ind in range(len(candidates)):
             
-            if candidates['num_spatial'][ind] <=0 or candidates['num_spatial'][ind] > config['threshold']['num_spatial']:
+            if candidates['num_spatial'].iloc[ind] <=0 or candidates['num_spatial'].iloc[ind] > config['threshold']['num_spatial']:
                 continue
             
             for i in range(max(labels[ind])+1):
