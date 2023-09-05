@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from npy_append_array import NpyAppendArray as npa
+import gzip
 
 DM_CONSTANT = 4.15
 
@@ -21,7 +22,7 @@ def location2pix(location, npix=256):
 
 location2pix = np.vectorize(location2pix)
 
-class CandsHandler:
+class CandidateWriter:
     raw_dtype = np.dtype([('snr', '<i2'), ('loc_2dfft', '<u2'), ('boxc_width', 'u1'), ('time', 'u1'), ('dm', '<u2')])
     raw_dtype_formats = ['g', 'g', 'g', 'g', 'g']
 
@@ -61,15 +62,14 @@ class CandsHandler:
             '+.5f'  #dec_deg
         ]
 
-    def __init__(self, outname, outtype='txt', overwrite = True, delimiter = "\t"):
+    def __init__(self, outname, overwrite = True, delimiter = "\t"):
         '''
         Initialises the object, opens file handler and writes the header (if appropriate)
 
         outname: str
-                Path to the output file
-        outtype: str
-                Output type - 'bin' for binary file (npy file)
-                            - 'txt' for human-readable file (txt file)
+                Path to the output file. If it ends in '.npy' it will make a binary file
+                Otherwise '.txt' for human readable
+        
         overwrite: bool
                 overwrite an existing file or not
         delimiter: str
@@ -79,6 +79,14 @@ class CandsHandler:
         '''
         self.outname = outname
         self.overwrite = overwrite
+        outtype = outname.split('.')[-1].lower()
+        assert outtype in ('gz', 'txt','npy'), f'Invalid output type {outtype} for {outname}'
+        self.gzip = False
+        if outtype == 'gz':
+            outtype = 'txt'
+            assert self.outname.endswith('.txt.gz'), f'Invalid output file type {outname}'
+            self.gzip = True
+        
         self.outtype = outtype
         self.delimiter = delimiter
         self.make_string_formatter()
@@ -101,16 +109,19 @@ class CandsHandler:
                 raise IOError(f"File {self.outname} exists, and overwrite = False")
         
         if self.outtype.lower() == 'txt':
-            self.fout = open(self.outname, 'w')
-        elif self.outtype.lower() == 'bin':
+            if self.gzip:
+                self.fout = gzip.open(self.outname, 'wt')
+            else:
+                self.fout = open(self.outname, 'w')
+        elif self.outtype.lower() == 'npy':
             self.fout = npa(self.outname)
         else:
-            raise ValueError(f"Unknown outtype specified: {self.outtype}, expected - ['txt', 'bin']")
+            raise ValueError(f"Unknown outtype specified: {self.outtype}, expected - ['txt', 'npy']")
         
         self._write_header()
 
     def _write_header(self):
-        if self.outtype == 'bin':
+        if self.outtype == 'npy':
             #npa will write the appropriate header when it sees the first block
             pass
         else:
@@ -120,6 +131,11 @@ class CandsHandler:
     def interpret_cands(self, rawcands, iblk, plan, first_tstart, raw_noise_level):
         ncands = len(rawcands)
         candidates = np.zeros(ncands, self.out_dtype)
+
+        # don't bother computing everything it if it's empty
+        # also location2pix fails as you cant verctorize on size 0 inputs
+        if ncands == 0:
+            return candidates
 
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
@@ -139,14 +155,37 @@ class CandsHandler:
         return candidates
     
     def write_cands(self, candidates):
-        if self.outtype == 'bin':
+        if self.outtype == 'npy':
             self.fout.append(candidates)
         elif self.outtype == 'txt':
             for candrow in candidates:
                 self.fout.write(self.string_formatter.format(*candrow))
+
+            self.fout.flush()
         else:
             raise Exception("VG has messed up somewhere! Kill him!")
+
+    def interpret_and_write_candidates(self, rawcands, iblk, plan, first_tstart, raw_noise_level):
+        c = self.interpret_cands(rawcands, iblk, plan, first_tstart, raw_noise_level)
+        self.write_cands(c)
+        return c
+
+    def write_log(self, logline):
+        '''
+        Write a log entry
+        Only supports 'txt' output type
+        '''
+        if self.outtype == 'txt':
+            self.fout.write(logline.strip() + '\n')
 
     def dump_raw_cands(self, raw_cands, iblk):
         outname = f"raw_candidates_{iblk}.npy"
         np.save(outname, raw_cands)
+
+
+    def close(self):
+        if self.fout is not None:
+            self.fout.close()
+            self.fout = None
+
+    __del__ = close

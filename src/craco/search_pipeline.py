@@ -22,6 +22,7 @@ from craco import calibration
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
+from craco.candidate_writer import CandidateWriter
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -1005,9 +1006,12 @@ class PipelineWrapper:
             
         self.pipeline = p
         p.clear_buffers(values)
-        candfile = os.path.join(values.outdir, values.cand_file+f'b{beamid:02d}')
-        candout = open(candfile, 'w')
-        candout.write(cand_str_wcs_header)
+
+        # make cand file name 'soemthing.b02.txt' and preserve the extension
+        cand_file_bits = values.cand_file.split('.')
+        cand_file_bits.insert(-1, f'b{beamid:02d}')
+        candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
+        candout = CandidateWriter(candfile)
         self.total_candidates = 0
         self.candout = candout
         self.iblk = 0
@@ -1032,7 +1036,6 @@ class PipelineWrapper:
         self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
-        candout = self.candout
         iblk = self.iblk
         values = self.values
         plan = self.plan
@@ -1075,10 +1078,7 @@ class PipelineWrapper:
 
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
-        for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
-        candout.flush()
-
+        self.candout.interpret_and_write_candidates(candidates, iblk, plan, p.first_tstart, p.last_bc_noise_level)
         t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1122,8 +1122,7 @@ class PipelineWrapper:
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
         logstr = f'# Run {cmdstr} finished on {now}\n'
-        candout.write(logstr)
-        candout.flush()    
+        candout.write_log(logstr)
         candout.close()
         logging.info('Wrote %s candidates to %s', self.total_candidates, values.cand_file)
         
