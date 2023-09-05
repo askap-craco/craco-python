@@ -33,5 +33,12 @@ grpcio
 dill
 iqrm
 
+
+# for candidate writer
+npy-append-array
+
+# for candidate pipeline
+sklearn
+
 # vivek's candidate plotter
 #candploter @ git+https://github.com/vivgastro/candplotter.git

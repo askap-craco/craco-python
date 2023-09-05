@@ -22,6 +22,7 @@ from craco import calibration
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
+from craco.candidate_writer import CandidateWriter
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -438,6 +439,13 @@ class Pipeline:
         sets the channel flags. this is done by updating the calibraiton solution
         '''
         return self.cal_solution.set_channel_flags(chanrange, flagval)
+
+    def flag_frequencies_from_file(self, flag_frequency_file:str, flagval:bool):
+        '''
+        Updates channel flags by loading file and oring in new flags
+        '''
+        return self.cal_solution.flag_frequencies_from_file(flag_frequency_file, flagval)
+
     
     def copy_mainbuf(p):
         '''
@@ -871,6 +879,7 @@ def get_parser():
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
+    parser.add_argument('--flag-frequency-file', help='Flag channels based on frequency ranges in this file in MHz. One range per line')
     parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
@@ -990,12 +999,19 @@ class PipelineWrapper:
         if values.flag_chans:
             log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
             p.set_channel_flags(values.flag_chans, True)
+
+        if values.flag_frequency_file:
+            log.info('Flagging channels from file %s', values.flag_frequency_file)
+            p.flag_frequencies_from_file(values.flag_frequency_file, True)
             
         self.pipeline = p
         p.clear_buffers(values)
-        candfile = os.path.join(values.outdir, values.cand_file+f'b{beamid:02d}')
-        candout = open(candfile, 'w')
-        candout.write(cand_str_wcs_header)
+
+        # make cand file name 'soemthing.b02.txt' and preserve the extension
+        cand_file_bits = values.cand_file.split('.')
+        cand_file_bits.insert(-1, f'b{beamid:02d}')
+        candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
+        candout = CandidateWriter(candfile)
         self.total_candidates = 0
         self.candout = candout
         self.iblk = 0
@@ -1020,7 +1036,6 @@ class PipelineWrapper:
         self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
-        candout = self.candout
         iblk = self.iblk
         values = self.values
         plan = self.plan
@@ -1063,10 +1078,7 @@ class PipelineWrapper:
 
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
-        for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
-        candout.flush()
-
+        self.candout.interpret_and_write_candidates(candidates, iblk, plan, p.first_tstart, p.last_bc_noise_level)
         t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1099,7 +1111,7 @@ class PipelineWrapper:
             p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
             t.tick('dump boxcar')
 
-        logging.info('Write for iblk %d timer: %s', t)
+        logging.info('Write for iblk %d timer: %s', iblk, t)
 
         self.iblk += 1
 
@@ -1110,8 +1122,7 @@ class PipelineWrapper:
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
         logstr = f'# Run {cmdstr} finished on {now}\n'
-        candout.write(logstr)
-        candout.flush()    
+        candout.write_log(logstr)
         candout.close()
         logging.info('Wrote %s candidates to %s', self.total_candidates, values.cand_file)
         

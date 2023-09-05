@@ -25,7 +25,7 @@ class Timestamp:
     @property
     def sleep(self):
         '''
-        Returns the amoutn of time spent sleeping'''
+        Returns the amount of time spent sleeping'''
         s = self.perf - self.process
         return s
 

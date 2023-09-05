@@ -416,7 +416,6 @@ class FpgaCapturer:
 
                 # average over the first 2 time axes always
                 dout['data'] = d['data'].mean(axis=(1,2), dtype=np.float32).astype(np.int16)[:, np.newaxis, :, :]
-                print('d', d.shape, d['data'].shape, 'dout', dout.shape, dout['data'].shape)
                 d = dout
 
 
