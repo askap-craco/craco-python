@@ -54,10 +54,11 @@ class VisFlagger:
     
     '''
 
-    def __init__(self, fradius, tradius, threshold, tblk=None):
+    def __init__(self, fradius, tradius, cas_threshold, ics_threshold, tblk=None):
         self.fradius = fradius
         self.tradius = tradius
-        self.threshold = threshold
+        self.cas_threshold = cas_threshold
+        self.ics_threshold = ics_threshold
         self.tblk = tblk
         self.total_tflag = 0
         self.total_fflag = 0
@@ -75,7 +76,7 @@ class VisFlagger:
         factor = nfcas // nf
 
 
-        ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.threshold)
+        ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.ics_threshold)
 
         # The input CAS is rescaled per channel, which makes it not so great at detecting RFI
         # Vivek claims it's much better to compute unrescaled CAS and use that
@@ -87,7 +88,7 @@ class VisFlagger:
             cas = abs(input_flat).mean(axis=0)
             factor = 1
             
-        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.threshold)
+        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
 
         fmask = ics_fmask | cas_fmask
         tmask = ics_tmask | cas_tmask

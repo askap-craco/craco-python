@@ -370,7 +370,11 @@ class Pipeline:
 
         self.subtractor = None
         values = plan.values
-        self.flagger = VisFlagger(values.dflag_fradius, values.dflag_tradius, values.dflag_threshold, values.dflag_tblk)
+        self.flagger = VisFlagger(values.dflag_fradius,
+                                  values.dflag_tradius,
+                                  values.dflag_cas_threshold,
+                                  values.dflag_ics_threshold,
+                                  values.dflag_tblk)
         self.first_tstart = plan.tstart
         self.update_plan(plan) 
 
@@ -880,9 +884,10 @@ def get_parser():
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     parser.add_argument('--flag-frequency-file', help='Flag channels based on frequency ranges in this file in MHz. One range per line')
-    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
+    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable frequency flagging', default=0, type=float)
+    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable time flagging', default=0, type=float)
+    parser.add_argument('--dflag-cas-threshold', help='Dynamic flagging threshold for CAS. >0 to enable CAS flagging', default=0, type=float)
+    parser.add_argument('--dflag-ics-threshold', help='Dynamic flagging threshold for ICS. >0 to enable ICS flagging', default=0, type=float)
     parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
