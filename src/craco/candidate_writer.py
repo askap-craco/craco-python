@@ -28,7 +28,7 @@ class CandidateWriter:
 
     out_dtype = np.dtype(
         [
-            ('snr', '<i4'),
+            ('snr', '<f4'),
             ('lpix', '<u1'),
             ('mpix', '<u1'),
             ('boxc_width', '<u1'),

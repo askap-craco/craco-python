@@ -41,8 +41,9 @@ class FakePlan:
 
 def write(writer, N=8192):
     d = np.ones(N, dtype=CandidateWriter.raw_dtype)
+    d['snr'] *= 5000
     plan = FakePlan()
-    raw_noise_level = 100
+    raw_noise_level = 100.237862348756234578
     icands = writer.interpret_cands(d, 1, plan, plan.first_tstart, raw_noise_level)
     writer.write_cands(icands)
     writer.close()
@@ -70,7 +71,6 @@ def test_write_text_n_0():
     print(header)
     assert header[0] == '#'
     write(writer,0)
-
 
 
 def _main():
