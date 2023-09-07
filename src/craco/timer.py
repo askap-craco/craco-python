@@ -14,8 +14,8 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class Timestamp:
     def __init__(self, perf, process):
-        self.perf = perf # does not include time spent in sleep
-        self.process = process # includes time spent in sleep
+        self.perf = perf # *does* include time spent in sleep
+        self.process = process # system+CPU time. Does *not* include time spent in sleep
 
     @staticmethod
     def now():

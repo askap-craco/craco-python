@@ -64,7 +64,7 @@ class VisFlagger:
         self.total_tfflag = 0
         self.total_blocks = 0
 
-    def flag_block(self, input_flat, cas, ics):
+    def flag_block(self, input_flat, cas, ics, use_local_cas=True):
 
         (nbl, nf, nt) = input_flat.shape
         assert cas.shape == ics.shape
@@ -74,7 +74,19 @@ class VisFlagger:
         assert nfcas >= nf
         factor = nfcas // nf
 
+
         ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.threshold)
+
+        # The input CAS is rescaled per channel, which makes it not so great at detecting RFI
+        # Vivek claims it's much better to compute unrescaled CAS and use that
+        # The easiest thing to do is do it here. Note; this isn't calibrated yet, so it's
+        # possibly a bit biased towards antennas with higher gains, but it appears not to hurt
+        # for the purposes of RFI mitigation
+
+        if use_local_cas:
+            cas = abs(input_flat).mean(axis=0)
+            factor = 1
+            
         cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.threshold)
 
         fmask = ics_fmask | cas_fmask

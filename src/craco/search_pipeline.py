@@ -883,7 +883,7 @@ def get_parser():
     parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
     parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-tblk', help='Dynamif flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
+    parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
