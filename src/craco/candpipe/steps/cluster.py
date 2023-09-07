@@ -53,9 +53,7 @@ class Step(ProcessingStep):
         '''
 
         log.debug('Got %d candidates type=%s, columns=%s', len(ind), type(ind), ind.columns)
-        #from IPython import embed
-        #embed()
-
+        
         # do first clustering - time/dm/boxcar
         candidates, clustered = self.dbscan(ind)
 
