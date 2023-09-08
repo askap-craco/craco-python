@@ -22,7 +22,7 @@ def my_iqrm_mask(x, radius, threshold):
     Compute iqrm mask if radius is valid > 0
     '''
     
-    if radius > 0:
+    if radius > 0 and threshold > 0:
         mask, _ = iqrm_mask(x, radius=radius, threshold=threshold)
     else:
         mask = np.zeros(len(x), dtype=bool)
