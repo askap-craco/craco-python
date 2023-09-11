@@ -7,12 +7,15 @@ from .pyxrtutil import *
 import time
 import pickle
 import copy
-
 from craft.cmdline import strrange
+
+import craft.craco_plan
+
 from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
+
 from craft.craco import printstats
 from craft import sigproc
 
@@ -835,8 +838,9 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
+    plan_parser = craft.craco_plan.get_parser()
+
+    parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
@@ -844,22 +848,7 @@ def get_parser():
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks to process')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
-    #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
-    parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
-    parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
-    #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
-    #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
-    #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
-    #parser.add_argument('-N', '--nuvmax',    action='store', type=int, help='Maximum number of UV allowed.')
-    #parser.add_argument('-C', '--ncin',      action='store', type=int, help='Numer of channels for sub fdmt')
-    #parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
-    
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed')
-    parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per synthesized beam')
-    
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
-    parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
     parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
@@ -907,7 +896,6 @@ def get_parser():
     parser.set_defaults(nuvwide   = 8)
     parser.set_defaults(nuvmax    = 8192)
     parser.set_defaults(ncin      = 32)
-    parser.set_defaults(ndout     = 186) # used to be 32
     parser.set_defaults(threshold = 10.0)
     parser.set_defaults(boxcar_weight = "sum")
     parser.set_defaults(fdmt_scale =1.0)
