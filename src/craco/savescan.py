@@ -37,6 +37,9 @@ def _main():
     parser.add_argument('--scan-minutes', type=float, help='Number of minutes to record for', default=15)
     parser.add_argument('--pol-sum', help='Sum pol mode', action='store_true', dest='pol_sum', default=True)
     parser.add_argument('--dual-pol', help='Dual pol mode', action='store_false', dest='pol_sum', default=False)
+    parser.add_argument('-a','--card', help='Cards to download', default='1-12')
+    parser.add_argument('--block', help='Blocks to download', default='5-7')
+    parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -90,13 +93,13 @@ def _main():
         tscrunch = ''
         spi = '--samples-per-integration 32'
 
-    card  = '-a 1-12'
-    block = '-b 5-7'
+    card  = f'-a {values.card}'
+    block = f'-b {values.block}'
     fpga = ''
     fpga_mask = ''
 
     # 30 cards is about the limit for cardcap
-    max_ncards = '--max-ncards 30'
+    max_ncards = f'--max-ncards {values.max_ncards}'
 
     if values.scan_minutes is not None:
         scan_nminutes = values.scan_minutes
