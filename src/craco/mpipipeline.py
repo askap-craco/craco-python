@@ -31,7 +31,7 @@ import glob
 import craft.sigproc as sigproc
 from craft.parset import Parset
 from craco.search_pipeline_sink import SearchPipelineSink
-from craco.metadatafile import MetadataFile
+from craco.metadatafile import MetadataFile,MetadataDummy
 from scipy import constants
 from collections import namedtuple
 from craft.craco import ant2bl
@@ -221,7 +221,7 @@ class MpiObsInfo:
             # TODO: implement calc11 and getting sources from .... elsewhere
             self.md = MetadataFile(values.metadata)
         else:
-            self.md = None
+            self.md = MetadataDummy()
 
         self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
         assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
@@ -759,7 +759,6 @@ class FilterbankSink:
 
 class UvFitsFileSink:
     def __init__(self, obs_info):
-        from craco.metadatafile import MetadataFile # Stupid seren doesn't have libopenblas on all nodes yet
         from craco.ccapfits2uvfits import get_antennas
         from craft.corruvfits import CorrUvFitsFile
         import scipy
@@ -768,8 +767,8 @@ class UvFitsFileSink:
         self.obs_info = obs_info
         self.blockno = 0
         values = obs_info.values
-        if values.fcm is None or values.metadata is None or beamno not in obs_info.values.save_uvfits_beams:
-            log.info('Not writing UVFITS file as as FCM=%s or Metadata=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm, values.metadata,
+        if values.fcm is None or beamno not in obs_info.values.save_uvfits_beams:
+            log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
                      beamno, obs_info.values.save_uvfits_beams)
             self.uvout = None
             return
@@ -824,7 +823,6 @@ class UvFitsFileSink:
 
         vis_data = vis_block.data
         info = self.obs_info
-        md = self.obs_info
         fid_start = vis_block.fid_start
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
         assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'

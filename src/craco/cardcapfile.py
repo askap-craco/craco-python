@@ -286,7 +286,7 @@ class CardcapFile:
         if self.npol == 2:
             nint = 1
         else:
-            if self.tscrunch_bug or self.ntoutpfm: # We'll scrunch them together
+            if self.tscrunch_bug: # We'll scrunch them together
                 nint = 1
             else:
                 nint = 2

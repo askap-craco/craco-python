@@ -92,6 +92,47 @@ def open_gz_or_plain(fname, mode='rt'):
 
     return fout
 
+class MetadataDummy:
+    '''
+    Dummy metadata object implemnets same interface as metadata file but isn't backed by a file. Just returns fixed values or nothing for UVWs
+    '''
+    def __init__(self, src_name='UNKNOWN', skycoord=None):
+        
+        self.nant = 36
+        self.nbeam = 36
+        if skycoord is None:
+            skycoord = SkyCoord(ra=0,dec=0,unit='deg',
+                                equinox='J2000',
+                                frame='icrs')
+        s = OrderedDict()
+        name = src_name
+        data = {'name':name}
+        data['ra'] = skycoord.ra.deg
+        data['dec'] = skycoord.dec.deg
+        data['epoch'] = 'J2000'
+        data['skycoord'] = skycoord
+        data['scan_times'] = []
+        s[name] = data
+        self.__source = data
+        self.__sources = s
+
+
+    def sources(self, beamid):
+        return self.__sources
+
+    def source_index_at_time(self, mjd):
+        return 0
+
+    def source_at_time(self, beamid, mjd):
+        return self.__source
+
+    def uvw_at_time(self, mjd):
+        return np.zeros((self.nant, self.nbeam, 3))
+
+    def flags_at_time(self, mjd):
+        return np.zeros(self.nant, dtype=bool)
+    
+
 class MetadataFile:
     def __init__(self, fname):
         self.fname = fname

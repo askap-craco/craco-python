@@ -199,8 +199,8 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     vis_nt = nt // vis_tscrunch
     vis_nc = nc // vis_fscrunch
 
-    assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
-    assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
+    assert nt % vis_tscrunch == 0, f'Tscrunch should divide into nt. nt={nt} tscrunch={vis_tscrunch}'
+    assert nc % vis_fscrunch == 0, f'Fscrunch should divide into nc. nc={nc} fscrunch={vis_fscrunch}'
     assert nbeam > 0
     assert nant > 0
     assert nc > 0
