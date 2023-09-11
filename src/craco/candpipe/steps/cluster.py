@@ -180,19 +180,17 @@ class Step(ProcessingStep):
     def classify(self, candidates_new):
 
         config = self.pipeline.config 
+        cand_fname = self.pipeline.cand_fname
 
         # RFI
         # number of samples 
         rfi_ind = ((candidates_new['num_samps'] <= config['threshold']['num_samps']) | (candidates_new['num_spatial'] > config['threshold']['num_spatial'])) & (candidates_new['SNR'] < config['threshold']['max_snr'])
         candidates_rfi = candidates_new[rfi_ind]
-
-        # # central ghost
-        # cet_ind = (self.candidates_new['lpix'] >= 127) & (self.candidates_new['lpix'] <= 128) & (self.candidates_new['mpix'] >= 127) & (self.candidates_new['mpix'] <= 128)
-        # self.candidates_cet = self.candidates_new[cet_ind]
+        candidates_rfi.to_csv(cand_fname + ".rfi.csv")
 
         # others | which is suppose to be candidates! 
         candidates_fin = candidates_new[(~rfi_ind)]
-        # self.candidates_fin = self.candidates_new[(~rfi_ind) & (~cet_ind)]
+
 
         return candidates_fin 
 
