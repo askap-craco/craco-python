@@ -126,9 +126,9 @@ class Step(ProcessingStep):
         sepname = col_prefix + '_sep'
 
         if len(catalogue) == 0:
-            new_df = pd.DataFrame(new_columns)
-            result_df = pd.concat([candidates, new_df],axis=1)
-            return result_df
+            candidates[colname] = [None] * len(candidates)
+            candidates[sepname] = [None] * len(candidates)
+            return candidates
 
         cand_radec = SkyCoord(ra=candidates['ra_deg'], dec=candidates['dec_deg'], unit=(units.degree, units.degree), frame='icrs')
 
