@@ -100,6 +100,7 @@ class CandidateWriter:
         self.string_formatter = string_formatter.strip() + "\n"         
 
     def open_files(self):
+        self.fout = None
         if os.path.exists(self.outname):
             if self.overwrite:
                 if not os.access(self.outname, os.W_OK):
@@ -140,6 +141,7 @@ class CandidateWriter:
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
         candidates['rawsn'] = rawcands['snr']
+        candidates['time'] = rawcands['time']
         candidates['snr'] = rawcands['snr'] * 1./raw_noise_level
         candidates['total_sample'] = iblk * plan.nt + rawcands['time']
         candidates['iblk'] = iblk
