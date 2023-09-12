@@ -142,6 +142,8 @@ class CandidateWriter:
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
         candidates['rawsn'] = rawcands['snr']
         candidates['time'] = rawcands['time']
+        candidates['dm'] = rawcands['dm']
+        candidates['boxc_width'] = rawcands['boxc_width']
         candidates['snr'] = rawcands['snr'] * 1./raw_noise_level
         candidates['total_sample'] = iblk * plan.nt + rawcands['time']
         candidates['iblk'] = iblk
