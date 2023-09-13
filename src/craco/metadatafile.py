@@ -112,7 +112,7 @@ class MetadataDummy:
         data['epoch'] = 'J2000'
         data['skycoord'] = skycoord
         data['scan_times'] = []
-        s[name] = data
+
         self.__source = data
         self.__sources = s
 
