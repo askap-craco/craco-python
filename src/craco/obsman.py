@@ -80,14 +80,17 @@ class Obsman:
 
         craco_enabled = caget('ak:enableCraco') == 1
 
-        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled}')
+        zoomval = caget('ak:S_zoom:val')
+        standard_zoom = zoomval == 0
+
+        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled} zoomval = {zoomval} zoom OK? = {standard_zoom}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
             pass
         elif new_scanid == self.curr_scanid: # avoid race condition
             pass
-        elif target_ok and craco_enabled: # new valid scan number with new scan ID
+        elif target_ok and craco_enabled and standard_zoom: # new valid scan number with new scan ID and valid zoom
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
             self.start_process(new_scanid)
         else:
