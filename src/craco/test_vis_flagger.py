@@ -12,6 +12,7 @@ import os
 import sys
 import logging
 from craco.vis_flagger import VisFlagger
+from sigpyproc.header import Header
 import pytest
 
 log = logging.getLogger(__name__)
@@ -23,6 +24,8 @@ nchan = 32
 nt = 64
 shape = [nbl, nchan, nt]
 np.random.seed(42)
+filheader = Header(filename="test.fil", data_type="filterbank", nchans=nchan, foff=1, fch1 = 700, nbits=1, tsamp=0.11, tstart=0, nsamples=-1)
+filwriter = filheader.prep_outfile(filheader.filename)
 
 
 def test_runs():
@@ -35,10 +38,12 @@ def test_runs():
     cas = np.random.randn(*casshape)
 
     flagger = VisFlagger(4,4,5, 5)
-    visout = flagger(vis, cas, ics)
+    visout = flagger(vis, cas, ics, filwriter)
 
     flagger = VisFlagger(4,0,5, 5)
-    visout = flagger(vis,cas, ics)
+    visout = flagger(vis,cas, ics, filwriter)
+
+    filwriter.close()
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
