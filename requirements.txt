@@ -45,4 +45,4 @@ sklearn
 
 # Sigpyproc
 # Needed to handle 1-bit filterbanks
-sigpyproc @ git+https://github.com/FRBs/sigpyproc3.git
+# sigpyproc @ git+https://github.com/FRBs/sigpyproc3.git

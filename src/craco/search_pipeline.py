@@ -28,7 +28,7 @@ from craco.vis_flagger import VisFlagger
 from craco.candidate_writer import CandidateWriter
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
-from sigpyproc.header import Header     #Needed to write RFI masks as 1-bit filterbanks
+#from sigpyproc.header import Header     #Needed to write RFI masks as 1-bit filterbanks
 
 from collections import OrderedDict
 
@@ -981,17 +981,18 @@ class PipelineWrapper:
             pcfile = os.path.join(values.outdir, values.phase_center_filterbank.replace('.fil',f'b{beamid:02d}.fil'))
             self.pc_filterbank = sigproc.SigprocFile(pcfile, 'wb', hdr)
 
-        mask_filterbank_name = f"RFI_tfmask.b{beamid:02d}.fil"
-        mask_filterbank_hdr = SPPHeader(filename=mask_filterbank_name, 
-                                         data_type="filterbank", 
-                                         nchans=plan.nf, 
-                                         foff=plan.foff/1e6, 
-                                         fch1 = plan.fmin/1e6, 
-                                         nbits=1, 
-                                         tsamp=plan.tsamp_s.value, 
-                                         tstart=plan.tstart.utc.mjd, 
-                                         nsamples = -1)
-        self.mask_fil_writer = mask_filterbank_hdr.prep_outfile(mask_filterbank_name)
+        #mask_filterbank_name = f"RFI_tfmask.b{beamid:02d}.fil"
+        #mask_filterbank_hdr = SPPHeader(filename=mask_filterbank_name, 
+        #                                 data_type="filterbank", 
+        #                                 nchans=plan.nf, 
+        #                                 foff=plan.foff/1e6, 
+        #                                 fch1 = plan.fmin/1e6, 
+        #                                 nbits=1, 
+        #                                 tsamp=plan.tsamp_s.value, 
+        #                                 tstart=plan.tstart.utc.mjd, 
+        #                                 nsamples = -1)
+        #self.mask_fil_writer = mask_filterbank_hdr.prep_outfile(mask_filterbank_name)
+        self.mask_fil_writer = None
 
 
         # Create a pipeline
