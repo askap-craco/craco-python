@@ -34,7 +34,7 @@ class ProcessingStep:
         Pipeline steps should call this function with the pipeline  and then do their own
         initialisaation. e.g. opening and checking input files, etc
         '''
-        self.pipeline = pipeline # keep a references to theparent pipeline
+        self.pipeline = pipeline # keep a references to the parent pipeline
 
 
     def __call__(self, context, ind):
@@ -86,21 +86,38 @@ class Pipeline:
             log.warning('Expected input file doesnt exist %s', full_path)
 
         return full_path
+
+
+    def create_dir(self):
+        outdir = self.args.outdir
+        if not os.path.exists(outdir):
+            os.mkdir(outdir)
+            log.debug('Create new directory %s', outdir)
+        else:
+            log.debug('Directory %s exists.', outdir)
+
     
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
+        self.create_dir()
+
         for istep, step in enumerate(self.steps):
             cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
             log.debug('Step "%s" produced %d candidates', stepname, len(cand_out))
             if self.args.save_intermediate:
                 fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
+                fout = os.path.join(self.args.outdir, fout)
                 log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
                 cand_out.to_csv(fout)
 
             cand_in = cand_out
 
+        log.info('Produced %s candidates in total', len(cand_out))
+        fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
+        log.info('Saving final candidates to %s', fout)
+        cand_out.to_csv(fout)
 
         for step in self.steps:
             step.close()
@@ -123,6 +140,7 @@ def _main():
     parser = ArgumentParser(description='Run the candidate pipeline', formatter_class=ArgumentDefaultsHelpFormatter, parents=parents)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-s','--save-intermediate', action='store_true', help='Save intermediate data tables')
+    parser.add_argument('-o', '--outdir', type=str, default='.', help='output directory')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     
