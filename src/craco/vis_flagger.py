@@ -101,10 +101,10 @@ class VisFlagger:
 
         input_flat.mask |= tfmask[np.newaxis, :, :]
 
-        return input_flat, tfmask
+        return input_flat
         
         
-    def __call__(self, input_flat, cas, ics, mask_fil_writer = None):
+    def __call__(self, input_flat, cas, ics):
         '''
         Updates input flat mask shape (nbl, nf, nt)
         Expects cas, ics as (nf, nt) and ors the mask together
@@ -130,9 +130,7 @@ class VisFlagger:
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
-            input_flat, tfmask = self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
-            #if mask_fil_writer is not None:
-            #    mask_fil_writer.cwrite(tfmask.T.ravel().astype(mask_fil_writer.bitsinfo.dtype, casting='unsafe'))
+            self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
 
 
         tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag

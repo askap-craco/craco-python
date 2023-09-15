@@ -42,7 +42,3 @@ sklearn
 
 # vivek's candidate plotter
 #candploter @ git+https://github.com/vivgastro/candplotter.git
-
-# Sigpyproc
-# Needed to handle 1-bit filterbanks
-# sigpyproc @ git+https://github.com/FRBs/sigpyproc3.git

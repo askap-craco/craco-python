@@ -28,7 +28,6 @@ from craco.vis_flagger import VisFlagger
 from craco.candidate_writer import CandidateWriter
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
-#from sigpyproc.header import Header     #Needed to write RFI masks as 1-bit filterbanks
 
 from collections import OrderedDict
 
@@ -699,11 +698,11 @@ class Pipeline:
         return input_flat
 
 
-    def flag_input(self, input_flat, cas, ics, mask_fil_writer=None):
+    def flag_input(self, input_flat, cas, ics):
         '''
         Update input flagging mask based on running CAS and ICS and IQRM standard deviation
         '''
-        return self.flagger(input_flat, cas, ics, mask_fil_writer)
+        return self.flagger(input_flat, cas, ics)
 
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
@@ -981,19 +980,6 @@ class PipelineWrapper:
             pcfile = os.path.join(values.outdir, values.phase_center_filterbank.replace('.fil',f'b{beamid:02d}.fil'))
             self.pc_filterbank = sigproc.SigprocFile(pcfile, 'wb', hdr)
 
-        #mask_filterbank_name = f"RFI_tfmask.b{beamid:02d}.fil"
-        #mask_filterbank_hdr = SPPHeader(filename=mask_filterbank_name, 
-        #                                 data_type="filterbank", 
-        #                                 nchans=plan.nf, 
-        #                                 foff=plan.foff/1e6, 
-        #                                 fch1 = plan.fmin/1e6, 
-        #                                 nbits=1, 
-        #                                 tsamp=plan.tsamp_s.value, 
-        #                                 tstart=plan.tstart.utc.mjd, 
-        #                                 nsamples = -1)
-        #self.mask_fil_writer = mask_filterbank_hdr.prep_outfile(mask_filterbank_name)
-        self.mask_fil_writer = None
-
 
         # Create a pipeline
         alloc_device_only = values.dump_mainbufs is not None or \
@@ -1043,14 +1029,13 @@ class PipelineWrapper:
         self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
-        mask_fil_writer = self.mask_fil_writer
         iblk = self.iblk
         values = self.values
         plan = self.plan
 
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
 
-        input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer)
+        input_flat = p.flag_input(input_flat, cas, ics)
         t.tick('flag')
         
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
@@ -1126,7 +1111,6 @@ class PipelineWrapper:
     def close(self):
         candout = self.candout
         pc_filterbank = self.pc_filterbank
-        mask_fil_writer = self.mask_fil_writer
         values = self.values
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
@@ -1137,9 +1121,6 @@ class PipelineWrapper:
         
         if pc_filterbank is not None:
             pc_filterbank.fin.close()
-
-        if mask_fil_writer is not None:
-            mask_fil_writer.close()
         
 def _main():
     parser = get_parser()
