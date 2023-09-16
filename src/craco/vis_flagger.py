@@ -101,14 +101,15 @@ class VisFlagger:
 
         input_flat.mask |= tfmask[np.newaxis, :, :]
 
-        return input_flat
+        return input_flat, tfmask
         
         
-    def __call__(self, input_flat, cas, ics):
+    def __call__(self, input_flat, cas, ics, mask_fil_writer = None):
         '''
         Updates input flat mask shape (nbl, nf, nt)
         Expects cas, ics as (nf, nt) and ors the mask together
         Computes in blocks of self.tblk to capture shorter RFI
+        Writes the computed tfmask to a craft.sigproc.SigprocFile obj
         '''
 
         if cas is None or ics is None:
@@ -130,8 +131,9 @@ class VisFlagger:
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
-            self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
-
+            input_flat, tfmask = self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
+            if mask_fil_writer is not None:
+                np.packbits(tfmask.T.ravel()).tofile(mask_fil_writer.fin)
 
         tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag
         tflagd = tflag1 - tflag0
