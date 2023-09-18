@@ -104,7 +104,6 @@ class MetadataDummy:
             skycoord = SkyCoord(ra=0,dec=0,unit='deg',
                                 equinox='J2000',
                                 frame='icrs')
-        s = OrderedDict()
         name = src_name
         data = {'name':name}
         data['ra'] = skycoord.ra.deg
@@ -114,6 +113,8 @@ class MetadataDummy:
         data['scan_times'] = []
 
         self.__source = data
+        s = OrderedDict()
+        s[name] = data
         self.__sources = s
 
 

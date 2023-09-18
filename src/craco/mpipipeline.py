@@ -231,7 +231,10 @@ class MpiObsInfo:
         Returns an ordered dict
         '''
         assert self.md is not None, 'Requested source list but not metadata specified'
-        return self.md.sources(self.beamid)
+        srcs =  self.md.sources(self.beamid)
+        assert len(srcs) > 0
+
+        return srcs
 
     def source_index_at_time(self, mjd:Time):
         '''
@@ -560,7 +563,7 @@ class ByteTransposer:
     def all2all(self, dtx):
         nmsgs = self.nmsgs
         t = Timer()
-        comm.Barrier()
+        #comm.Barrier() # Barrier can take a super long time and slow everything to a halt. dont do it
         t.tick('barrier')
 
         for imsg in range(nmsgs):
@@ -672,25 +675,42 @@ def proc_rx(pipe_info):
     t_start = MPI.Wtime()
 
     for ibuf, (packets, fids) in enumerate(pktiter):
+        expected_fid = info.fid_of_block(ibuf) 
+
         now = MPI.Wtime()
         read_time = now - t_start
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
-        averaged = averager.accumulate_packets(packets)
+        test_mode = info.values.test_mode
+
+        if test_mode != 'none': # check frame IDs are sensible
+            for pkt, fid in zip(packets, fids):
+                pktfid = None if pkt is None else pkt['frame_id'][0,0]
+                assert pkt is None or pktfid == fid, f'FID did not match for ibuf {ibuf}. Expected {fid} but got {pktfid}'
+                assert pkt is None or pktfid == expected_fid, f'FID did not match expected. Expected {expected_fid} but got {pktfid}'
+
+        if test_mode == 'none':
+            averaged = averager.accumulate_packets(packets)
+        elif test_mode == 'fid':
+            fidnos = np.array([0 if pkt is None else fid for pkt, fid in zip(packets, fids)])
+            averaged['ics'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
+            averaged['cas'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
+            averaged['vis'] = fidnos[0]
+        elif test_mode == 'cardid':
+            averaged['ics'].flat = cardidx #np.arange(averaged['ics'].size)
+            averaged['cas'].flat = np.arange(averaged['cas'].size)
+            averaged['vis'].flat = np.arange(averaged['vis'].size)
+        else:
+            raise ValueError(f'Invalid test mode {test_mode}')
+
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
-        expected_fid = info.fid_of_block(ibuf) 
 
         best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
         if avg_time*1e3 > 110:
             log.warning('Averaging time for cardidx=%s ibuf=%s was too long: %s ms best=%s', cardidx,ibuf, avg_time*1e3, best_avg_time*1e3)
             
-        test_mode = False
-        if test_mode:
-            averaged['ics'].flat = cardidx #np.arange(averaged['ics'].size)
-            averaged['cas'].flat = np.arange(averaged['cas'].size)
-            averaged['vis'].flat = np.arange(averaged['vis'].size)
 
         transposer.send(averaged)
         transpose_end = MPI.Wtime()
@@ -998,7 +1018,7 @@ def dump_rankfile(pipe_info, fpga_per_rx=3):
         assert hostidx < len(hosts), f'Invalid hostidx beam={beam} hostidx={hostidx} lenhosts={len(hosts)}'
         host = hosts[hostidx]
         slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
-        core='1-2'
+        core='0-9'
         devices = host_cards[host]
         this_host_search_beams = host_search_beams.get(host,[])
         host_search_beams[host] = this_host_search_beams
@@ -1069,6 +1089,7 @@ def _main():
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
     parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
     parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
+    parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
     
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
