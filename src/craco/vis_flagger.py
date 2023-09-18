@@ -70,7 +70,7 @@ class VisFlagger:
         (nbl, nf, nt) = input_flat.shape
         assert cas.shape == ics.shape
         nfcas, nt2 = cas.shape
-        assert nt == nt2
+        assert nt == nt2, f"input_flat ({nt}) and cas ({nt2}) don't have the same nt"
 
         assert nfcas >= nf
         factor = nfcas // nf

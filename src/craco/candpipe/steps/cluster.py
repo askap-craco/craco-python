@@ -30,6 +30,7 @@ def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='cluster arguments', formatter_class=ArgumentDefaultsHelpFormatter, add_help=False)
     parser.add_argument('--cluster-min-sn', type=float, help='Minimum S/N of cluster output', default=None)
+    parser.add_argument('--save-rfi', action='store_true', help='Save removed rfi into a file')
     return parser
 
 
@@ -183,14 +184,16 @@ class Step(ProcessingStep):
         cand_fname = self.pipeline.cand_fname
 
         # RFI
-        # number of samples 
         rfi_ind = ((candidates_new['num_samps'] <= config['threshold']['num_samps']) | (candidates_new['num_spatial'] > config['threshold']['num_spatial'])) & (candidates_new['SNR'] < config['threshold']['max_snr'])
-        candidates_rfi = candidates_new[rfi_ind]
-        candidates_rfi.to_csv(cand_fname + ".rfi.csv")
+        log.debug("Found %d rfi signals", sum(rfi_ind))
+
+        if self.pipeline.args.save_rfi:
+            candidates_rfi = candidates_new[rfi_ind]
+            log.info('Saving selected rfi to file %s.rfi.csv', cand_fname)
+            candidates_rfi.to_csv(cand_fname + ".rfi.csv")
 
         # others | which is suppose to be candidates! 
         candidates_fin = candidates_new[(~rfi_ind)]
-
 
         return candidates_fin 
 

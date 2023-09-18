@@ -738,7 +738,6 @@ class Candidate:
         ### initiate the dedisperser
         self.dedisperser = preprocess.Dedisp(
             freqs=self.freqs, tsamp=self.tsamp,
-            baseline_order = self.plan.baseline_order, 
             dm_pccc=self.search_output["dm_pccm3"]
         )
 
