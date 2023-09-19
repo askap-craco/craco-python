@@ -22,7 +22,7 @@ def my_iqrm_mask(x, radius, threshold):
     Compute iqrm mask if radius is valid > 0
     '''
     
-    if radius > 0:
+    if radius > 0 and threshold > 0:
         mask, _ = iqrm_mask(x, radius=radius, threshold=threshold)
     else:
         mask = np.zeros(len(x), dtype=bool)
@@ -54,28 +54,41 @@ class VisFlagger:
     
     '''
 
-    def __init__(self, fradius, tradius, threshold, tblk=None):
+    def __init__(self, fradius, tradius, cas_threshold, ics_threshold, tblk=None):
         self.fradius = fradius
         self.tradius = tradius
-        self.threshold = threshold
+        self.cas_threshold = cas_threshold
+        self.ics_threshold = ics_threshold
         self.tblk = tblk
         self.total_tflag = 0
         self.total_fflag = 0
         self.total_tfflag = 0
         self.total_blocks = 0
 
-    def flag_block(self, input_flat, cas, ics):
+    def flag_block(self, input_flat, cas, ics, use_local_cas=True):
 
         (nbl, nf, nt) = input_flat.shape
         assert cas.shape == ics.shape
         nfcas, nt2 = cas.shape
-        assert nt == nt2
+        assert nt == nt2, f"input_flat ({nt}) and cas ({nt2}) don't have the same nt"
 
         assert nfcas >= nf
         factor = nfcas // nf
 
-        ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.threshold)
-        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.threshold)
+
+        ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.ics_threshold)
+
+        # The input CAS is rescaled per channel, which makes it not so great at detecting RFI
+        # Vivek claims it's much better to compute unrescaled CAS and use that
+        # The easiest thing to do is do it here. Note; this isn't calibrated yet, so it's
+        # possibly a bit biased towards antennas with higher gains, but it appears not to hurt
+        # for the purposes of RFI mitigation
+
+        if use_local_cas:
+            cas = abs(input_flat).mean(axis=0)
+            factor = 1
+            
+        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
 
         fmask = ics_fmask | cas_fmask
         tmask = ics_tmask | cas_tmask

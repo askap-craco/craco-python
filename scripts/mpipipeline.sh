@@ -44,7 +44,7 @@ fi
 
 
 
-ifaces=eno1
+ifaces=enp175s0
 # use OB1 and TCP
 tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0 --mca orte_base_help_aggregate 0"
 
@@ -59,7 +59,7 @@ echo "UCX_NET_DEVICES=$UCX_NET_DEVICES UCX_TLS=$UCX_TLS"
 
 # TODO: MPI can abort explosively if you like by doing `which python` -m mpi4py before `which pipeline`
 # but I hve trouble with pyton versions 
-cmd="mpirun $commonargs $tcpargs -rf $rankfile `which python` -m mpi4py `which mpipipeline` --mpi $extra_args $@"
+cmd="mpirun $commonargs $ucxargs -rf $rankfile `which python` -m mpi4py `which mpipipeline` --mpi $extra_args $@"
 echo $cmd
 $cmd
 

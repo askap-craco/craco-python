@@ -67,9 +67,11 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
     rs_chan_stats = rescale_stats[ibeam, ichan, ...]
     rs_chan_scales = rescale_scales[ibeam, ichan, ...]
     nt = nsamp*nsamp2
+
     for samp in range(nsamp):
         bd = beam_data[samp]['data']
         for samp2 in range(nsamp2):
+            # continue here works for real time
             t = samp2 + nsamp2*samp
             agg_count = t + count + 1
             ochan = ichan // vis_fscrunch
@@ -85,6 +87,8 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                 #print('CAVG', ibeam, ichan, samp, samp2, ibl, a1, a2, ants_ok, vis_bl, output_bl, bd.shape, vis.shape)
                 if ants_ok:
                     for pol in range(npol):
+                        # continue here means we can't do real time
+                        # I tested it twice and you really cant.
                         v = bd[samp2, ibl, pol, :]
                         v_real = np.float32(v[0]) # have to add np.float32 here when not using number, othewise we get nan in the sqrt
                         v_imag= np.float32(v[1])
@@ -149,7 +153,6 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
     dshape = beam_data[0].shape
     assert len(dshape) == 2 # expected (nmsgs, npkt_per_accum)
     nmsgs = dshape[0]
-    npkt_per_accum = dshape[1]
     nt = output[0]['cas'].shape[0] # assume this is the same as ICS
 
     # Set visibility output to valid valid only if all FPGAS for this card are valid
@@ -160,9 +163,13 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
         vis_valid = True
     else:
         vis_valid  = np.all(valid)
+
         
     for beam in prange(nbeam):
         for fpga in range(nfpga):
+            # continue here lets us still run in real time
+            #continue
+            
             # TODO: Work out what should do if some data isn't valid.
             # do we Just not add it, do we note it somewhere in some arrays ... what should we do?
             isvalid = valid[fpga]
@@ -199,8 +206,8 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     vis_nt = nt // vis_tscrunch
     vis_nc = nc // vis_fscrunch
 
-    assert nt % vis_tscrunch == 0, 'Tscrunch should divide into nt'
-    assert nc % vis_fscrunch == 0, 'Fscrunch should divide into nc'
+    assert nt % vis_tscrunch == 0, f'Tscrunch should divide into nt. nt={nt} tscrunch={vis_tscrunch}'
+    assert nc % vis_fscrunch == 0, f'Fscrunch should divide into nc. nc={nc} fscrunch={vis_fscrunch}'
     assert nbeam > 0
     assert nant > 0
     assert nc > 0
@@ -341,7 +348,12 @@ class Averager:
         [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
         log.debug('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
         for idata, d in enumerate(data):
+            if d.ndim == 1:
+                d.shape = (d.shape[0], 1)
+            
             assert d.shape == self.dummy_packet.shape, f'Invalid shape for packet[{idata}] expected={self.dummy_packet.shape} but got {d.shape}'
+
+            #log.info('Idata %d dhsape=%s', idata, d.shape)
             
         self.reset()
         return self.accumulate_all(data, valid)
@@ -352,7 +364,7 @@ class Averager:
         Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
         :param: beam_data is numba List with the expected data
         '''
-        
+    
         accumulate_all(self.output,
                        self.rescale_scales,
                        self.rescale_stats,

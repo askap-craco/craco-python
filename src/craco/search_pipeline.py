@@ -7,12 +7,15 @@ from .pyxrtutil import *
 import time
 import pickle
 import copy
-
 from craft.cmdline import strrange
+
+import craft.craco_plan
+
 from craft.craco_plan import PipelinePlan
 from craft.craco_plan import FdmtPlan
 from craft.craco_plan import FdmtRun
 from craft.craco_plan import load_plan
+
 from craft.craco import printstats
 from craft import sigproc
 
@@ -22,6 +25,7 @@ from craco import calibration
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
+from craco.candidate_writer import CandidateWriter
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -371,7 +375,11 @@ class Pipeline:
 
         self.subtractor = None
         values = plan.values
-        self.flagger = VisFlagger(values.dflag_fradius, values.dflag_tradius, values.dflag_threshold, values.dflag_tblk)
+        self.flagger = VisFlagger(values.dflag_fradius,
+                                  values.dflag_tradius,
+                                  values.dflag_cas_threshold,
+                                  values.dflag_ics_threshold,
+                                  values.dflag_tblk)
         self.first_tstart = plan.tstart
         self.update_plan(plan) 
 
@@ -440,6 +448,13 @@ class Pipeline:
         sets the channel flags. this is done by updating the calibraiton solution
         '''
         return self.cal_solution.set_channel_flags(chanrange, flagval)
+
+    def flag_frequencies_from_file(self, flag_frequency_file:str, flagval:bool):
+        '''
+        Updates channel flags by loading file and oring in new flags
+        '''
+        return self.cal_solution.flag_frequencies_from_file(flag_frequency_file, flagval)
+
     
     def copy_mainbuf(p):
         '''
@@ -825,8 +840,9 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose',   action='store_true', help='Be verbose')
+    plan_parser = craft.craco_plan.get_parser()
+
+    parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
@@ -834,22 +850,7 @@ def get_parser():
     
     parser.add_argument('-b', '--nblocks',   action='store', type=int, help='Number of blocks to process')
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
-    #parser.add_argument('-n', '--npix',      action='store', type=int, help='Number of pixels in image')
-    parser.add_argument('-c', '--cell',      action='store', type=int, help='Image cell size (arcsec). Overrides --os')
-    parser.add_argument('-m', '--ndm',       action='store', type=int, help='Number of DM trials')
-    parser.add_argument('--max-ndm', help='Maximum number of DM trials. MUST AGREE WITH FIRMWARE - DO NOT CHANGE UNLESS YOU KNW WHAT YOUR DOING', type=int, default=1024)
-    #parser.add_argument('-t', '--nt',        action='store', type=int, help='Number of times per block')
-    #parser.add_argument('-B', '--nbox',      action='store', type=int, help='Number of boxcar trials')
-    #xparser.add_argument('-U', '--nuvwide',   action='store', type=int, help='Number of UV processed in parallel')
-    #parser.add_argument('-N', '--nuvmax',    action='store', type=int, help='Maximum number of UV allowed.')
-    #parser.add_argument('-C', '--ncin',      action='store', type=int, help='Numer of channels for sub fdmt')
-    #parser.add_argument('-D', '--ndout',     action='store', type=int, help='Number of DM for sub fdmt')
-    
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed')
-    parser.add_argument('-o', '--os',        action='store', type=str, help='Number of pixels per synthesized beam')
-    
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
-    parser.add_argument('-u', '--uv',        action='store', type=str, help='Load antenna UVW coordinates from this UV file')
     parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
@@ -873,10 +874,12 @@ def get_parser():
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
-    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-threshold', help='Dynamic flagging threshold. >0 to enable flagging', default=0, type=float)
-    parser.add_argument('--dflag-tblk', help='Dynamif flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
+    parser.add_argument('--flag-frequency-file', help='Flag channels based on frequency ranges in this file in MHz. One range per line')
+    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable frequency flagging', default=0, type=float)
+    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable time flagging', default=0, type=float)
+    parser.add_argument('--dflag-cas-threshold', help='Dynamic flagging threshold for CAS. >0 to enable CAS flagging', default=0, type=float)
+    parser.add_argument('--dflag-ics-threshold', help='Dynamic flagging threshold for ICS. >0 to enable ICS flagging', default=0, type=float)
+    parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
 
@@ -895,7 +898,6 @@ def get_parser():
     parser.set_defaults(nuvwide   = 8)
     parser.set_defaults(nuvmax    = 8192)
     parser.set_defaults(ncin      = 32)
-    parser.set_defaults(ndout     = 186) # used to be 32
     parser.set_defaults(threshold = 10.0)
     parser.set_defaults(boxcar_weight = "sum")
     parser.set_defaults(fdmt_scale =1.0)
@@ -992,12 +994,19 @@ class PipelineWrapper:
         if values.flag_chans:
             log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
             p.set_channel_flags(values.flag_chans, True)
+
+        if values.flag_frequency_file:
+            log.info('Flagging channels from file %s', values.flag_frequency_file)
+            p.flag_frequencies_from_file(values.flag_frequency_file, True)
             
         self.pipeline = p
         p.clear_buffers(values)
-        candfile = os.path.join(values.outdir, values.cand_file+f'b{beamid:02d}')
-        candout = open(candfile, 'w')
-        candout.write(cand_str_wcs_header)
+
+        # make cand file name 'soemthing.b02.txt' and preserve the extension
+        cand_file_bits = values.cand_file.split('.')
+        cand_file_bits.insert(-1, f'b{beamid:02d}')
+        candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
+        candout = CandidateWriter(candfile)
         self.total_candidates = 0
         self.candout = candout
         self.iblk = 0
@@ -1022,7 +1031,6 @@ class PipelineWrapper:
         self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
-        candout = self.candout
         iblk = self.iblk
         values = self.values
         plan = self.plan
@@ -1065,10 +1073,7 @@ class PipelineWrapper:
 
         log.info('Got %d candidates in block %d', len(candidates), iblk)
         self.total_candidates += len(candidates)
-        for c in candidates:
-            candout.write(cand2str_wcs(c, iblk, plan, p.first_tstart,  p.last_bc_noise_level)+'\n')
-        candout.flush()
-
+        self.candout.interpret_and_write_candidates(candidates, iblk, plan, p.first_tstart, p.last_bc_noise_level)
         t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1101,7 +1106,7 @@ class PipelineWrapper:
             p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
             t.tick('dump boxcar')
 
-        logging.info('Write for iblk %d timer: %s', t)
+        logging.info('Write for iblk %d timer: %s', iblk, t)
 
         self.iblk += 1
 
@@ -1112,8 +1117,7 @@ class PipelineWrapper:
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
         logstr = f'# Run {cmdstr} finished on {now}\n'
-        candout.write(logstr)
-        candout.flush()    
+        candout.write_log(logstr)
         candout.close()
         logging.info('Wrote %s candidates to %s', self.total_candidates, values.cand_file)
         
