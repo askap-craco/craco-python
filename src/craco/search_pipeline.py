@@ -336,7 +336,9 @@ class Pipeline:
         sub_mainbuf_shape[0] = (self.plan.nuvrest + num_mainbufs - 1) // num_mainbufs
         log.info(f'Mainbuf shape is {mainbuf_shape} breaking into {num_mainbufs} buffers of {sub_mainbuf_shape}')
         # Allocate buffers in sub buffers - this works around an XRT bug that doesn't let you allocate a large buffer
+        # every time you allocate a buffer it stacks the address on top of the previous buffer
         self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
+            
 
         log.info('Allocating boxcar_history')    
 

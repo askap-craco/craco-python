@@ -19,7 +19,7 @@ class Buffer:
         self.itemsize = itemsize
         self.size = self.nbytes
         
-        print(f'Allocated {nbytes} bytes flags={flags} groupid={group_id} address={self.buf.address():#x}')
+        log.info(f'Allocated {nbytes} bytes flags={flags} groupid={group_id} address={self.buf.address():#x}')
         # make numpy view from mappying the buffer. Doesn't use anymore memory
         # Any writes to teh np array go directly to the host pointer allocated above
         if flags == pyxrt.bo.flags.device_only:
