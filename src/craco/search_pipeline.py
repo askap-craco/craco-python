@@ -513,6 +513,8 @@ class Pipeline:
         # scale threshold by target RMS and signal/noise scale
         signal_scale, noise_scale = self.calculate_processing_gain(fft_shift1, fft_shift2)
         threshold = values.threshold
+        assert threshold >= 0, f'Invalid threshold:{threshold}'
+
         img_noiselevel = self.plan.values.target_input_rms*noise_scale
         bc_noiselevel = img_noiselevel / 4 # for some reason BOXCAR values are 4x smaller than image values - check with Xinping
         bc_threshold = threshold*bc_noiselevel
@@ -841,6 +843,8 @@ def get_parser():
     plan_parser = craft.craco_plan.get_parser()
 
     parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
+
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=8)
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
@@ -896,7 +900,6 @@ def get_parser():
     parser.set_defaults(nuvwide   = 8)
     parser.set_defaults(nuvmax    = 8192)
     parser.set_defaults(ncin      = 32)
-    parser.set_defaults(threshold = 10.0)
     parser.set_defaults(boxcar_weight = "sum")
     parser.set_defaults(fdmt_scale =1.0)
     parser.set_defaults(fft_scale  =10.0)
