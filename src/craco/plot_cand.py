@@ -42,40 +42,17 @@ def load_cands(fname, maxcount=None, fmt='numpy'):
     if fmt=='pandas' returns pandas dataframe
     '''
 
+    c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
     if fmt == 'numpy':
-        c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
         if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
             c.shape = (1,)
             
     elif fmt == 'pandas':
-        c = load_cands_pandas(fname, maxcount)
+        c = pd.DataFrame(c)
     else:
         raise ValueError(f'Unknown format {fmt}')
     
     return c
-
-def load_cands_pandas(fname, maxcount=None):
-    '''
-    Loads candidate file as pandas dadtaframe
-    '''
-    colnames = ['SNR',
-                 'lpix',
-                'mpix',
-                 'boxc_width',
-                'blank','time',
-                 'dm',
-                 'iblk',
-                'rawsn',
-                'total_sample',
-                'obstime_sec',
-                'mjd',
-                'dm_pccm3',
-                'ra_deg',
-                'dec_deg']
-    df = pd.read_csv(fname, delimiter='\t', comment='#',names=colnames, nrows=maxcount)
-    # delete blank column which is there because of piece of junk writer - yeah KB tidy it up kids
-    df = df.drop('blank', axis=1)
-    return df
 
 CandInputFile = namedtuple("CandInputFile", 'filename candidates')
 CandfileArtist = namedtuple("CandfileArtist", 'candfile artist')
