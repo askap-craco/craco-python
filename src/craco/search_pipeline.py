@@ -1144,12 +1144,17 @@ def _main():
     if values.wait:
         input('Press any key to continue...')
 
+    t = Timer()
     for iblk, input_flat in enumerate(vis_source):
+        t.tick('read')
         if values.nblocks is not None and iblk >= values.nblocks:
             log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
 
         pipeline_wrapper.write(input_flat)
+        t.tick('written')
+        log.info("Read for loop %s", t)
+        t = Timer()
 
     f.close()
     pipeline_wrapper.close()
