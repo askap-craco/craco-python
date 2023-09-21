@@ -56,7 +56,8 @@ class Pipeline:
     def __init__(self, candfile, args, config):
         self.args = args
         self.cand_fname= candfile
-        self.beamno = int(candfile.replace('candidates.txtb',''))
+        # self.beamno = int(candfile.replace('candidates.txtb',''))
+        self.beamno = int(candfile[candfile.find('b')+1 : candfile.find('b') + 3])
         self.srcdir = os.path.dirname(self.cand_fname)
         self.uvfits_fname = self.get_file( f'b{self.beamno:02d}.uvfits')
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
