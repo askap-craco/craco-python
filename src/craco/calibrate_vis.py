@@ -16,8 +16,8 @@ def main(args):
     print("Running the calibrate function")
     caldata = calibrator.apply_calibration(craco.bl2array(data))
     print("Swapping the original data with calibrated data")
-    if caldata.dtype != np.complex64 and args.force_dtype:
-        caldata = caldata.astype(np.complex64, casting='unsafe')
+    #if caldata.dtype != np.complex64 and args.force_dtype:
+    #    caldata = caldata.astype(np.complex64, casting='unsafe')
     f.swap_with_data(caldata)
     print("Saving the data as a uvfits file")
     if args.outname is not None:
