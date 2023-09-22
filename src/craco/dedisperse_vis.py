@@ -32,8 +32,8 @@ def main(args):
 def get_parser():
     a = argparse.ArgumentParser()
     a.add_argument("uvpath", type=str, help="Path to the uvfits file to read from")
-    a.add_argument("-tstart", type=int, help="Start sample (inclusive)", required = True)
-    a.add_argument("-tend", type=int, help="End sample (inclusive)", required = True)
+    a.add_argument("-tstart", type=int, help="Start sample (inclusive), def:0", default=0)
+    a.add_argument("-tend", type=int, help="End sample (inclusive), say -1 for end of file, (def:-1)", default=-1)
     a.add_argument("-outname", type=int, help="Name of the output vis", default = None)
     g = a.add_mutually_exclusive_group(required = True)
     g.add_argument("-dm_samps", type=int, help="DM in sample units to de-disperse to", default=None)
