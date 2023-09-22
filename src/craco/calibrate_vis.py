@@ -7,7 +7,7 @@ def main(args):
     print("Instantiating the UvfitsSnippet")
     f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend)
     print("Instantiating the Calibration class")
-    plan = craco_plan.PipelinePlan(f.uvsource, "--threshold 6")
+    plan = craco_plan.PipelinePlan(f.uvsource)
     calibrator = Calibrate(plan = plan, block_dtype=np.ndarray, 
             miriad_gains_file = args.cal,
             baseline_order = plan.baseline_order)
