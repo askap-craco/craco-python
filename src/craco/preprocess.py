@@ -134,7 +134,7 @@ class Calibrate:
         self.plan.values.calibration = self.gains_file
         calsoln_obj = calibration.CalibrationSolution(plan = self.plan)
         self.gains_array = calsoln_obj.solarray.copy()
-        self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
+        self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True).astype(self.gains_array.dtype)
         if type(self.gains_array) == np.ma.core.MaskedArray:
             self.sol_isMasked = True
         else:
