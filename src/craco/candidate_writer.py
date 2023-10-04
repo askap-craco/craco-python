@@ -38,7 +38,7 @@ class CandidateWriter:
             ('rawsn', '<i2'),
             ('total_sample', '<u4'),    #Saturates after 50 days
             ('obstime_sec', '<f4'),     #Saturates after 25 days
-            ('mjd', '<f4'),
+            ('mjd', '<f8'),
             ('dm_pccm3', '<f4'),
             ('ra_deg', '<f4'),
             ('dec_deg', 'f4')
