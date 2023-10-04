@@ -57,10 +57,12 @@ def normalise(block, target_input_rms = 1):
             #print(f"====>> The shape of received block[ibl] for ibl{ibl} is {block[ibl].shape}")
             existing_rms = bldata.std(axis=-1) / np.sqrt(2)
             new_block[ibl] = (bldata - np.mean(bldata, axis=-1, keepdims=True)) * (target_input_rms / existing_rms)[..., None]
+            new_block[ibl] = new_block[ibl].astype(bldata.dtype)
             #print(f"====>> The shape of normalised block[ibl] for ibl{ibl} is {block[ibl].shape}")
     elif type(block) == np.ndarray or type(block) == np.ma.core.MaskedArray:
         existing_rms = block.std(axis=-1) / np.sqrt(2)   
         new_block = (block - np.mean(block, axis=-1, keepdims = True)) * (target_input_rms / existing_rms)[..., None]
+        new_block = new_block.astype(block.dtype)
 
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
@@ -134,7 +136,7 @@ class Calibrate:
         self.plan.values.calibration = self.gains_file
         calsoln_obj = calibration.CalibrationSolution(plan = self.plan)
         self.gains_array = calsoln_obj.solarray.copy()
-        self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True)
+        self.gains_pol_avged_array = self.gains_array.mean(axis=-2, keepdims=True).astype(self.gains_array.dtype)
         if type(self.gains_array) == np.ma.core.MaskedArray:
             self.sol_isMasked = True
         else:

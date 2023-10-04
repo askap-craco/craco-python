@@ -181,7 +181,7 @@ class Step(ProcessingStep):
     def classify(self, candidates_new):
 
         config = self.pipeline.config 
-        cand_fname = self.pipeline.cand_fname
+        cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
 
         # RFI
         rfi_ind = ((candidates_new['num_samps'] <= config['threshold']['num_samps']) | (candidates_new['num_spatial'] > config['threshold']['num_spatial'])) & (candidates_new['SNR'] < config['threshold']['max_snr'])
