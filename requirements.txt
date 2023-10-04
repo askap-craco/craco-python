@@ -38,7 +38,7 @@ iqrm
 npy-append-array
 
 # for candidate pipeline
-sklearn
+scikit-learn
 
 # vivek's candidate plotter
 #candploter @ git+https://github.com/vivgastro/candplotter.git
