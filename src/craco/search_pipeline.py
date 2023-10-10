@@ -700,11 +700,11 @@ class Pipeline:
         return input_flat
 
 
-    def flag_input(self, input_flat, cas, ics):
+    def flag_input(self, input_flat, cas, ics, mask_fil_writer):
         '''
         Update input flagging mask based on running CAS and ICS and IQRM standard deviation
         '''
-        return self.flagger(input_flat, cas, ics)
+        return self.flagger(input_flat, cas, ics, mask_fil_writer)
 
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
@@ -983,6 +983,10 @@ class PipelineWrapper:
             pcfile = os.path.join(values.outdir, values.phase_center_filterbank.replace('.fil',f'b{beamid:02d}.fil'))
             self.pc_filterbank = sigproc.SigprocFile(pcfile, 'wb', hdr)
 
+        mask_fil_hdr = hdr.copy()
+        mask_fil_hdr['nbits'] = 1
+        mask_fil_fname = os.path.join(values.outdir, f"RFI_tfmask.b{beamid:02d}.fil")
+        self.mask_fil_writer = sigproc.SigprocFile(mask_fil_fname, 'wb', mask_fil_hdr)
 
         # Create a pipeline
         alloc_device_only = values.dump_mainbufs is not None or \
@@ -1032,13 +1036,14 @@ class PipelineWrapper:
         self.last_write_timer = t
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
+        mask_fil_writer = self.mask_fil_writer
         iblk = self.iblk
         values = self.values
         plan = self.plan
 
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
 
-        input_flat = p.flag_input(input_flat, cas, ics)
+        input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer)
         t.tick('flag')
         
         input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
@@ -1114,6 +1119,7 @@ class PipelineWrapper:
     def close(self):
         candout = self.candout
         pc_filterbank = self.pc_filterbank
+        mask_fil_writer = self.mask_fil_writer
         values = self.values
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
@@ -1124,6 +1130,9 @@ class PipelineWrapper:
         
         if pc_filterbank is not None:
             pc_filterbank.fin.close()
+
+        if mask_fil_writer is not None:
+            mask_fil_writer.fin.close()
         
 def _main():
     parser = get_parser()
