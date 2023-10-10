@@ -65,9 +65,9 @@ def frame_id_iter(i, fid0):
 
         if curr_frameid == frame_id:
             b = currblock
-            log.debug(f'HIT frame_id={frame_id} hit {curr_bat}')
+            log.debug('HIT frame_id=%d bat=', frame_id, curr_bat)
         else:
-            log.debug(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat}')
+            log.info(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat} fid0={fid0}')
             b = None
 
         if curr_frameid >= fid0:

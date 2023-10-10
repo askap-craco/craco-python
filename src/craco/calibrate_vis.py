@@ -7,7 +7,7 @@ def main(args):
     print("Instantiating the UvfitsSnippet")
     f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend)
     print("Instantiating the Calibration class")
-    plan = craco_plan.PipelinePlan(f.uvsource, "--threshold 6")
+    plan = craco_plan.PipelinePlan(f.uvsource, " ")
     calibrator = Calibrate(plan = plan, block_dtype=np.ndarray, 
             miriad_gains_file = args.cal,
             baseline_order = plan.baseline_order)
@@ -16,8 +16,6 @@ def main(args):
     print("Running the calibrate function")
     caldata = calibrator.apply_calibration(craco.bl2array(data))
     print("Swapping the original data with calibrated data")
-    if caldata.dtype != np.complex64 and args.force_dtype:
-        caldata = caldata.astype(np.complex64, casting='unsafe')
     f.swap_with_data(caldata)
     print("Saving the data as a uvfits file")
     if args.outname is not None:

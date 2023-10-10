@@ -197,6 +197,12 @@ class Craco(EpicsSubsystem):
         en = self.read('enableCraco', cache=False)
         if en != 1:
             raise ValueError('CRACO not enabled in EPICS. Ask someone to enable it via CSS or add it to an SB parset and schedule another block. Sorry kids. No dice')
+
+        zoomval = self.read('S_zoom:val', cache=False)
+        standard_zoom = zoomval == 0
+        if not standard_zoom:
+            raise ValueError(f'Correlator is not in standard zoom. Its in zoom mode={zoomval}. Please wait until operations schedules an SB in standard zoom')
+
         
         self.previous_start_bat = self.read_start_bat()
         self.start_bat = None
