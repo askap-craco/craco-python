@@ -5,6 +5,7 @@ from craft import uvfits
 from craft.cmdline import strrange
 from craco import preprocess, postprocess
 from craft.craco import bl2array
+from craco.timer import Timer
 import matplotlib.pyplot as plt
 import IPython
 from PIL import Image
@@ -177,9 +178,9 @@ def main():
         uvdata_source = FV.get_fake_data_block()
     else:
         if args.proper:
-            uvdata_source = uvsource.time_blocks_with_uvws(py_plan.nt)
+            uvdata_source = uvsource.fast_time_blocks(py_plan.nt, fetch_uvws = True)
         else:
-            uvdata_source = uvsource.time_blocks(py_plan.nt)
+            uvdata_source = uvsource.fast_time_blocks(py_plan.nt)
 
     if args.ogif:
         images = []
@@ -189,54 +190,70 @@ def main():
         N = 1
     try:
         for iblock, block in enumerate(uvdata_source):
-            if args.proper:
-                block, uvws = block
-                print(f"Splitting the block into uvws and data block of types - {type(uvws), type(block)}")
-                
+            timer = Timer()
+
+            block, uvws = block
+            timer.tick("Read data")
             
-            print(f"Working on block {iblock}, dtype={type(block)}")
+            print(f"Working on block {iblock}")
             #IPython.embed()
             if type(block) == dict and block_type != dict:
                 block = bl2array(block)
+
+            block = block.squeeze()
 
             assert type(block) == block_type, f"On no... I need blocks to be of type {block_type}, got {type(block)}"
 
             
             if args.plot_blocks:
                 plot_block(block, title="The raw input block")
+
+            if block.ndim == 3:
+                #Adding back the polarisation axis so that calibration can work
+                block = block[:, :, None, :]
+            timer.tick("precalib")
             if args.calibration:
                 block = calibrator.apply_calibration(block)
                 if args.plot_blocks:
                     plot_block(block, title="The calibrated block")
+
+            timer.tick("postcalib")
             if args.flag_chans:
                 block = rfi_cleaner.flag_chans(block, args.flag_chans, 0)
             if args.rfi:
                 block, _, _, _ = rfi_cleaner.run_IQRM_cleaning(block, False, False, False, False, True, False)
                 if args.plot_blocks:
                     plot_block(block, title="The cleaned block")
+            
 
             if args.norm:
                 block = preprocess.normalise(block, target_input_rms=values.target_input_rms)
                 if args.plot_blocks:
                     plot_block(block, title="The normalised block")
-            
+            timer.tick("post norm")
             #We should fill the masked values with 0s before processing the data further
             block = preprocess.fill_masked_values(block, fill_value = 0)
+            timer.tick("post fill_masked_values")
 
             block = preprocess.average_pols(block, keepdims=False)
             if args.plot_blocks:
                 plot_block(block, title="The pol-averaged block")
 
+            timer.tick("pre dedisp")
             if dm_samps > 0:
                 block = brute_force_dedipserser.dedisperse(iblock, block)
                 if args.plot_blocks:
                     plot_block(block, title="The dedispersed block")
 
+            timer.tick("post dedisp")
 
             if args.proper:
                 gridded_block = direct_gridder.grid_with_uvws(block, uvws)
             else:
                 gridded_block = direct_gridder(block)
+
+            timer.tick("post gridding")
+
             for t in range(py_plan.nt // 2):
                 imgout = imager_obj(np.fft.fftshift(gridded_block[..., t])).astype(np.complex64)
                 if args.stats_image:
@@ -269,7 +286,9 @@ def main():
                 if args.ogif is not None:
                     images.append(make_PIL_images_from_array(imgout.real))
                     images.append(make_PIL_images_from_array(imgout.imag))
-            
+            timer.tick("post fft and stats image loop")
+            print(timer)
+
             if args.ogif is not None:
                 print(f"Saving GIF as {args.ogif} now")
                 images[0].save(args.ogif, save_all = True, append_images = images[1:], duration=2, loop = 0)
