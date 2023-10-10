@@ -982,7 +982,7 @@ class PipelineWrapper:
 
         mask_fil_hdr = hdr.copy()
         mask_fil_hdr['nbits'] = 1
-        mask_fil_fname = f"RFI_tfmask.b{beamid:02d}.fil"
+        mask_fil_fname = os.path.join(values.outdir, f"RFI_tfmask.b{beamid:02d}.fil")
         self.mask_fil_writer = sigproc.SigprocFile(mask_fil_fname, 'wb', mask_fil_hdr)
 
         # Create a pipeline

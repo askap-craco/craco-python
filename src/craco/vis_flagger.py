@@ -131,7 +131,7 @@ class VisFlagger:
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
-            input_flat, tfmask = self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
+            _, tfmask = self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
             if mask_fil_writer is not None:
                 np.packbits(tfmask.T.ravel()).tofile(mask_fil_writer.fin)
 
