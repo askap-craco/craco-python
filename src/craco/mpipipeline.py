@@ -84,7 +84,7 @@ class BaselineIndex:
         
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
-CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
+CPLX_DTYPE = np.float32 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
 
 class BeamRankInfo(namedtuple('BeamProcInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     @property
@@ -468,8 +468,6 @@ def get_transpose_dtype(values):
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
     npol = 1 # card averager always averagers pol
-    rdtype = np.float32
-    cdtyep = np.complex64
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
     return dt
 

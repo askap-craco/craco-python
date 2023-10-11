@@ -416,8 +416,8 @@ def average_vis_and_reshape(din, tscrunch, dout, auto_idxs, cross_idxs):
     
     d = average2(din,tscrunch)
 
-    dout[:32, :,:,:,:] = d[:32*4,...].reshape(NCHAN,32,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
-    dout[32:, :,:,:,:] = d[32*4:,...].reshape(NCHAN,4 ,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
+    dout[:32, ...] = d[:32*4,...].reshape(NCHAN,32,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
+    dout[32:, ...] = d[32*4:,...].reshape(NCHAN,4 ,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
             
     return dout
 
@@ -462,7 +462,7 @@ def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_dat
     return output
 
 
-def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.complex64):
+def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.float32):
 
     nbl = nant*(nant-1)//2
     vis_nt = nt // vis_tscrunch
@@ -494,7 +494,7 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
+    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.float32, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
 
         
         if exclude_ants is None:
