@@ -16,7 +16,7 @@ os.environ['NUMBA_CPU_FEATURES'] = '+sse,+sse2,+avx,+avx2,+avx512f,+avx512dq'
 
 
 
-from craco.cardcap import NCHAN, NFPGA
+from craco.cardcapfile import NCHAN, NFPGA, get_indexes, NBEAM
 from numba import jit,njit,prange
 import numba
 from numba.typed import List
@@ -104,6 +104,8 @@ def do_accumulate(output, rescale_scales, rescale_stats, count, nant, ibeam, ich
                         agg_mean += delta / agg_count
                         delta2 = va - agg_mean
                         agg_m2 += delta * delta2
+
+                        #print(agg_mean, output_bl, pol, delta, agg_count, rs_chan_stats.shape, va)
                         rs_chan_stats[output_bl, pol, 0] = agg_mean # Update amplitude
                         rs_chan_stats[output_bl, pol, 1] = agg_m2 # Add amplitude**2 for stdev
                         
@@ -142,7 +144,7 @@ def get_channel_of(chan, nc_per_fpga, fpga, nfpga):
     
     return ichan
 
-@njit(parallel=True,cache=True)
+#@njit(parallel=True,cache=True)
 def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, vis_fscrunch=1, vis_tscrunch=1):
     nfpga= len(beam_data)
     assert nfpga == 6
@@ -199,6 +201,266 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
                 
             count[fpga] += nt # only gets incremented if isvalid == True
 
+@njit
+def ibc2beamchan(ibc):
+    '''
+    Given a beam/chan index of 0 to 36beamx4chan returns the actual beam and channel
+    assumes channel beam order, with beam0-31 to start, then beams 32-35 at the end
+    i.e. the crazy beamformer ordering
+    '''
+
+    if ibc < 32*4:
+        beam = ibc % 32
+        chan = ibc // 32
+    else:
+        ibc2 = ibc - 32*4
+        beam = ibc2 % 4 + 32
+        chan = ibc2 // 4
+
+    return (beam, chan)
+
+
+def average1(din):
+    dout =  din['data'].mean(axis=(0,2,3), dtype=np.float32)
+    return dout
+
+def average2(din, tscrunch=4):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+
+    dout =  din['data'].reshape(nfpga, npkt, nt1*nt2//tscrunch, tscrunch, nbl, 2).mean(axis=(0,3), dtype=np.float32)
+    return dout
+
+def average3(din, tscrunch=4):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    nttotal = nt1 * nt2
+    ntout = nttotal // tscrunch
+    # average first time axis
+    dout =  data.mean(axis=(0,3), dtype=np.float32)
+
+    tscrunch2 = tscrunch // nt2
+    dout = dout.reshape(npkt, nt1 // tscrunch2, tscrunch2, nbl, 2).mean(axis=3)
+    return dout
+
+def average4(din, tscrunch=2, dout=None):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dshape = (npkt, nt1*nt2 // tscrunch, nbl, 2)
+    if dout is None:
+        dout = np.zeros(dshape, dtype=np.float32)
+    else:
+        dout[:] = 0
+        
+    for ifpga in range(nfpga):
+        for t1 in range(nt1):
+            for t2 in range(nt2):
+                ttotal = t2*nt1 + t1
+                tout = ttotal // tscrunch
+                dout[:, tout, :, :] += data[ifpga,:,t1,t2,:,0,:]
+            
+    return dout
+            
+@njit(fastmath=True,debug=True,parallel=True)
+def average6(din, tscrunch, dout):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dout[:] = 0
+    
+    for ifpga in range(nfpga):
+        for ipkt in range(npkt):
+            for t1 in range(nt1):
+                for t2 in range(nt2):
+                    ttotal = t2*nt1 + t1
+                    tout = ttotal // tscrunch
+                    for ibl in range(nbl):
+                        for c in range(nt2):
+                            dout[ipkt, tout, ibl, c] += data[ifpga,ipkt,t1,t2,ibl,0,c]
+                            
+    n = tscrunch*nfpga
+    dout *= float(1/n)
+    
+            
+    return dout
+
+@njit(fastmath=True,debug=True)
+def average5(din, tscrunch, dout):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dout[:] = 0
+    for ifpga in range(nfpga):
+        for t1 in range(nt1):
+            for t2 in range(nt2):
+                ttotal = t2*nt1 + t1
+                tout = ttotal // tscrunch
+                dout[:, tout, :, :] += data[ifpga,:,t1,t2,:,0,:]
+            
+    return dout
+
+@njit(fastmath=True,debug=True,parallel=True)
+def average6(din, tscrunch, dout):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dout[:] = 0
+    
+    for ifpga in range(nfpga):
+        for ipkt in range(npkt):
+            for t1 in range(nt1):
+                for t2 in range(nt2):
+                    ttotal = t2*nt1 + t1
+                    tout = ttotal // tscrunch
+                    for ibl in range(nbl):
+                        for c in range(nt2):
+                            dout[ipkt, tout, ibl, c] += data[ifpga,ipkt,t1,t2,ibl,0,c]
+                            
+    n = tscrunch*nfpga
+    dout *= float(1/n)
+    
+            
+    return dout
+
+@njit(fastmath=True,debug=True,parallel=False)
+def average7(din, tscrunch, dout):
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dout[:] = 0
+    # HACK - set nbl to output NBL, which doesn't include autos, for now
+    nbl = dout.shape[1]
+    
+    # dout shape
+    # avger.output['vis'].shape
+    # (36, 435, 4, 8, 2)
+    
+    for ifpga in prange(nfpga):
+        for ipkt in range(npkt):
+            beam,chan = ibc2beamchan(ipkt)
+            #print(beam,chan)
+            for t1 in range(nt1):
+                for t2 in range(nt2):
+                    ttotal = t2 + t1*nt2
+                    tout = ttotal // tscrunch
+                    for ibl in range(nbl):                        
+                        #print(t1,t2,ttotal,tout,ibl,c, dout.shape, data.shape)
+                        for c in range(2):
+                            dout[beam, ibl, chan, tout, c] += data[ifpga,ipkt,t1,t2,ibl,0,c]                            
+
+                            
+    n = tscrunch*nfpga
+    dout *= float(1/n)
+    
+            
+    return dout
+
+@njit(fastmath=True,debug=True)
+def average8(din, tscrunch, dout, nant):
+    '''
+    Writes (beam,chan) order and removes autocorrelations
+    '''
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
+    dout[:] = 0
+    # HACK - set nbl to output NBL, which doesn't include autos, for now
+    #nbl = dout.shape[1]
+    
+    # dout shape
+    # avger.output['vis'].shape
+    # (36, 435, 4, 8, 2)
+    
+    for ifpga in range(nfpga):
+        for ipkt in range(npkt):
+            beam,chan = ibc2beamchan(ipkt)
+            #print(beam,chan)
+            for t1 in range(nt1):
+                for t2 in range(nt2):
+                    ttotal = t2 + t1*nt2
+                    tout = ttotal // tscrunch
+                    
+                    obl = 0
+                    ibl = 0
+                    for ia1 in range(nant):
+                        for ia2 in range(ia1, nant):
+                            ibl += 1
+                            if ia1 == ia2:
+                                continue
+                                
+                            for c in range(nt2):
+                                #print(t1,t2,ttotal,tout,ibl,c, dout.shape, data.shape)
+                                dout[beam, obl, chan, tout, c] += data[ifpga,ipkt,t1,t2,ibl,0,c]
+                                
+                            obl += 1
+                            
+                            
+    n = tscrunch*nfpga
+    dout *= float(1/n)
+    
+            
+    return dout
+
+
+
+def average_vis_and_reshape(din, tscrunch, dout, auto_idxs, cross_idxs):
+    '''
+    Writes (beam,chan) order and removes autocorrelations
+    Fixed fscrunch at 6
+    
+    '''
+    data = din['data']
+    (nfpga, npkt, nt1, nt2, nbl, npol, _) = data.shape
+    assert npol == 1, 'Expect npol = 1 in this thing'
+    
+    dout[:] = 0
+    # HACK - set nbl to output NBL, which doesn't include autos, for now
+    #nbl = dout.shape[1]
+    ntout = nt1*nt2//tscrunch
+    nblout = len(cross_idxs)
+    
+    d = average2(din,tscrunch)
+
+    dout[:32, :,:,:,:] = d[:32*4,...].reshape(NCHAN,32,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
+    dout[32:, :,:,:,:] = d[32*4:,...].reshape(NCHAN,4 ,ntout,nbl,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
+            
+    return dout
+
+def calc_ics(data, auto_idxs):
+    dmean = data[:,:,:,:,auto_idxs,0,0].mean(axis=4, dtype=np.float32)
+
+    return dmean
+
+def calc_and_reshape_ics(data, auto_idxs, valid, output):
+    (nfpga, npkt, nt1, nt2, nbl, npol, _) = data.shape
+    nttotal = nt1*nt2
+    dmean = calc_ics(data, auto_idxs)
+    assert dmean.shape == (nfpga, NCHAN*NBEAM, nt1, nt2)
+    #print(data.shape,output.shape,dmean.shape)
+    # ICS output shape = (36, 32, 24) = (nbeam,ntime,nchan)
+    # data shape as above
+    # dmean shape is (6,144,16,2) = (nfpga,nbeam*nchan,nt1,nt2)
+    
+    # flag FPGAS that are not valid
+    dmean[~valid,...] = 0
+
+    output[:32,...] = dmean[:,:32*4 ,:,:].reshape(nfpga,NCHAN,32,nttotal).transpose(2,3,1,0).reshape(32,nttotal,NCHAN*nfpga)
+    output[32:,...] = dmean[:, 32*4:,:,:].reshape(nfpga,NCHAN,4 ,nttotal).transpose(2,3,1,0).reshape(4,nttotal,NCHAN*nfpga)
+    return output
+     
+def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, auto_idxs, cross_idxs,  vis_fscrunch=1, vis_tscrunch=1):
+    '''
+    FIxed vis fscrunch
+    Doesnt do CAS or ICS
+    '''
+    assert vis_fscrunch == 6
+
+    # we average all FPGAs into all 4 channels. If any FPGA is not valid, then all 4 channels will be under-cooked
+    # Therefore, if any FPGA is flagged, the entire visibility-summed data is flagged
+    if np.all(valid):
+        average_vis_and_reshape(beam_data, vis_tscrunch, output['vis'], auto_idxs, cross_idxs)
+    else:
+        output['vis'] = 0
+    
+    calc_and_reshape_ics(beam_data['data'], auto_idxs, valid, output['ics'])
+    
+    return output
+
 
 def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.complex64):
 
@@ -232,7 +494,12 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None, exclude_ants=[], rescale_update_blocks=16, rescale_output_path=None):
+    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.complex64, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
+
+        
+        if exclude_ants is None:
+            exclude_ants = []
+
         self.nant_in = nant
         self.nant_out = self.nant_in - len(exclude_ants)
         nbl_with_autos = self.nant_out*(self.nant_out+1)//2
@@ -248,11 +515,11 @@ class Averager:
         self.rescale_stats = np.zeros((nbeam, nc, self.nbl_with_autos, npol, 2), dtype=rdtype)
         self.rescale_scales = np.zeros((nbeam, nc, self.nbl_with_autos, npol, 2), dtype=rdtype)
         self.count = np.zeros(NFPGA, dtype=np.int32)
+        
+        _,_,self.auto_idxs,self.cross_idxs = get_indexes(self.nant_in, exclude_ants=exclude_ants)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
 
-        if exclude_ants is None:
-            exclude_ants = []
 
         self.exclude_ants = set(map(int, exclude_ants))
         self.antenna_mask = np.array([False if (iant+1) in exclude_ants else True for iant in range(self.nant_in)])
@@ -364,17 +631,34 @@ class Averager:
         Runs multi-threaded accumulation over all fpgas/coarse channels / beams / times /  baselnes
         :param: beam_data is numba List with the expected data
         '''
-    
-        accumulate_all(self.output,
-                       self.rescale_scales,
-                       self.rescale_stats,
-                       self.count,
-                       self.nant_in,
-                       beam_data,
-                       valid,
-                       self.antenna_mask,
-                       self.vis_fscrunch,
-                       self.vis_tscrunch)
+
+        use_v2 = True
+
+        if use_v2:
+            accumulate_all2(self.output,
+                        self.rescale_scales,
+                        self.rescale_stats,
+                        self.count,
+                        self.nant_in,
+                        np.array(beam_data),
+                        valid,
+                        self.antenna_mask,
+                        self.auto_idxs,
+                        self.cross_idxs,
+                        self.vis_fscrunch,
+                        self.vis_tscrunch)
+        else:
+            accumulate_all(self.output,
+                        self.rescale_scales,
+                        self.rescale_stats,
+                        self.count,
+                        self.nant_in,
+                        beam_data,
+                        valid,
+                        self.antenna_mask,
+                        self.vis_fscrunch,
+                        self.vis_tscrunch)
+            
 
         # update after first block and then every N thereafter
         if self.iblk == 0 or self.iblk % self.rescale_update_blocks == 0:
@@ -384,9 +668,11 @@ class Averager:
 
         return self.output
 
-
-    def accumulate_beam(self, ibeam, ichan, beam_data):
-        do_accumulate(self.output, self.rescale_scales, self.rescale_stats, self.count, self.nant, ibeam, ichan, beam_data, self.vis_fscrunch, self.vis_tscrunch)
+    def accumulate_beam(self, ibeam, ichan, beam_data, ifpga=0, antmask=None, vis_valid=True):
+        if antmask is None:
+            antmask = np.ones(self.nant_in, dtype=bool)
+        
+        do_accumulate(self.output, self.rescale_scales, self.rescale_stats, self.count[ifpga], self.nant_in, ibeam, ichan, beam_data, antmask, vis_valid, self.vis_fscrunch, self.vis_tscrunch)
 
         return self.output
 
