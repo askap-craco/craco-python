@@ -83,7 +83,7 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     
     return np.dtype(dtype)
 
-def get_indexes(nant):
+def get_indexes(nant, exclude_ants=None):
     '''
     Returns a set of array indexs that can be used to index into baseline arrays
     assumign the way the correlator orders everythign (baseically, sensibly)
@@ -96,21 +96,26 @@ def get_indexes(nant):
     revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
     auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
     cross_products: length=nbl array of which indices contain cross correlations
+    exclude_ants: set or list containint list of 1-based antenna numbers to exclude
     '''
     
     products = []
     revproducts = {}
     auto_products = []
     cross_products = []
+    if exclude_ants is None:
+        exclude_ants = set()
+        
     idx = 0
     for a1 in range(1, nant+1):
         for a2 in range(a1, nant+1):
-            products.append((a1,a2))
-            revproducts[(a1,a2)] = idx
-            if a1 == a2:
-                auto_products.append(idx)
-            else:
-                cross_products.append(idx)
+            if a1 not in exclude_ants and a2 not in exclude_ants:
+                products.append((a1,a2))
+                revproducts[(a1,a2)] = idx
+                if a1 == a2:
+                    auto_products.append(idx)
+                else:
+                    cross_products.append(idx)
             
             idx += 1
               
