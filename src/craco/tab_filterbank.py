@@ -59,6 +59,10 @@ def average_uvw(bluvws, metrics="mean"):
     if metrics == "end":
         return {blid: bluvws[blid][:, -1] for blid in bluvws}
 
+def average_fast_uvw(bluvws, metrics="mean"):
+    nval = len(bluvws)
+    return bluvws[nval // 2]
+
 def phase_rotate(blk, model):
     """
     there is broadcasting issue here,
@@ -168,28 +172,28 @@ def run(f, values):
 
     iblk = 0
     nblocks_to_process = int(nsamps_to_process / values.nt)
-    for blk, bluvw in uvsource.time_blocks_with_uvws(values.nt):
+    for blk, bluvw in uvsource.fast_time_blocks(values.nt, fetch_uvws=True):
         try:
             iblk += 1
             # logger.info(f"processing block {iblk}...")
             print(f"processing block {iblk}...")
 
             # take the mean of uvw here to represent the block
-            bluvw_ave = average_uvw(bluvw, metrics="mean")
+            # bluvw_ave = average_uvw(bluvw, metrics="mean")
+            bluvw_ave = average_fast_uvw(bluvw, metrics="mean")
             
             # make a model for a unit Jansky source
             psvis = pointsource(1, lm, plan.freqs, plan.baseline_order, bluvw_ave)
 
             # perform calibration
-            blk = bl2array(blk)
+            blk = blk.squeeze()
+            blk = blk[:, :, None, :]
+            print(blk.shape)
+            # blk = bl2array(blk)
             _vis = calibrator.apply_calibration(blk)
             # phase rotation
             # this need to be done for each sample...
             _vis = _vis * np.conj(psvis)[:, :, None, None]
-            # # flagging
-            # flag_vis, _, _, _ = rfi_cleaner.run_IQRM_cleaning(
-            #     np.abs(rot_vis), False, False, False, False, True, True
-            # )
 
             if values.norm:
                 _vis = preprocess.normalise(
@@ -198,30 +202,9 @@ def run(f, values):
             # shape: nbl, nchan, npol, nt
 
             out_tf = _vis.real.mean(axis=0)
-            # ### if using weighted_snr...
-            # if values.weighted_snr is None:
-            #     out_tf = fin_vis.real.mean(axis=0)
-            # else:
-            #     ### shape: nbl, nchan, npol
-            #     bp_snr = np.load(values.weighted_snr)[..., 0] # just pick up one polarisation atm...
-            #     ### work out flagged antenna...
-            #     _nbl, _nchan = bp_snr.shape
-            #     ant_idx = get_ant_idx(_nbl, values.flag_ant)
-            #     bp_snr = bp_snr[ant_idx, ...]
-            #     #####
-            #     bp_var = 1 / bp_snr ** 2
-            #     bp_var = bp_var[..., None, None] # make dimension match...
-            #     bp_weight = bp_var / np.nansum(bp_var, axis=0, keepdims=True) # sum over baseline
-
-            #     weight_tf = fin_vis.real * bp_weight
-            #     out_tf = fin_vis.sum(axis=0)
                 
             assert out_tf.shape[1] == 1, "not single polarsiation found..."
             out_tf = out_tf[:, 0, :].T.data.astype(np.float32) # shape: frequency vs time
-
-            # mask = np.ma.getmask(out_tf)
-            # data = np.ma.getdata(out_tf)
-            # data[mask] = np.nan
 
             out_tf.tofile(fout.fin)
 
