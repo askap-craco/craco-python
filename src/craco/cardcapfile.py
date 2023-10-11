@@ -343,6 +343,23 @@ class CardcapFile:
         return self.mainhdr.get('TSCRUNCH', 1)
 
     @property
+    def card_enabled(self):
+        '''
+        Returns True if card enabled in card mask, which is set by operators if card malfunctioning.
+        If not in header (previous to 3 October 2023) then
+        returns True by default.
+        '''
+        return self.mainhdr.get('CARDEN', True)
+
+    @property
+    def card(self):
+        return self.mainhdr['CARD']
+
+    @property
+    def shelf(self):
+        return self.mainhdr['SHELF']
+
+    @property
     def ntpkt_per_frame(self):
         if self.tscrunch_bug:
             ntpkt = 1
@@ -394,7 +411,7 @@ class CardcapFile:
             else:
                 mylen = ngroups
                 
-            warnings.warn(f'CCAP file {self.fname} was not closed correctly. Estimating ngroups from size={nbytes} datalen={datalen} len={ngroups}')
+            #warnings.warn(f'CCAP file {self.fname} was not closed correctly. Estimating ngroups from size={nbytes} datalen={datalen} len={ngroups}')
         else:
             mylen = nax2
 

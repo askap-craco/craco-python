@@ -12,6 +12,7 @@ from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
 from numba.types import List
 from craco.utils import get_target_beam
 from typing import List
+from craft.freq_config import FrequencyConfig
 
 log = logging.getLogger(__name__)
 
@@ -131,8 +132,11 @@ class CcapMerger:
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
+        self.freq_config = FrequencyConfig.from_cardcap_files(self.ccap)
+        
         log.info('Opened %d files. nint=%d ntpkt=%d nt=%d', len(self.ccap), self.nint_per_packet,
                  self.ntpkt_per_frame, self.nt_per_frame)
+        
 
 
     @classmethod
@@ -173,29 +177,39 @@ class CcapMerger:
     def fcent(self):
         '''
         Returns center frequency - units of MHz
+        originally this was the mean frequency but now, annoyingly, some cards are masked
+        and may return randomly broken frequencies.
+        Now just return the middle frequency between the top and the bottom
         '''
-        return self.all_freqs.mean()
 
+        fc = self.freq_config.fcent
+        return fc
+        
+
+    @property
+    def fchtop(self):
+        '''
+        returns frequency of the top channel
+        '''
+        return self.freq_config.fchtop
+        
     @property
     def fch1(self):
         '''
         Returns first channel frequency
         '''
-        return self.all_freqs.flat[0]
+        return self.freq_config.fch1
 
     @property
     def foff(self):
         '''
         Returns channel interval - MHz
         '''
-        fsort = np.array(sorted(self.all_freqs.flat))
-        fdiff = fsort[1:] - fsort[:-1]
-        foff = fdiff.mean()
-        return foff
+        return self.freq_config.foff
 
     @property
     def nchan(self):
-        return self.all_freqs.size
+        return self.freq_config.nchan
 
     @property
     def npol(self):

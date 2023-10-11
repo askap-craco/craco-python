@@ -587,6 +587,13 @@ class CardCapturer:
 
         dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
         iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+        cardmask = int(ctrl.read(f'acx:s{shelf:02d}:array:mask_O'))
+
+        # apparently the cardmask is a bitamsk of signed int.
+        # -1 is all unmasked - i.e. all enabled
+        icard = card - 1
+        assert 0 <= icard < 12, f'Invalid icard {icard}'
+        card_enabled = (cardmask >> icard) & 1 == 1
 
         hdr['NANT'] = (nant, 'Number of antennas')
         hdr['NBL'] = (nbl, 'Number of baselines')
@@ -636,6 +643,8 @@ class CardCapturer:
         hdr['TSCRUNCH'] = (self.values.tscrunch, 'Tscrunch factor')
         hdr['OUTSHAPE'] = (str(self.out_shape), 'Shape of file output')
         hdr['NTOUTPFM'] = (self.nintout_per_frame, 'Number of output integraitons per frame, after tscrunch')
+        hdr['CARDMASK'] = (cardmask, 'signed bitmask for all cards to be enabled')
+        hdr['CARDEN'] = (card_enabled, 'True if card enabled in bitmask')
         hdr['FLUSHBM'] = (flushOnBeam, 'T if flush on beam is enabled')
         
         self.hdr = hdr
@@ -836,6 +845,7 @@ class MpiCardcapController:
             for shelf in values.block:
                 dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
                 iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+                cardmask = ctrl.read(f'acx:s{shelf:02d}:array:mask_O')
                 for card in values.card:
                     ctrl.get_channel_frequencies(shelf, card)
 
