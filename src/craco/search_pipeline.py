@@ -992,8 +992,13 @@ class PipelineWrapper:
                             values.print_dm0_stats
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
+
+        if f.freq_config.nmasked_channels > 0:
+            log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
+            p.set_channel_flags(f.freq_config.channel_mask, True)
+            
         if values.flag_chans:
-            log.info('Flagging %d channels %s', len(values.flag_chans), values.flag_chans)
+            log.info('Flagging %d channels %s from command line', len(values.flag_chans), values.flag_chans)
             p.set_channel_flags(values.flag_chans, True)
 
         if values.flag_frequency_file:

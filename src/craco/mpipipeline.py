@@ -184,14 +184,12 @@ class MpiObsInfo:
         self.values = values
         # make megers for all the receiers
         # just assume beams will have returned ['']
-        self.card_mergers = []
-        for card_hdrs in hdrs:
-            if len(card_hdrs) > 0 and len(card_hdrs[0]) > 0:
-                self.card_mergers.append(CcapMerger.from_headers(card_hdrs))
+        # I'm not sure we need card mergers any more
+        #self.card_mergers = []
+        #for card_hdrs in hdrs:
+        #    if len(card_hdrs) > 0 and len(card_hdrs[0]) > 0:
+        #        self.card_mergers.append(CcapMerger.from_headers(card_hdrs))
                 
-        #self.card_mergers = [CcapMerger.from_headers(card_hdrs)
-        #                     for card_hdrs in hdrs if len(card_hdrs[0]) != 0]
-        
         all_hdrs = []
 
         # flatten into all headers
@@ -201,20 +199,10 @@ class MpiObsInfo:
                     all_hdrs.append(fpga_hdr)
 
         self.main_merger = CcapMerger.from_headers(all_hdrs)
-
         m = self.main_merger
-        assert m.fch1 == m.all_freqs.min(), f'Channel 0 = {m.fch1} but lowest channel is {m.all_freqs.min()}'
+        self.raw_freq_config = m.freq_config
+        self.vis_freq_config = self.raw_freq_config.fscrunch(self.values.vis_fscrunch)
 
-        # we're goign to assume the individual card receiver mergers and preprocessing
-        # will do the right thing. So we're just going to check channels at a card level
-
-        card_freqs = np.array([m.fch1 for m in self.card_mergers])
-        if len(self.card_mergers) > 1:
-            card_freqdiff = card_freqs[1:] - card_freqs[:-1]
-            card_foff = np.abs(card_freqdiff[0] - card_freqdiff)
-            assert np.all(card_foff < 1e-3), f'Cards frequencies not contiguous {card_foff} {card_freqs} {card_freqdiff}'
-            assert card_freqdiff[0] > 0, f'Card frequency increment should probably be positive. It was {card_freqdiff[0]}'
-            
         self.__fid0 = None # this gets sent with some transposes later
 
         if self.pipe_info.is_beam_processor and values.metadata is not None:
@@ -225,6 +213,7 @@ class MpiObsInfo:
 
         self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
         assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
+
   
     def sources(self):
         '''
@@ -375,7 +364,7 @@ class MpiObsInfo:
         '''
         Number of channels of input before fscrunch
         '''
-        return self.main_merger.nchan
+        return self.raw_freq_config.nchan
 
     @property
     def npol(self):
@@ -389,21 +378,21 @@ class MpiObsInfo:
         '''
         First channel frequency
         '''
-        return self.main_merger.fch1
+        return self.raw_freq_config.fch1
 
     @property
     def fcent(self):
         '''
         Central frequency of band
         '''
-        return self.main_merger.fcent
+        return self.raw_freq_config.fcent
 
     @property
     def foff(self):
         '''
         Offset Hz between channels
         '''
-        return self.main_merger.foff
+        return self.raw_freq_config.foff
 
     @property
     def vis_channel_frequencies(self):
@@ -411,9 +400,7 @@ class MpiObsInfo:
         Channel frequencies in Hz of channels in the visibilities after 
         f scrunching
         '''
-        main_freqs = np.arange(self.nchan)*self.foff + self.fch1
-        vis_freqs = main_freqs.reshape(-1, self.vis_fscrunch).mean(axis=1)
-        return vis_freqs
+        return self.vis_freq_config.channel_frequencies
 
     @property
     def skycoord(self) -> SkyCoord:
@@ -758,6 +745,7 @@ class FilterbankSink:
                'foff':vis_source.foff,
                'source_name':vis_source.target
         }
+        log.info('Creating filterbank %s with header %s', fname, hdr)
 
         self.fout = sigproc.SigprocFile(fname, 'wb', hdr)
 
@@ -1067,8 +1055,8 @@ def dump_rankfile(pipe_info, fpga_per_rx=3):
                 for rank_info in pipe_info.receiver_ranks:
                     fout.write(rank_info.rank_file_str+'\n')
 
-    
-def _main():
+
+def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     from craco import search_pipeline
     
@@ -1093,6 +1081,11 @@ def _main():
     
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
+
+    return parser
+def _main():
+
+    parser = get_parser()
     values = parser.parse_args()
     
     if values.verbose:
