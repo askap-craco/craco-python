@@ -221,6 +221,7 @@ def ibc2beamchan(ibc):
 
 
 def average1(din):
+    #(nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
     dout =  din['data'].mean(axis=(0,2,3), dtype=np.float32)
     return dout
 
@@ -283,9 +284,9 @@ def average6(din, tscrunch, dout):
             
     return dout
 
-@njit(fastmath=True,debug=True)
-def average5(din, tscrunch, dout):
-    data = din['data']
+@njit(fastmath=True,debug=True, parallel=True)
+def average5(data, tscrunch, dout):
+    #data = din['data']
     (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
     dout[:] = 0
     for ifpga in range(nfpga):
@@ -298,8 +299,8 @@ def average5(din, tscrunch, dout):
     return dout
 
 @njit(fastmath=True,debug=True,parallel=True)
-def average6(din, tscrunch, dout):
-    data = din['data']
+def average6(data, tscrunch, dout):
+    #data = din['data']
     (nfpga, npkt, nt1, nt2, nbl, _, _) = data.shape
     dout[:] = 0
     
@@ -331,8 +332,8 @@ def average7(din, tscrunch, dout):
     # avger.output['vis'].shape
     # (36, 435, 4, 8, 2)
     
-    for ifpga in prange(nfpga):
-        for ipkt in range(npkt):
+    for ifpga in range(nfpga):
+        for ipkt in prange(npkt):
             beam,chan = ibc2beamchan(ipkt)
             #print(beam,chan)
             for t1 in range(nt1):
@@ -396,7 +397,19 @@ def average8(din, tscrunch, dout, nant):
             
     return dout
 
+def average9(din, tscrunch, dout):
+    '''
+    Try to average without doing doing ['data']
+    This takes 110ms
+    '''
+    data = din['data'] # this line takes5 00 ns
+    (nfpga, npkt, nt1, nt2, nbl, npol, _) = data.shape
+    dshape = (npkt, nt1*nt2 // tscrunch, nbl, 2)
+    dout[:] = 0
+    for ifpga in range(nfpga):
+        dout[...] += data[ifpga, ...]
 
+    return dout
 
 def average_vis_and_reshape(din, tscrunch, dout, auto_idxs, cross_idxs):
     '''
@@ -459,7 +472,7 @@ def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_dat
         output['vis'] = 0
 
     # doint calc and rescape ics adds abotu 20mn to this call
-    calc_and_reshape_ics(beam_data['data'], auto_idxs, valid, output['ics'])
+    #calc_and_reshape_ics(beam_data['data'], auto_idxs, valid, output['ics'])
     
     return output
 
@@ -633,7 +646,7 @@ class Averager:
         :param: beam_data is numba List with the expected data
         '''
 
-        use_v2 = True
+        use_v2 = False
 
         if use_v2:
             #accuulate all 2 doesnt do rescaling
