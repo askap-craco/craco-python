@@ -453,10 +453,12 @@ def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_dat
     # we average all FPGAs into all 4 channels. If any FPGA is not valid, then all 4 channels will be under-cooked
     # Therefore, if any FPGA is flagged, the entire visibility-summed data is flagged
     if np.all(valid):
+        # this takes about 70m,s on athena. Which seems like an awefully bloody long time
         average_vis_and_reshape(beam_data, vis_tscrunch, output['vis'], auto_idxs, cross_idxs)
     else:
         output['vis'] = 0
-    
+
+    # doint calc and rescape ics adds abotu 20mn to this call
     calc_and_reshape_ics(beam_data['data'], auto_idxs, valid, output['ics'])
     
     return output
@@ -540,7 +542,7 @@ class Averager:
             self.dummy_packet = dummy_packet
             
             # run it so it numba compiles it
-            packets = [(0, self.dummy_packet) for i in range(NFPGA)]
+            packets = [self.dummy_packet for i in range(NFPGA)]
 
             self.accumulate_packets(packets)
             self.iblk = 0
@@ -609,10 +611,10 @@ class Averager:
 
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
-        valid = np.array([pkt[1] is not None for pkt in packets], dtype=bool)
+        valid = np.array([pkt is not None for pkt in packets], dtype=bool)
         self.last_nvalid = valid.sum()
         data = List()
-        [data.append(self.dummy_packet if pkt[1] is None else pkt[1]) for pkt in packets]
+        [data.append(self.dummy_packet if pkt is None else pkt) for pkt in packets]
         log.debug('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
         for idata, d in enumerate(data):
             if d.ndim == 1:
@@ -622,7 +624,6 @@ class Averager:
 
             #log.info('Idata %d dhsape=%s', idata, d.shape)
             
-        self.reset()
         return self.accumulate_all(data, valid)
 
 
@@ -635,6 +636,9 @@ class Averager:
         use_v2 = True
 
         if use_v2:
+            #accuulate all 2 doesnt do rescaling
+            # so dn't need to reset
+            #self.reset()
             accumulate_all2(self.output,
                         self.rescale_scales,
                         self.rescale_stats,
@@ -648,6 +652,7 @@ class Averager:
                         self.vis_fscrunch,
                         self.vis_tscrunch)
         else:
+            self.reset() 
             accumulate_all(self.output,
                         self.rescale_scales,
                         self.rescale_stats,

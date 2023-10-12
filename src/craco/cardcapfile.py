@@ -83,6 +83,29 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     
     return np.dtype(dtype)
 
+def get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint):
+    fid_usec = 54 # 54 microseconds per FID = 27/32 * 64)
+    start_fid = (start_bat - sync_bat) / fid_usec
+    start_bfframe = start_fid / NSAMP_PER_FRAME
+    
+    # In practice we'll probably get a few frames before this FID, but it's OK because the packet fid iterator will ignore them
+    bfframe_offset = 1
+    fid0 = np.uint64(int(np.ceil(start_bfframe + bfframe_offset))*NSAMP_PER_FRAME)
+    # due to a quirk in the firmware, we'll work around a bug where the first frame ID
+    # has an offset = SPI in polsum mode
+    if pol_sum:
+        fid0 += np.uint64(sampint)
+
+    return fid0
+
+def get_fid0_from_bat_and_header(start_bat, hdr):
+    sync_bat = hdr.get('SYNCBAT')
+    log.info('Header is start_bat is 0x%x %s %s', start_bat, sync_bat, type(sync_bat))
+    sync_bat = int(sync_bat, 16)
+    sampint = hdr.get('SAMPINT')
+    pol_sum = hdr.get('POLSUM')
+    return get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint)
+
 def get_indexes(nant, exclude_ants=None):
     '''
     Returns a set of array indexs that can be used to index into baseline arrays

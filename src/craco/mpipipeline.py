@@ -658,8 +658,11 @@ def proc_rx(pipe_info):
     best_avg_time = 1e6
     
     t_start = MPI.Wtime()
+    timer = Timer()
 
     for ibuf, (packets, fids) in enumerate(pktiter):
+        timer.tick('read')
+        
         expected_fid = info.fid_of_block(ibuf) 
 
         now = MPI.Wtime()
@@ -667,30 +670,34 @@ def proc_rx(pipe_info):
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
         test_mode = info.values.test_mode
-
-        if test_mode != 'none': # check frame IDs are sensible
+        check_fids = False
+        if check_fids:
             for pkt, fid in zip(packets, fids):
+                log.info('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
                 pktfid = None if pkt is None else pkt['frame_id'][0,0]
                 assert pkt is None or pktfid == fid, f'FID did not match for ibuf {ibuf}. Expected {fid} but got {pktfid}'
                 assert pkt is None or pktfid == expected_fid, f'FID did not match expected. Expected {expected_fid} but got {pktfid}'
+            timer.tick('check fids')
 
         if test_mode == 'none':
             averaged = averager.accumulate_packets(packets)
+            timer.tick('average')
         elif test_mode == 'fid':
             fidnos = np.array([0 if pkt is None else fid for pkt, fid in zip(packets, fids)])
             averaged['ics'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
             averaged['cas'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
             averaged['vis'] = fidnos[0]
+            timer.tick('test-fid')
         elif test_mode == 'cardid':
             averaged['ics'].flat = cardidx #np.arange(averaged['ics'].size)
             averaged['cas'].flat = np.arange(averaged['cas'].size)
             averaged['vis'].flat = np.arange(averaged['vis'].size)
+            timer.tick('test-cardid')
         else:
             raise ValueError(f'Invalid test mode {test_mode}')
 
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
-
         best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
         if avg_time*1e3 > 110:
@@ -698,6 +705,7 @@ def proc_rx(pipe_info):
             
 
         transposer.send(averaged)
+        timer.tick('transpose')
         transpose_end = MPI.Wtime()
         transpose_time = transpose_end - avg_end
         
@@ -706,7 +714,7 @@ def proc_rx(pipe_info):
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
             read_rate = read_size_bytes/1e6 / read_time
-            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
+            log.info('CARD0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s. Timer: %s',
                      ibuf,
                      read_time*1e3,
                      read_rate,
@@ -718,9 +726,11 @@ def proc_rx(pipe_info):
                      averaged.shape,
                      averaged.dtype,
                      size_bytes,
-                     read_size_bytes)
+                     read_size_bytes,
+                     timer)
 
         t_start = MPI.Wtime()
+        timer = Timer()
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
 
@@ -837,7 +847,13 @@ class UvFitsFileSink:
         sourceidx = vis_block.source_index
         uvw = vis_block.uvw
         antflags = vis_block.antflags
-        dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
+        if np.iscomplexobj(vis_data):
+            dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
+            damp = abs(dreshape)
+        else:
+            dreshape = np.transpose(vis_data, (3,1,0,2,4)).reshape(vis_nt, nbl, self.total_nchan, self.npol,2) # should be [t, baseline, coarsechan*finechan]
+            damp = np.sqrt(dreshape[...,0]**2 + dreshape[...,1]**2)
+            
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         nant = info.nant
         inttime = info.inttime.to(u.second).value*info.vis_tscrunch
@@ -846,7 +862,7 @@ class UvFitsFileSink:
         blflags = vis_block.baseline_flags
 
         weights = np.ones((vis_nt, nbl, self.total_nchan, self.npol), dtype=np.float32)
-        weights[abs(dreshape) == 0] = 0 # flag channels that have zero amplitude
+        weights[damp == 0] = 0 # flag channels that have zero amplitude
         uvw_baselines = np.empty((nbl, 3))
 
         # fits convention has source index with starting value of 1

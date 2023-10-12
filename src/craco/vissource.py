@@ -129,22 +129,7 @@ class CardCapNetworkSource:
         # This will start a few seconds into the future. We'd better get our skates on
         start_bat = self.ctrl.configure_and_start()
         self.start_bat = start_bat # BAT for when CRACO Go event happens. Data starts on the next BF frame boundary (i.e. 2048 FIDs)
-        sync_bat = int(self.merger.gethdr('SYNCBAT'), 16)
-        fid_usec = 54 # 54 microseconds per FID = 27/32 * 64)
-        start_fid = (start_bat - sync_bat) / fid_usec
-        start_bfframe = start_fid / NSAMP_PER_FRAME
-
-        # In practice we'll probably get a few frames before this FID, but it's OK because the packet fid iterator will ignore them
-        bfframe_offset = 1
-        fid0 = np.uint64(int(np.ceil(start_bfframe + bfframe_offset))*NSAMP_PER_FRAME)
-
-        # due to a quirk in the firmware, we'll work around a bug where the first frame ID
-        # has an offset = SPI in polsum mode
-        if self.merger.npol == 1:
-            sampint = (self.merger.gethdr('SAMPINT')) # samples per integration
-            fid0 += np.uint64(sampint)
-
-        self.fid0 = fid0
+        self.fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
         
         return self.fid0
 
@@ -156,7 +141,7 @@ class CardCapNetworkSource:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
-                yield (fpga_data, fids)
+                yield (packets, fids)
             except StopIteration:
                 break
 

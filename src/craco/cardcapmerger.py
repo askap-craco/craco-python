@@ -8,7 +8,7 @@ import numpy as np
 import os
 import sys
 import logging
-from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
+from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM, get_fid0_from_bat_and_header
 from numba.types import List
 from craco.utils import get_target_beam
 from typing import List
@@ -281,6 +281,10 @@ class CcapMerger:
     def target(self):
         return self.gethdr('TARGET')
 
+    def get_fid0_from_start_bat(self, start_bat):
+        fid0 = get_fid0_from_bat_and_header(start_bat, self.ccap[0].mainhdr)
+        return fid0
+
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]
     
@@ -308,25 +312,28 @@ class CcapMerger:
         assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
         while True:
             packets = []
+            fids = []
             finished_array = []
+
             for iterno, i in enumerate(iters):
                 try:
                     # if cardcap file is empty, then we output None forever and hope
                     # that some other file terminates the run
                     # If empty, send None forever
-                    packet = next(i)
+                    fid, packet = next(i)
                     finished = False
 
                 except StopIteration:
-                    packet = (None, None)
+                    fid = None
+                    packet = None
                     finished = True
 
                 packets.append(packet)
+                fids.append(fid)
                 finished_array.append(finished)
 
             assert len(packets) == len(iters)
             flagged_array = [p is None or p[1] is None for p in packets]
-            fids = [None if p is None else p[0] for p in packets]
             num_finished = sum(finished_array) # True is 1 and Flase is 0, so this is the number of finished things
             frac_finished = num_finished/len(finished_array)
             finished = frac_finished >= frac_finished_threshold
@@ -348,10 +355,10 @@ class CcapMerger:
         :beam: choose beam. None means whatever is in the source. -1 means force all or error. else choose a beam number
         '''
         for packets, fids in self.packet_iter(frac_finished_threshold, beam):
-            outfid, dout = self.merge_and_mask_packets(packets, beam)
+            outfid, dout = self.merge_and_mask_packets(packets, fids, beam)
             yield outfid, dout
 
-    def merge_and_mask_packets(self, packets, beam=None):
+    def merge_and_mask_packets(self, packets, fids, beam=None):
         nfile = len(self.ccap)
         assert self.nchan == len(self.ccap)*self.nchan_per_file
         nint_total = self.ntpkt_per_frame*self.nint_per_packet
@@ -364,7 +371,7 @@ class CcapMerger:
         log.debug('Initial dout shape=%s final shape=%s beam=%s nbeam=%s', shape, newshape, beam, nbeam)
         outfid = None
         
-        for ip, (fid, p) in enumerate(packets):
+        for ip, (fid, p) in enumerate(zip(fids, packets)):
             assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
             #log.debug('ip=%s fid=%s p.shape=%s dout.shape=%s', ip, fid, p.shape, dout.shape)
             
