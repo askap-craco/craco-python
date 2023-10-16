@@ -152,7 +152,7 @@ def check_piperun(sbid, runname, client):
         if notice is not None:
             send_slack_msg(notice, client, )
 
-if __name__ == "__main__":
+def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(
         description='post slack notification for craco offline pipeline run...', 
@@ -164,3 +164,6 @@ if __name__ == "__main__":
 
     client = get_slack_client()
     check_piperun(values.s, values.r, client)
+
+if __name__ == "__main__":
+    _main()
