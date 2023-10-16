@@ -34,8 +34,9 @@ class SharedBlock(shared_memory.SharedMemory):
     def __init__(self, name, create, block_size):
         self.extra_bytes = self.WRITER_NBYTES + self.READER_NBYTES + self.HDR_SIZE
         super().__init__(name, create, block_size + self.extra_bytes)
-        self.reset_write_bytes()
-        self.reset_read_bytes()
+        if create:
+            self.reset_write_bytes()
+            self.reset_read_bytes()
         
     def reset_write_bytes(self):
         self.buf[self.WRITER_BYTES_START_POS:self.WRITER_BYTES_END_POS] = np.zeros(self.WRITER_NBYTES, dtype='uint8').tobytes()
@@ -98,6 +99,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if iwriter >= self.WRITER_NBYTES or iwriter < 0:
+            raise SharedBlockError(f"Max number of writers allowed = {self.WRITER_NBYTES}, given = {iwriter}")
+        
         if self.buf[self.WRITER_BYTES_START_POS + iwriter] != 1:
             raise SharedBlockError(f"Cannot engage the shared block at writer pos {iwriter} as it is either not yet acquired (status = 0), or already engaged (status = 2). Current status = {self.buf[self.WRITER_BYTES_START_POS + iwriter]}")
         else:
@@ -112,6 +116,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if ireader >= self.READER_NBYTES or ireader < 0:
+            raise SharedBlockError(f"Max number of readers allowed = {self.READER_NBYTES}, given = {ireader}")
+        
         if self.buf[self.READER_BYTES_START_POS + ireader] != 1:
             raise SharedBlockError(f"Cannot engage the shared block at reader pos {ireader} as it is either not yet acquired (status = 0), or already engaged (status = 2). Current status = {self.buf[self.READER_BYTES_START_POS + ireader]}")
         else:
@@ -125,6 +132,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if iwriter >= self.WRITER_NBYTES or iwriter < 0:
+            raise SharedBlockError(f"Max number of writers allowed = {self.WRITER_NBYTES}, given = {iwriter}")
+        
         if self.buf[self.WRITER_BYTES_START_POS + iwriter] != 2:
             raise SharedBlockError(f"Cannot deengage the shared block at writer pos {iwriter} as it is either not yet acquired (status = 0), or not yet engaged (status = 1). Current status = {self.buf[self.WRITER_BYTES_START_POS + iwriter]}")
         else:
@@ -139,6 +149,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if ireader >= self.READER_NBYTES or ireader < 0:
+            raise SharedBlockError(f"Max number of readers allowed = {self.READER_NBYTES}, given = {ireader}")
+        
         if self.buf[self.READER_BYTES_START_POS + ireader] != 2:
             raise SharedBlockError(f"Cannot deengage the shared block at reader pos {ireader} as it is either not yet acquired (status = 0), or not yet engaged (status = 1). Current status = {self.buf[self.READER_BYTES_START_POS + ireader]}")
         else:
@@ -152,6 +165,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if iwriter >= self.WRITER_NBYTES or iwriter < 0:
+            raise SharedBlockError(f"Max number of writers allowed = {self.WRITER_NBYTES}, given = {iwriter}")
+        
         if self.buf[self.WRITER_BYTES_START_POS + iwriter] != 1:
             raise SharedBlockError(f"Cannot release writer at {iwriter}. Current status = {self.buf[self.WRITER_BYTES_START_POS + iwriter]}, expected 1")
         else:
@@ -165,6 +181,9 @@ class SharedBlock(shared_memory.SharedMemory):
         Returns 0 if all OK
         Raises SharedBlockError if unsuccesfull
         '''
+        if ireader >= self.READER_NBYTES or ireader < 0:
+            raise SharedBlockError(f"Max number of readers allowed = {self.READER_NBYTES}, given = {ireader}")
+        
         if self.buf[self.READER_BYTES_START_POS + ireader] != 1:
             raise SharedBlockError(f"Cannot release reader at {ireader}. Current status = {self.buf[self.READER_BYTES_START_POS + ireader]}, expected 1")
         else:
