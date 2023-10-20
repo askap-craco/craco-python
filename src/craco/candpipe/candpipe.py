@@ -156,8 +156,11 @@ def _main():
         config = yaml.safe_load(yaml_file)
 
     for f in args.files:
-        p = Pipeline(f, args, config)
-        p.run()
+        try:
+            p = Pipeline(f, args, config)
+            p.run()
+        except:
+            logging.info(f"failed to run candpipe on {f}... aborted...")
 
     
     
