@@ -31,8 +31,8 @@ class CracoCand:
         self.mentionlst = mentionlst
         
     def get_cand_info(self, fpath):
-        # pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.b(\d{2}).txt"
-        pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.txtb(\d{2})"
+        pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.b(\d{2}).txt"
+        # pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.txtb(\d{2})"
         match = re.findall(pat, fpath)
         assert len(match) == 1, "wrong file path produced..."
         self.sbid, self.scan, self.tstart, self.runname, self.beam = match[0]
