@@ -112,7 +112,7 @@ class CracoCand:
             
         else:
             for i, row in df.iterrows():
-                notice += f'\t• *{row[srcnamecol]}* - <http://{self._construct_source_page(row)}|candidate page> \n'
+                notice += f'\t• *{row[srcnamecol]}* SNR = {row["SNR"]:.1f}, DM = {row["dm_pccm3"]:.1f}, boxcwidth = {row["boxc_width"]}  - <http://{self._construct_source_page(row)}|candidate page> \n'
         return notice
     
     def format_slack_notice(self, maxsrc=10, racs=True, psr=True, unknown=True, newcat=True):
@@ -130,7 +130,7 @@ class CracoCand:
             )
         if newcat and self.newcat_source is not None:
             notice += self._format_slack_df_notice(
-                self.newcat_source, header="**TEST** User Defined Sources", maxsrc=maxsrc, srcnamecol="NEW_name"
+                self.newcat_source, header="User Defined Sources", maxsrc=maxsrc, srcnamecol="NEW_name"
             )
         
         if unknown and self.unknown_source is not None:
