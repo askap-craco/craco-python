@@ -21,15 +21,18 @@ class CracoCand:
         ### convert everything to string for RACS_name and PSR_name
         self.df["PSR_name"] = self.df["PSR_name"].astype(str)
         self.df["RACS_name"] = self.df["RACS_name"].astype(str)
+        self.df["NEW_name"] = self.df["NEW_name"].astype(str)
         
         self.racs_source = self.get_known_racs_source()
         self.psr_source = self.get_known_psr_source()
         self.unknown_source = self.get_unknown_source()
+        self.newcat_source = self.get_newcat_source()
         
         self.mentionlst = mentionlst
         
     def get_cand_info(self, fpath):
-        pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.b(\d{2}).txt"
+        # pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.b(\d{2}).txt"
+        pat = "craco/SB(\d{6})/scans/(\d{2})/(\d+)/(.*)/clustering_output/candidates.txtb(\d{2})"
         match = re.findall(pat, fpath)
         assert len(match) == 1, "wrong file path produced..."
         self.sbid, self.scan, self.tstart, self.runname, self.beam = match[0]
@@ -60,6 +63,12 @@ class CracoCand:
         if len(racs_cands) == 0: return None
         
         return self._group_by_known_source(racs_cands, "RACS_name")
+
+    def get_newcat_source(self, ):
+        newcat_cands = self.df[self.df["NEW_name"] != "nan"]
+        if len(newcat_cands) == 0: return None
+
+        return self._group_by_known_source(newcat_cands, "NEW_name")
         
     def get_unknown_source(self, groupradius=30, min_samples=1):
         unknown_source = self.df[
@@ -106,7 +115,7 @@ class CracoCand:
                 notice += f'\t• *{row[srcnamecol]}* - <http://{self._construct_source_page(row)}|candidate page> \n'
         return notice
     
-    def format_slack_notice(self, maxsrc=10, racs=True, psr=True, unknown=True):
+    def format_slack_notice(self, maxsrc=10, racs=True, psr=True, unknown=True, newcat=True):
         if len(self.df) == 0: return None
         
         notice = f"*{self.sbid} BEAM{self.beam} candidate notification* - _{self.scan}/{self.tstart}/{self.runname}_ \n"
@@ -119,6 +128,11 @@ class CracoCand:
             notice += self._format_slack_df_notice(
                 self.psr_source, header="Known Pulsars", maxsrc=maxsrc, srcnamecol="PSR_name"
             )
+        if newcat and self.newcat_source is not None:
+            notice += self._format_slack_df_notice(
+                self.newcat_source, header="**TEST** User Defined Sources", maxsrc=maxsrc, srcnamecol="NEW_name"
+            )
+        
         if unknown and self.unknown_source is not None:
             notice += self._format_slack_df_notice(
                 self.unknown_source, header="Unknown Sources", maxsrc=maxsrc, srcnamecol="sourcename"
@@ -144,6 +158,7 @@ def send_slack_msg(msg, client, channel="C05Q11P9GRH"):
 def check_piperun(sbid, runname, client):
     candfiles = glob.glob(
         f"/data/seren-??/big/craco/SB0{sbid}/scans/??/*/{runname}/clustering_output/candidates.b??.txt.uniq.csv"
+        # f"/data/seren-??/big/craco/SB0{sbid}/scans/??/*/{runname}/clustering_output/candidates.txtb??.uniq.csv"
     )
 
     for candfile in candfiles:
