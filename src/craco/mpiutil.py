@@ -72,6 +72,17 @@ def make_log_handler(comm):
     handler.setFormatter(logging.Formatter(FORMAT))
     return handler
 
+def setup_logging(comm, verbose=False):
+    if verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+
+    logger = logging.getLogger() # get root logger
+    logger.addHandler(make_log_handler(comm))
+    logger.setLevel(level)
+
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
