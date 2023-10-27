@@ -260,14 +260,14 @@ class MpiObsInfo:
         Return the 0 based index in the list of sources at the specified time
         '''
         assert self.md is not None, 'Requested source index but no metadata specified'
-        s = self.md.source_index_at_time(mjd.value)
+        s = self.md.source_index_at_time(mjd)
         return s
 
     def uvw_at_time(self, mjd:Time):
         '''
         Returns np array (nant, 3) UVW values in seconds at the given time
         '''
-        uvw = self.md.uvw_at_time(mjd.value)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
+        uvw = self.md.uvw_at_time(mjd)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
         return uvw
 
     def antflags_at_time(self, mjd:Time):
@@ -275,7 +275,7 @@ class MpiObsInfo:
         Return antenna flags at given time
         :see:MetadadtaFile for format
         '''
-        flags =  self.md.flags_at_time(mjd.value)[self.valid_ants_0based]
+        flags =  self.md.flags_at_time(mjd)[self.valid_ants_0based]
         return flags
 
     def baseline_iter(self):
@@ -444,7 +444,7 @@ class MpiObsInfo:
         if self.md is None: # return a default onne in case metadata not set - just for filterbanks
             coord = SkyCoord('00h00m00s +00d00m00s' )
         else:
-            source = self.md.source_at_time(self.pipe_info.beamid, tstart.mjd)
+            source = self.md.source_at_time(self.pipe_info.beamid, tstart)
             coord = source['skycoord']
             
         return coord

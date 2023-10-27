@@ -14,6 +14,7 @@ import logging
 import pytest
 from craco.metadatafile import *
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def test_dummy():
     assert src['ra'] == c.ra.deg
     assert src['dec'] == c.dec.deg
 
-    mjd = 235135
+    mjd = Time(235135, scale='tai', format='mjd')
     assert d.source_index_at_time(mjd) == 0
     assert d.source_at_time(0,mjd) is not None
     assert np.all(d.uvw_at_time(mjd) == 0)

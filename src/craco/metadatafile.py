@@ -183,11 +183,11 @@ class MetadataFile:
         # Keys for eeach etnry are:
         #dict_keys(['antenna_targets', 'antennas', 'beams_direction', 'beams_offsets', 'cycle_period', 'flagged', 'phase_direction', 'polangle', 'polmode', 'sbid', 'scan_id', 'schedulingblock_id', 'sky_frequency', 'target_direction', 'target_name', 'timestamp'])
 
-    def source_name_at_time(self, time : float):
+    def source_name_at_time(self, time : Time):
         srcname = self.data_at_time(time)['target_name']
         return srcname
 
-    def source_index_at_time(self, time : float):
+    def source_index_at_time(self, time : Time):
         srcname = self.source_name_at_time(time)
         # Looup index by stupid loop:
         for i, k in enumerate(self._sources_b0.keys()):
@@ -197,7 +197,7 @@ class MetadataFile:
         sourceidx = i
         return sourceidx
 
-    def source_at_time(self, beam: int,  time : float):
+    def source_at_time(self, beam: int,  time : Time):
         '''
         Return the source dictionary being tracked at the given time and beam
         '''
@@ -206,29 +206,29 @@ class MetadataFile:
         
         return source
 
-    def data_index_at_time(self, time : float):
-        idx = int(self.index_interp(time))
+    def data_index_at_time(self, time : Time):
+        idx = int(self.index_interp(time.tai.mjd))
         return idx
 
-    def data_at_time(self, time : float):
+    def data_at_time(self, time : Time):
         return self.data[self.data_index_at_time(time)]
 
-    def flags_at_time(self, time : float):
+    def flags_at_time(self, time : Time):
         '''
         Returns the flags applicable at the time
         :returns: np array of length nant with True if flagged
         '''
-        flags = self.flag_interp(time) == 1.0
+        flags = self.flag_interp(time.tai.mjd) == 1.0
         return flags
 
-    def uvw_at_time(self, time : float):
+    def uvw_at_time(self, time : Time):
         '''
         Returns UVW for each antenna in meters. Interpolated to the given time 
 
-        :time: MJD time (float)
+        :time: MJD time 
         :returns: np.array shape [NANT, NBEAM, 3] type float
         '''
-        return self.uvw_interp(time)
+        return self.uvw_interp(time.tai.mjd)
 
     def sources(self, beam):
         '''

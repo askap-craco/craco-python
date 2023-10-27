@@ -96,7 +96,7 @@ def _main():
 
     for ibeam, beam in enumerate(beams):
         full_source_list = list(md.sources(beam).values())
-        meta_source_idx = md.source_index_at_time(tstart)
+        meta_source_idx = md.source_index_at_time(merge.mjd0)
         if len(full_source_list) > 1:
             warnings.warn(f'Metadata contains more than 1 source. Setting source table to the source at tstart={tstart} which was {full_source_list[meta_source_idx]}')
             
@@ -126,10 +126,10 @@ def _main():
                 break
         
             weights = 1-blk.mask.astype(np.float32) # 0 if flagged. 1 if OK.
-            uvw = md.uvw_at_time(mjd.value)/scipy.constants.c # UVW in seconds 
+            uvw = md.uvw_at_time(mjd)/scipy.constants.c # UVW in seconds 
             antflags = md.flags_at_time(mjd.value)
-            sourceidx = md.source_index_at_time(mjd.value)
-            sourcename = md.source_name_at_time(mjd.value)
+            sourceidx = md.source_index_at_time(mjd)
+            sourcename = md.source_name_at_time(mjd)
             log.debug('ibld=%s mjd=%s source=%s id=%d shape=%s fid=%s', iblk, mjd.value, sourcename, sourceidx, blk.shape, fid)
             # FITS standard starts at 1
             if sourceidx != meta_source_idx:
