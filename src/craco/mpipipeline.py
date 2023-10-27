@@ -49,9 +49,39 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 numprocs = comm.Get_size()
 
+# realtime SCHED_FIFO priorities
+BEAM_PRIORITY = 90
+RX_PRIORITY = 91
+
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
 
+def set_scheduler(priority:int, policy=None):
+    '''
+    This breaks the system
+        # setting RT priorities makes MPI deadlcok it appears, even with SCHED_RR.
+        # SO try just setting nice for now
+    '''
+    if policy is None:
+        policy = os.SCHED_RR
+        
+    prio_max = os.sched_get_priority_max(policy)
+    assert priority <= prio_max, f'Requested priority {prority} greater than max {prio_max} for policy {policy}'
+    
+    param = os.sched_param(priority)
+    pid = 0 # means current process
+    affinity = os.sched_getaffinity(pid)
+    try:
+        #log.info('Setting scheduler policy to %d with priority %d. Affinity is %s. RR interval is %s ms',
+        #policy, priority, affinity, os.sched_rr_get_interval(pid)*1e3)
+        #os.sched_setscheduler(pid, policy, param)
+        #os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(90))
+        nicelevel = -19
+        old_nicelevel = os.nice(nicelevel)
+        log.info('Set nice level from %d to %d', old_nicelevel, nicelevel)
+
+    except PermissionError:
+        log.info('Did not have permission to set scheduler.')
 
 class BaselineIndex:
     def __init__(self, blidx, a1, a2, ia1, ia2):
@@ -602,6 +632,7 @@ def proc_rx(pipe_info):
     Process 1 card per beam
     1 card = 6 FGPAs
     '''
+    set_scheduler(RX_PRIORITY)
     ccap = open_source(pipe_info)
     log.info('opened source')
 
@@ -925,6 +956,7 @@ class UvFitsFileSink:
         self.close()
         
 def proc_beam(pipe_info):
+    set_scheduler(BEAM_PRIORITY)
     all_hdrs = comm.allgather([''])
     info = MpiObsInfo(all_hdrs, pipe_info)
 
