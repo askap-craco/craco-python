@@ -49,9 +49,39 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 numprocs = comm.Get_size()
 
+# realtime SCHED_FIFO priorities
+BEAM_PRIORITY = 90
+RX_PRIORITY = 91
+
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
 
+def set_scheduler(priority:int, policy=None):
+    '''
+    This breaks the system
+        # setting RT priorities makes MPI deadlcok it appears, even with SCHED_RR.
+        # SO try just setting nice for now
+    '''
+    if policy is None:
+        policy = os.SCHED_RR
+        
+    prio_max = os.sched_get_priority_max(policy)
+    assert priority <= prio_max, f'Requested priority {prority} greater than max {prio_max} for policy {policy}'
+    
+    param = os.sched_param(priority)
+    pid = 0 # means current process
+    affinity = os.sched_getaffinity(pid)
+    try:
+        #log.info('Setting scheduler policy to %d with priority %d. Affinity is %s. RR interval is %s ms',
+        #policy, priority, affinity, os.sched_rr_get_interval(pid)*1e3)
+        #os.sched_setscheduler(pid, policy, param)
+        #os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(90))
+        nicelevel = -19
+        old_nicelevel = os.nice(nicelevel)
+        log.info('Set nice level from %d to %d', old_nicelevel, nicelevel)
+
+    except PermissionError:
+        log.info('Did not have permission to set scheduler.')
 
 class BaselineIndex:
     def __init__(self, blidx, a1, a2, ia1, ia2):
@@ -84,7 +114,7 @@ class BaselineIndex:
         
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
-CPLX_DTYPE = np.complex64 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
+CPLX_DTYPE = np.float32 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
 
 class BeamRankInfo(namedtuple('BeamProcInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     @property
@@ -184,14 +214,12 @@ class MpiObsInfo:
         self.values = values
         # make megers for all the receiers
         # just assume beams will have returned ['']
-        self.card_mergers = []
-        for card_hdrs in hdrs:
-            if len(card_hdrs) > 0 and len(card_hdrs[0]) > 0:
-                self.card_mergers.append(CcapMerger.from_headers(card_hdrs))
+        # I'm not sure we need card mergers any more
+        #self.card_mergers = []
+        #for card_hdrs in hdrs:
+        #    if len(card_hdrs) > 0 and len(card_hdrs[0]) > 0:
+        #        self.card_mergers.append(CcapMerger.from_headers(card_hdrs))
                 
-        #self.card_mergers = [CcapMerger.from_headers(card_hdrs)
-        #                     for card_hdrs in hdrs if len(card_hdrs[0]) != 0]
-        
         all_hdrs = []
 
         # flatten into all headers
@@ -201,20 +229,10 @@ class MpiObsInfo:
                     all_hdrs.append(fpga_hdr)
 
         self.main_merger = CcapMerger.from_headers(all_hdrs)
-
         m = self.main_merger
-        assert m.fch1 == m.all_freqs.min(), f'Channel 0 = {m.fch1} but lowest channel is {m.all_freqs.min()}'
+        self.raw_freq_config = m.freq_config
+        self.vis_freq_config = self.raw_freq_config.fscrunch(self.values.vis_fscrunch)
 
-        # we're goign to assume the individual card receiver mergers and preprocessing
-        # will do the right thing. So we're just going to check channels at a card level
-
-        card_freqs = np.array([m.fch1 for m in self.card_mergers])
-        if len(self.card_mergers) > 1:
-            card_freqdiff = card_freqs[1:] - card_freqs[:-1]
-            card_foff = np.abs(card_freqdiff[0] - card_freqdiff)
-            assert np.all(card_foff < 1e-3), f'Cards frequencies not contiguous {card_foff} {card_freqs} {card_freqdiff}'
-            assert card_freqdiff[0] > 0, f'Card frequency increment should probably be positive. It was {card_freqdiff[0]}'
-            
         self.__fid0 = None # this gets sent with some transposes later
 
         if self.pipe_info.is_beam_processor and values.metadata is not None:
@@ -225,6 +243,7 @@ class MpiObsInfo:
 
         self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
         assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
+
   
     def sources(self):
         '''
@@ -375,7 +394,7 @@ class MpiObsInfo:
         '''
         Number of channels of input before fscrunch
         '''
-        return self.main_merger.nchan
+        return self.raw_freq_config.nchan
 
     @property
     def npol(self):
@@ -389,21 +408,21 @@ class MpiObsInfo:
         '''
         First channel frequency
         '''
-        return self.main_merger.fch1
+        return self.raw_freq_config.fch1
 
     @property
     def fcent(self):
         '''
         Central frequency of band
         '''
-        return self.main_merger.fcent
+        return self.raw_freq_config.fcent
 
     @property
     def foff(self):
         '''
         Offset Hz between channels
         '''
-        return self.main_merger.foff
+        return self.raw_freq_config.foff
 
     @property
     def vis_channel_frequencies(self):
@@ -411,9 +430,7 @@ class MpiObsInfo:
         Channel frequencies in Hz of channels in the visibilities after 
         f scrunching
         '''
-        main_freqs = np.arange(self.nchan)*self.foff + self.fch1
-        vis_freqs = main_freqs.reshape(-1, self.vis_fscrunch).mean(axis=1)
-        return vis_freqs
+        return self.vis_freq_config.channel_frequencies
 
     @property
     def skycoord(self) -> SkyCoord:
@@ -481,8 +498,6 @@ def get_transpose_dtype(values):
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
     npol = 1 # card averager always averagers pol
-    rdtype = np.float32
-    cdtyep = np.complex64
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
     return dt
 
@@ -542,17 +557,15 @@ class ByteTransposer:
         self.dtype = get_transpose_dtype(info)
         self.mpi_dtype = MPI.BYTE
         values = info.values
-                 
-        #self.msgsize = self.dtype.itemsize
-        if values.transpose_msg_bytes > 0:
-            self.msgsize = min(values.transpose_msg_bytes, self.dtype.itemsize)
-        else:
-            self.msgsize = self.dtype.itemsize
-                 
-        self.displacement = self.dtype.itemsize
-        self.nmsgs = (self.dtype.itemsize) // self.msgsize
+        assert values.transpose_nmsg > 0, 'Invalid transpose nmsg'
 
-        log.info('Transposing %s with type=%s  size=%s NMSG=%s', self.dtype, self.mpi_dtype, self.msgsize, self.nmsgs)
+        assert self.dtype.itemsize % values.transpose_nmsg == 0, f'Transpose nmsg must divide evenly into {values.transpose_nmsg}. it was {values.tranpose_nmsg}'
+                 
+        self.msgsize = self.dtype.itemsize // values.transpose_nmsg
+        self.displacement = self.dtype.itemsize
+        self.nmsgs = values.transpose_nmsg
+
+        log.info('Transposing %s with type=%s  size=%s NMSG=%s msgsize=%s', self.dtype, self.mpi_dtype, self.dtype.itemsize, self.nmsgs, self.msgsize)
         
         self.values = info.values
         self.tx_counts = np.zeros(numprocs, np.int32)
@@ -566,6 +579,7 @@ class ByteTransposer:
         #comm.Barrier() # Barrier can take a super long time and slow everything to a halt. dont do it
         t.tick('barrier')
 
+        assert self.nmsgs * self.msgsize == self.dtype.itemsize, 'for now we have to have whole numbers of messages. TODO: Handle final block'
         for imsg in range(nmsgs):
             msgsize = self.msgsize # TODO: Handle final block
             s_msg = [dtx.view(np.byte),
@@ -618,6 +632,7 @@ def proc_rx(pipe_info):
     Process 1 card per beam
     1 card = 6 FGPAs
     '''
+    set_scheduler(RX_PRIORITY)
     ccap = open_source(pipe_info)
     log.info('opened source')
 
@@ -673,8 +688,11 @@ def proc_rx(pipe_info):
     best_avg_time = 1e6
     
     t_start = MPI.Wtime()
+    timer = Timer()
 
     for ibuf, (packets, fids) in enumerate(pktiter):
+        timer.tick('read')
+        
         expected_fid = info.fid_of_block(ibuf) 
 
         now = MPI.Wtime()
@@ -682,30 +700,34 @@ def proc_rx(pipe_info):
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
         test_mode = info.values.test_mode
-
-        if test_mode != 'none': # check frame IDs are sensible
+        check_fids = False
+        if check_fids:
             for pkt, fid in zip(packets, fids):
+                log.info('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
                 pktfid = None if pkt is None else pkt['frame_id'][0,0]
                 assert pkt is None or pktfid == fid, f'FID did not match for ibuf {ibuf}. Expected {fid} but got {pktfid}'
                 assert pkt is None or pktfid == expected_fid, f'FID did not match expected. Expected {expected_fid} but got {pktfid}'
+            timer.tick('check fids')
 
         if test_mode == 'none':
             averaged = averager.accumulate_packets(packets)
+            timer.tick('average')
         elif test_mode == 'fid':
             fidnos = np.array([0 if pkt is None else fid for pkt, fid in zip(packets, fids)])
             averaged['ics'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
             averaged['cas'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
             averaged['vis'] = fidnos[0]
+            timer.tick('test-fid')
         elif test_mode == 'cardid':
             averaged['ics'].flat = cardidx #np.arange(averaged['ics'].size)
             averaged['cas'].flat = np.arange(averaged['cas'].size)
             averaged['vis'].flat = np.arange(averaged['vis'].size)
+            timer.tick('test-cardid')
         else:
             raise ValueError(f'Invalid test mode {test_mode}')
 
         avg_end = MPI.Wtime()
         avg_time = avg_end - avg_start
-
         best_avg_time = min(avg_time, best_avg_time)
         #print('RX times', read_time, avg_time, t_start, now, avg_start, avg_end)
         if avg_time*1e3 > 110:
@@ -713,6 +735,7 @@ def proc_rx(pipe_info):
             
 
         transposer.send(averaged)
+        timer.tick('transpose')
         transpose_end = MPI.Wtime()
         transpose_time = transpose_end - avg_end
         
@@ -721,7 +744,7 @@ def proc_rx(pipe_info):
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
             read_rate = read_size_bytes/1e6 / read_time
-            log.info('RANK0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s',
+            log.info('CARD0 ibuf=%d read time %0.1fms rate=%0.1f MB/s. Transpose %s time=%0.1fms rate=%0.1fGbps. Accumulation time=%0.1fms last_nvalid=%d shape=%s dtype=%s, accum size=%s read size %s. Timer: %s',
                      ibuf,
                      read_time*1e3,
                      read_rate,
@@ -733,9 +756,11 @@ def proc_rx(pipe_info):
                      averaged.shape,
                      averaged.dtype,
                      size_bytes,
-                     read_size_bytes)
+                     read_size_bytes,
+                     timer)
 
         t_start = MPI.Wtime()
+        timer = Timer()
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
 
@@ -758,6 +783,7 @@ class FilterbankSink:
                'foff':vis_source.foff,
                'source_name':vis_source.target
         }
+        log.info('Creating filterbank %s with header %s', fname, hdr)
 
         self.fout = sigproc.SigprocFile(fname, 'wb', hdr)
 
@@ -841,7 +867,16 @@ class UvFitsFileSink:
         if self.uvout is None:
             return
 
+        t = Timer()
         vis_data = vis_block.data
+
+
+        raw_dump = False
+        if raw_dump:
+            vis_data.tofile(self.uvout.fout)
+            return
+
+        
         info = self.obs_info
         fid_start = vis_block.fid_start
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
@@ -851,7 +886,22 @@ class UvFitsFileSink:
         sourceidx = vis_block.source_index
         uvw = vis_block.uvw
         antflags = vis_block.antflags
-        dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
+        t.tick('prep')
+        if np.iscomplexobj(vis_data):
+            dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
+            t.tick('transpose')
+            damp = abs(dreshape)
+            t.tick('amp')
+        else:
+            # transpose takes 30 ms
+            dreshape = np.transpose(vis_data, (3,1,0,2,4)).reshape(vis_nt, nbl, self.total_nchan, self.npol,2) # should be [t, baseline, coarsechan*finechan]
+            t.tick('transpose')
+
+            # amplitude takes 14 ms
+            damp = np.sqrt(dreshape[...,0]**2 + dreshape[...,1]**2)
+            t.tick('amp')
+
+
         log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
         nant = info.nant
         inttime = info.inttime.to(u.second).value*info.vis_tscrunch
@@ -860,11 +910,12 @@ class UvFitsFileSink:
         blflags = vis_block.baseline_flags
 
         weights = np.ones((vis_nt, nbl, self.total_nchan, self.npol), dtype=np.float32)
-        weights[abs(dreshape) == 0] = 0 # flag channels that have zero amplitude
+        weights[damp == 0] = 0 # flag channels that have zero amplitude
         uvw_baselines = np.empty((nbl, 3))
 
         # fits convention has source index with starting value of 1
         fits_sourceidx = sourceidx + 1
+        t.tick('prep weights')
 
         for blinfo in info.baseline_iter():
             ia1 = blinfo.ia1
@@ -876,8 +927,9 @@ class UvFitsFileSink:
             if blflags[ibl]:
                 weights[:, ibl, ...] = 0
                 dreshape[:, ibl,...] = 0 # set output to zeros too, just so we can't cheat
-        
 
+        t.tick('apply weights')
+        
         # UV Fits files really like being in time order
         for itime in range(vis_nt):
             # FID is for the beginning of the block.
@@ -886,9 +938,12 @@ class UvFitsFileSink:
             mjd = info.fid_to_mjd(fid_itime)
             log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
             self.uvout.put_data_block(uvw_baselines, mjd.value, self.blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
-        
+
+        t.tick('Write')
         self.uvout.fout.flush()
-        log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups}')
+        t.tick('flush')
+        if self.beamno == 0:
+            log.info(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
         self.blockno += 1
 
 
@@ -901,6 +956,7 @@ class UvFitsFileSink:
         self.close()
         
 def proc_beam(pipe_info):
+    set_scheduler(BEAM_PRIORITY)
     all_hdrs = comm.allgather([''])
     info = MpiObsInfo(all_hdrs, pipe_info)
 
@@ -1050,10 +1106,11 @@ def dump_rankfile(pipe_info, fpga_per_rx=3):
                 slot = 1 # fixed because both cards are on NUMA=1
                 # Put different FPGAs on differnt cores
                 evenfpga = fpga % 2 == 0
-                ncores = 10
-                icore = (hostrank % 5)*2
-                core = f'{icore}-{icore+3}' # let them be anywhere - need at least 3 cores / card
+                ncores_per_socket = 10
+                ncores_per_proc = 1
+                icore = (hostrank*ncores_per_proc) % ncores_per_socket # use even numbered cores becase of hyperthreading
                 core='0-9'
+                core = f'{icore}-{icore+ncores_per_proc-1}'
                 slot = 1 # where the network cards are
                 rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
                 pipe_info.receiver_ranks.append(rank_info)
@@ -1067,8 +1124,8 @@ def dump_rankfile(pipe_info, fpga_per_rx=3):
                 for rank_info in pipe_info.receiver_ranks:
                     fout.write(rank_info.rank_file_str+'\n')
 
-    
-def _main():
+
+def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     from craco import search_pipeline
     
@@ -1083,7 +1140,7 @@ def _main():
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
     parser.add_argument('--ncards-per-host', type=int, default=None, help='Number of cards to process per host, helpful to match previous cardcap')
     parser.add_argument('--cardcap-dir', '-D', help='Local directory (per node?) to load cardcap files from, if relevant. If unspecified, just use files from the positional arguments')
-    parser.add_argument('--transpose-msg-bytes', help='Size of the transpose block in bytes. If -1 do the whole block at once', type=int, default=-1)
+    parser.add_argument('--transpose-nmsg', help='Number of messages to break up transpose into', type=int, default=1)
     parser.add_argument('--search-beams', help='Beams to search. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--save-uvfits-beams', help='Beams to save UV fits files for. Also requires --metadata and --fcm. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
@@ -1093,16 +1150,15 @@ def _main():
     
     parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
+
+    return parser
+
+def _main():
+
+    parser = get_parser()
     values = parser.parse_args()
     
-    if values.verbose:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-
-    logger = logging.getLogger()
-    logger.addHandler(mpiutil.make_log_handler(comm))
-    logger.setLevel(level)
+    mpiutil.setup_logging(comm, values.verbose)
 
     try :
         pipe_info = MpiPipelineInfo(values)

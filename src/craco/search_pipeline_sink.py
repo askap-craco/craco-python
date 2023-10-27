@@ -96,6 +96,13 @@ class VisInfoAdapter:
         return self.info.vis_channel_frequencies*1e6
 
     @property
+    def freq_config(self):
+        '''
+        Returns the frequency configuration object
+        '''
+        return self.info.vis_freq_config
+
+    @property
     def target_name(self):
         '''
         String target name
@@ -131,6 +138,7 @@ class VisInfoAdapter:
         Return sample interval in .... seconds?
         '''
         return self.info.vis_inttime
+
 
 class SearchPipelineSink:
     def __init__(self, info):

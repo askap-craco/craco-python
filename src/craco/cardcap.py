@@ -16,8 +16,6 @@ import copy
 import time
 import socket
 
-
-
 from craft.fitswriter import FitsTableWriter
 
 log = logging.getLogger(__name__)
@@ -39,7 +37,8 @@ from astropy.time import Time
 from astropy.io import fits
 from craco import leapseconds
 from craco.utils import ibc2beamchan
-from craco.cardcapfile import * 
+from craco.cardcapfile import *
+from craco import mpiutil
 
 
 hostname = socket.gethostname()
@@ -400,31 +399,36 @@ class FpgaCapturer:
             self.total_completions += 1
             self.total_bytes += nbytes
 
-            if self.ccap.values.workaround_craco63:
-                d['data'] = np.roll(d['data'], shift=-1, axis=0)
+            d = self.post_process(d)
+            yield fid, d
 
-            if self.ccap.values.tscrunch != 1:
-                # BUG: When tscrunch != and polsum, we average over the packest, but not inside the packet, by accident.
-                # The output is the average of all the data in the frame
-                # the header is the first header of all the headers
-                # make dtype with 1 integration per packet
-                dout = np.empty(d.shape[0], dtype=self.ccap.tscrunch_dtype)
-
-                # set header values to the first header value in the frame
-                for field in ('frame_id','bat','beam_number','sample_number','channel_number','fpga_id','nprod','flags','zero1','version','zero3'):
+    def post_process(self, d):
+        if self.ccap.values.workaround_craco63:
+            d['data'] = np.roll(d['data'], shift=-1, axis=0)
+            
+        if self.ccap.values.tscrunch != 1:
+            # BUG: When tscrunch != and polsum, we average over the packest, but not inside the packet, by accident.
+            # The output is the average of all the data in the frame
+            # the header is the first header of all the headers
+            # make dtype with 1 integration per packet
+            dout = np.empty(d.shape[0], dtype=self.ccap.tscrunch_dtype)
+        
+            # set header values to the first header value in the frame
+            for field in ('frame_id','bat','beam_number','sample_number','channel_number','fpga_id','nprod','flags','zero1','version','zero3'):
                     dout[field] = d[field][:,0]
 
                 # average over the first 2 time axes always
-                dout['data'] = d['data'].mean(axis=(1,2), dtype=np.float32).astype(np.int16)[:, np.newaxis, :, :]
-                d = dout
+            dout['data'] = d['data'].mean(axis=(1,2), dtype=np.float32).astype(np.int16)[:, np.newaxis, :, :]
+            d = dout
 
+        beam = self.ccap.values.beam
 
-            if beam is not None:
-                assert 0 <= beam < 36, f'Invalid beam {beam}'
-                mask = d['beam_number'] == beam 
-                d = d[mask]
+        if beam is not None:
+            assert 0 <= beam < 36, f'Invalid beam {beam}'
+            mask = d['beam_number'] == beam 
+            d = d[mask]
 
-            yield fid, d
+        return d
 
     def write_data(self, w):
         for fid, d in self.get_data(): # loop through completions
@@ -433,7 +437,7 @@ class FpgaCapturer:
 
         self.issue_requests()
 
-    def packet_iterator(self):
+    def real_packet_iterator(self):
         nblk = 0
         while nblk < self.values.num_msgs:
             for fid, d in self.get_data(): # loop through completions
@@ -444,6 +448,33 @@ class FpgaCapturer:
 
             self.issue_requests()
 
+    def fake_packet_iterator(self):
+        nblk = 0
+        start_bat = 0
+        sync_bat = 0
+        sampint = self.ccap.hdr['SAMPINT'][0]
+        pol_sum = self.ccap.hdr['POLSUM'][0]
+        fid = get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint)
+        while nblk < self.values.num_msgs:
+            block_index = 0
+            message_index = 0
+            d = self.rdma_buffers[block_index][message_index]
+            d['data'] = 0
+            d['bat'][0] = fid
+            d['frame_id'][0][0] = fid
+            d = self.post_process(d)
+            fid += 2048
+            
+            yield fid, d
+
+    def packet_iterator(self):
+        if self.values.fake_cardcap_data:
+            it = self.fake_packet_iterator()
+        else:
+            it = self.real_packet_iterator()
+
+        return it
+            
 
     def __del__(self):
         log.info(f'Deleting RX for card {self.ccap.values.card}  FPGA {self.fpga}')
@@ -574,8 +605,7 @@ class CardCapturer:
 
         assert np.all(fpga_foff - fpga_foff[0,0] < 1e-6), 'FPGA frequency offset not always the same'
         assert np.all(coarse_foff - coarse_foff[0,0] < 1e-6), 'Coarse frequency offset not always the same'
-
-        syncbat = ctrl.read('F_syncReset:startBat_O')
+        syncbat = "0x0" if values.fake_cardcap_data else ctrl.read('F_syncReset:startBat_O')
 
         hdr = {}
         self.hdr = hdr
@@ -587,6 +617,13 @@ class CardCapturer:
 
         dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
         iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+        cardmask = int(ctrl.read(f'acx:s{shelf:02d}:array:mask_O'))
+
+        # apparently the cardmask is a bitamsk of signed int.
+        # -1 is all unmasked - i.e. all enabled
+        icard = card - 1
+        assert 0 <= icard < 12, f'Invalid icard {icard}'
+        card_enabled = (cardmask >> icard) & 1 == 1
 
         hdr['NANT'] = (nant, 'Number of antennas')
         hdr['NBL'] = (nbl, 'Number of baselines')
@@ -636,6 +673,8 @@ class CardCapturer:
         hdr['TSCRUNCH'] = (self.values.tscrunch, 'Tscrunch factor')
         hdr['OUTSHAPE'] = (str(self.out_shape), 'Shape of file output')
         hdr['NTOUTPFM'] = (self.nintout_per_frame, 'Number of output integraitons per frame, after tscrunch')
+        hdr['CARDMASK'] = (cardmask, 'signed bitmask for all cards to be enabled')
+        hdr['CARDEN'] = (card_enabled, 'True if card enabled in bitmask')
         hdr['FLUSHBM'] = (flushOnBeam, 'T if flush on beam is enabled')
         
         self.hdr = hdr
@@ -759,7 +798,6 @@ def hexstr(s):
     return int(s, 16)
 
 def dump_rankfile(values):
-    from craco import mpiutil
     hosts = sorted(set(mpiutil.parse_hostfile(values.hostfile)))
     log.debug("Hosts %s", hosts)
     total_cards = len(values.block)*len(values.card)
@@ -836,6 +874,7 @@ class MpiCardcapController:
             for shelf in values.block:
                 dspversion = uint8tostr(ctrl.read(f"acx:s{shelf:02d}:S_corFpgaVersion:val"))
                 iocversion = uint8tostr(ctrl.read(f'acx:s{shelf:02d}:version'))
+                cardmask = ctrl.read(f'acx:s{shelf:02d}:array:mask_O')
                 for card in values.card:
                     ctrl.get_channel_frequencies(shelf, card)
 
@@ -892,9 +931,9 @@ class MpiCardcapController:
         ctrl = self.ctrl
 
         comm.Barrier()
-        start_bat = None
+        start_bat = 0
 
-        if rank == 0:
+        if rank == 0 and not values.fake_cardcap_data:
             ccap.configure()
             # disable all cards, and enable only the ones we want
             #blk = values.block[0]
@@ -908,8 +947,9 @@ class MpiCardcapController:
             #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
             ctrl.start()
             start_bat = ctrl.get_start_bat()
+            # everyone gets to see startbat after the bcast
             log.info('Start bat is 0x%x=%d', start_bat, start_bat)
-
+            
         self.start_bat = comm.bcast(start_bat, root=0)
 
 
@@ -926,6 +966,7 @@ class MpiCardcapController:
         ccap = self.ccap
         comm = self.comm
         rank = self.rank
+        values = self.values
         log.info('Stop called. Waiting for barrier')
 
         # Due to 
@@ -933,7 +974,7 @@ class MpiCardcapController:
 
         log.info('Barrier complete')
         
-        if rank == 0:
+        if rank == 0 and not values.fake_cardcap_data:
             log.info('Rank 0 complete - stopping')
             ccap.stop()
 
@@ -976,6 +1017,7 @@ def add_arguments(parser):
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
     parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=None)
+    parser.add_argument('--fake-cardcap-data', help='If running network cardcap, dont actually start, but send fake cardcap data instead', action='store_true', default=False)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')
@@ -1007,6 +1049,7 @@ def _main():
         mpi4py.rc.threads = False
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
+        mpiutil.setup_logging(comm, values.verbose)
         numprocs = comm.Get_size()
 
         # Assign 1 FPGA to every rank

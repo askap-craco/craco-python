@@ -8,10 +8,11 @@ import numpy as np
 import os
 import sys
 import logging
-from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM
+from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM, get_fid0_from_bat_and_header
 from numba.types import List
 from craco.utils import get_target_beam
 from typing import List
+from craft.freq_config import FrequencyConfig
 
 log = logging.getLogger(__name__)
 
@@ -131,8 +132,11 @@ class CcapMerger:
         self.__npol = self.ccap[0].npol
         self.all_freqs = all_freqs
         self.nchan_per_file = nfpga*NCHAN
+        self.freq_config = FrequencyConfig.from_cardcap_files(self.ccap)
+        
         log.info('Opened %d files. nint=%d ntpkt=%d nt=%d', len(self.ccap), self.nint_per_packet,
                  self.ntpkt_per_frame, self.nt_per_frame)
+        
 
 
     @classmethod
@@ -173,29 +177,39 @@ class CcapMerger:
     def fcent(self):
         '''
         Returns center frequency - units of MHz
+        originally this was the mean frequency but now, annoyingly, some cards are masked
+        and may return randomly broken frequencies.
+        Now just return the middle frequency between the top and the bottom
         '''
-        return self.all_freqs.mean()
 
+        fc = self.freq_config.fcent
+        return fc
+        
+
+    @property
+    def fchtop(self):
+        '''
+        returns frequency of the top channel
+        '''
+        return self.freq_config.fchtop
+        
     @property
     def fch1(self):
         '''
         Returns first channel frequency
         '''
-        return self.all_freqs.flat[0]
+        return self.freq_config.fch1
 
     @property
     def foff(self):
         '''
         Returns channel interval - MHz
         '''
-        fsort = np.array(sorted(self.all_freqs.flat))
-        fdiff = fsort[1:] - fsort[:-1]
-        foff = fdiff.mean()
-        return foff
+        return self.freq_config.foff
 
     @property
     def nchan(self):
-        return self.all_freqs.size
+        return self.freq_config.nchan
 
     @property
     def npol(self):
@@ -267,6 +281,10 @@ class CcapMerger:
     def target(self):
         return self.gethdr('TARGET')
 
+    def get_fid0_from_start_bat(self, start_bat):
+        fid0 = get_fid0_from_bat_and_header(start_bat, self.ccap[0].mainhdr)
+        return fid0
+
     def gethdr(self, key):
         return self.ccap[0].mainhdr[key]
     
@@ -294,25 +312,28 @@ class CcapMerger:
         assert 0 < frac_finished_threshold <= 1, f'Invalid fract finished threshoold {frac_finished_threshold}'
         while True:
             packets = []
+            fids = []
             finished_array = []
+
             for iterno, i in enumerate(iters):
                 try:
                     # if cardcap file is empty, then we output None forever and hope
                     # that some other file terminates the run
                     # If empty, send None forever
-                    packet = next(i)
+                    fid, packet = next(i)
                     finished = False
 
                 except StopIteration:
-                    packet = (None, None)
+                    fid = None
+                    packet = None
                     finished = True
 
                 packets.append(packet)
+                fids.append(fid)
                 finished_array.append(finished)
 
             assert len(packets) == len(iters)
             flagged_array = [p is None or p[1] is None for p in packets]
-            fids = [None if p is None else p[0] for p in packets]
             num_finished = sum(finished_array) # True is 1 and Flase is 0, so this is the number of finished things
             frac_finished = num_finished/len(finished_array)
             finished = frac_finished >= frac_finished_threshold
@@ -334,10 +355,10 @@ class CcapMerger:
         :beam: choose beam. None means whatever is in the source. -1 means force all or error. else choose a beam number
         '''
         for packets, fids in self.packet_iter(frac_finished_threshold, beam):
-            outfid, dout = self.merge_and_mask_packets(packets, beam)
+            outfid, dout = self.merge_and_mask_packets(packets, fids, beam)
             yield outfid, dout
 
-    def merge_and_mask_packets(self, packets, beam=None):
+    def merge_and_mask_packets(self, packets, fids, beam=None):
         nfile = len(self.ccap)
         assert self.nchan == len(self.ccap)*self.nchan_per_file
         nint_total = self.ntpkt_per_frame*self.nint_per_packet
@@ -350,7 +371,7 @@ class CcapMerger:
         log.debug('Initial dout shape=%s final shape=%s beam=%s nbeam=%s', shape, newshape, beam, nbeam)
         outfid = None
         
-        for ip, (fid, p) in enumerate(packets):
+        for ip, (fid, p) in enumerate(zip(fids, packets)):
             assert self.fidxs.shape[1] == 1, 'Can only handle single FPGA files'
             #log.debug('ip=%s fid=%s p.shape=%s dout.shape=%s', ip, fid, p.shape, dout.shape)
             

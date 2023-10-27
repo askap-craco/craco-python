@@ -83,7 +83,30 @@ def get_single_packet_dtype(nbl: int, enable_debug_hdr: bool, sum_pols: bool=Fal
     
     return np.dtype(dtype)
 
-def get_indexes(nant):
+def get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint):
+    fid_usec = 54 # 54 microseconds per FID = 27/32 * 64)
+    start_fid = (start_bat - sync_bat) / fid_usec
+    start_bfframe = start_fid / NSAMP_PER_FRAME
+    
+    # In practice we'll probably get a few frames before this FID, but it's OK because the packet fid iterator will ignore them
+    bfframe_offset = 1
+    fid0 = np.uint64(int(np.ceil(start_bfframe + bfframe_offset))*NSAMP_PER_FRAME)
+    # due to a quirk in the firmware, we'll work around a bug where the first frame ID
+    # has an offset = SPI in polsum mode
+    if pol_sum:
+        fid0 += np.uint64(sampint)
+
+    return fid0
+
+def get_fid0_from_bat_and_header(start_bat, hdr):
+    sync_bat = hdr.get('SYNCBAT')
+    log.info('Header is start_bat is 0x%x %s %s', start_bat, sync_bat, type(sync_bat))
+    sync_bat = int(sync_bat, 16)
+    sampint = hdr.get('SAMPINT')
+    pol_sum = hdr.get('POLSUM')
+    return get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint)
+
+def get_indexes(nant, exclude_ants=None):
     '''
     Returns a set of array indexs that can be used to index into baseline arrays
     assumign the way the correlator orders everythign (baseically, sensibly)
@@ -96,21 +119,26 @@ def get_indexes(nant):
     revproducts: dictionary length(nbl) keyed by tuple (a1, a2) and returns baseline index
     auto_products: length=nant array of which indices in teh correlation matrix contain autocorrelations
     cross_products: length=nbl array of which indices contain cross correlations
+    exclude_ants: set or list containint list of 1-based antenna numbers to exclude
     '''
     
     products = []
     revproducts = {}
     auto_products = []
     cross_products = []
+    if exclude_ants is None:
+        exclude_ants = set()
+        
     idx = 0
     for a1 in range(1, nant+1):
         for a2 in range(a1, nant+1):
-            products.append((a1,a2))
-            revproducts[(a1,a2)] = idx
-            if a1 == a2:
-                auto_products.append(idx)
-            else:
-                cross_products.append(idx)
+            if a1 not in exclude_ants and a2 not in exclude_ants:
+                products.append((a1,a2))
+                revproducts[(a1,a2)] = idx
+                if a1 == a2:
+                    auto_products.append(idx)
+                else:
+                    cross_products.append(idx)
             
             idx += 1
               
@@ -338,6 +366,23 @@ class CardcapFile:
         return self.mainhdr.get('TSCRUNCH', 1)
 
     @property
+    def card_enabled(self):
+        '''
+        Returns True if card enabled in card mask, which is set by operators if card malfunctioning.
+        If not in header (previous to 3 October 2023) then
+        returns True by default.
+        '''
+        return self.mainhdr.get('CARDEN', True)
+
+    @property
+    def card(self):
+        return self.mainhdr['CARD']
+
+    @property
+    def shelf(self):
+        return self.mainhdr['SHELF']
+
+    @property
     def ntpkt_per_frame(self):
         if self.tscrunch_bug:
             ntpkt = 1
@@ -389,7 +434,7 @@ class CardcapFile:
             else:
                 mylen = ngroups
                 
-            warnings.warn(f'CCAP file {self.fname} was not closed correctly. Estimating ngroups from size={nbytes} datalen={datalen} len={ngroups}')
+            #warnings.warn(f'CCAP file {self.fname} was not closed correctly. Estimating ngroups from size={nbytes} datalen={datalen} len={ngroups}')
         else:
             mylen = nax2
 

@@ -18,7 +18,7 @@ nbl = nant*(nant + 1)//2
 
 nfpga = 6
 nc = 4*nfpga
-npol = 2
+npol = 1
 
 ibl = 0
 cross_idxs = []
@@ -127,12 +127,14 @@ def test_check_accumulate_all():
             for ibc in range(NCHAN*nbeam):
                 beam, coarse_chan = ibc2beamchan(ibc)
                 for p in range(npol):
-                    print(dfpga.shape, dfpga['data'].shape)
+                    #print(dfpga.shape, dfpga['data'].shape)
                     fullchan = ifpga + 6*coarse_chan
                     dfpga['data'][ibc:ibc+nt,0,:,:,:] = input_data[beam,fullchan,:,:,:,:]
+
+    valid = np.ones(nfpga, dtype=bool)
     
     avg = Averager(nbeam, nant, nc, nt, npol)
-    avg.accumulate_all(packets)
+    avg.accumulate_all(packets, valid)
 
 
     amp = np.sqrt(input_data[...,0]**2 + input_data[...,1]**2)
