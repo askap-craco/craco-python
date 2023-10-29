@@ -12,7 +12,10 @@ import os
 class CracoCand:
     def __init__(
         self, candpath, threshold=8,
-        mentionlst=["<@U049R2ZMKAN>", "<@U012FPE7D2B>"]
+        mentionlst=[
+            "<@U049R2ZMKAN>", "<@U012FPE7D2B>", 
+            "<@U01MHB4ABEU>", #Pavan
+        ]
     ):
         self.get_cand_info(candpath)
         
