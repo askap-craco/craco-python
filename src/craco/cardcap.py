@@ -37,7 +37,8 @@ from astropy.time import Time
 from astropy.io import fits
 from craco import leapseconds
 from craco.utils import ibc2beamchan
-from craco.cardcapfile import * 
+from craco.cardcapfile import *
+from craco import mpiutil
 
 
 hostname = socket.gethostname()
@@ -797,7 +798,6 @@ def hexstr(s):
     return int(s, 16)
 
 def dump_rankfile(values):
-    from craco import mpiutil
     hosts = sorted(set(mpiutil.parse_hostfile(values.hostfile)))
     log.debug("Hosts %s", hosts)
     total_cards = len(values.block)*len(values.card)
@@ -947,9 +947,9 @@ class MpiCardcapController:
             #ctrl.start_async(values.block, values.card) # starts async but I think does a better job of turnng stuff off
             ctrl.start()
             start_bat = ctrl.get_start_bat()
+            # everyone gets to see startbat after the bcast
+            log.info('Start bat is 0x%x=%d', start_bat, start_bat)
             
-        log.info('Start bat is 0x%x=%d', start_bat, start_bat)
-
         self.start_bat = comm.bcast(start_bat, root=0)
 
 
@@ -966,6 +966,7 @@ class MpiCardcapController:
         ccap = self.ccap
         comm = self.comm
         rank = self.rank
+        values = self.values
         log.info('Stop called. Waiting for barrier')
 
         # Due to 
@@ -1048,6 +1049,7 @@ def _main():
         mpi4py.rc.threads = False
         from mpi4py import MPI
         comm = MPI.COMM_WORLD
+        mpiutil.setup_logging(comm, values.verbose)
         numprocs = comm.Get_size()
 
         # Assign 1 FPGA to every rank
