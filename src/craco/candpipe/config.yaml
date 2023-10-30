@@ -26,7 +26,7 @@ filter_radius: 2 # in unit of degree - only select catalogue candidates within t
 
 # location for pulsar/RACS catalogue csv
 catpath: ['/data/fast/wan342/dash-craco-cand-dep/data/atnf_psrcat_localized.csv', 
-          '/data/fast/wan342/dash-craco-cand-dep/data/racs_bright_1.0Jy.csv', 
+          '/data/big/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv', 
           '/data/big/craco/wan348/catalogues/craco_updated.csv']
 catcols: 
   ra: ['RAJD', 'RA', 'RAD']

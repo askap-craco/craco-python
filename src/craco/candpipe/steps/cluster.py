@@ -58,6 +58,12 @@ class Step(ProcessingStep):
         # do first clustering - time/dm/boxcar
         candidates, clustered = self.dbscan(ind)
 
+        # save the clustered file - intermediate products
+        if self.pipeline.args.save_intermediate:
+            cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
+            log.info('Saving raw candfile with cluster id to file %s.rawcat.csv', cand_fname)
+            clustered.to_csv(cand_fname + ".rawcat.csv")
+
         # do second clustering - spatial/mpix/lpix 
         candidates = self.spatial_clustering(candidates, clustered)
         
