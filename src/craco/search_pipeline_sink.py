@@ -72,16 +72,8 @@ class VisInfoAdapter:
         log.info('Returning baselines for iblk=%s start_fid=%s fid_mid=%s mjd_mid=%s tstart=%s',
                  self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
 
-        # UVW is a np array shape [nant, 3]
-        uvw = self.info.uvw_at_time(mjd_mid)
-        bluvws = {}
-
-        for blinfo in self.info.baseline_iter():
-            bluvw = uvw[blinfo.ia1, :] - uvw[blinfo.ia2, :]
-            assert np.all(bluvw != 0), f'UVWs were zero for {blinfo}'
-            d = {'UU': bluvw[0], 'VV': bluvw[1], 'WW':bluvw[2]}
-            bluvws[float(blinfo.blid)] = d
-
+        
+        bluvws = self.info.baselines_at_time(mjd_mid)
         return bluvws
 
     @property

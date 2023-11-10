@@ -34,7 +34,7 @@ from craco.search_pipeline_sink import SearchPipelineSink
 from craco.metadatafile import MetadataFile,MetadataDummy
 from scipy import constants
 from collections import namedtuple
-from craft.craco import ant2bl
+from craft.craco import ant2bl, baseline_iter
 from craco import mpiutil
 from craft.cmdline import strrange
 from craco.timer import Timer
@@ -83,34 +83,6 @@ def set_scheduler(priority:int, policy=None):
     except PermissionError:
         log.info('Did not have permission to set scheduler.')
 
-class BaselineIndex:
-    def __init__(self, blidx, a1, a2, ia1, ia2):
-        '''
-        blidx - index into an array that's had flagged antenans removed
-        a1 - 1 based antenna number
-        a2 - 1 based antenna number
-        ia1 = index into an array of antennas that's had the flagged antennas removed
-        ia2 = index into an array of antennas that's had the flagged antennas removed
-        '''
-        assert a1 > 0 and a2 > 0
-        self.blidx = blidx
-        self.a1 = a1
-        self.a2 = a2
-        self.ia1 = ia1
-        self.ia2 = ia2
-
-    @property
-    def blid(self):
-        '''
-        Returns the baseline ID (FITS formatted) of this index
-        '''
-        return ant2bl((self.a1, self.a2))
-
-    def __str__(self):
-        s = f'BaselineIndex blidx={self.blidx} {self.a1}-{self.a2} idx={self.ia1}-{self.ia2} blid={self.blid}'
-        return s
-
-    __repr__ = __str__
         
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
@@ -268,7 +240,11 @@ class MpiObsInfo:
         Returns np array (nant, 3) UVW values in seconds at the given time
         '''
         uvw = self.md.uvw_at_time(mjd)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
+
         return uvw
+
+    def baselines_at_time(self, mjd:Time):
+        return self.md.baselines_at_time(mjd, self.valid_ants_0based, self.beamid)
 
     def antflags_at_time(self, mjd:Time):
         '''
@@ -279,19 +255,7 @@ class MpiObsInfo:
         return flags
 
     def baseline_iter(self):
-        '''
-        Returns an iterator over the valid baselines
-        Returns a BaselineIndex whichis info on which baselines are present
-        No autocorrelations are returned
-        '''
-        blidx = 0
-        for ia1, a1 in enumerate(self.valid_ants_0based):
-            for a2 in self.valid_ants_0based[ia1+1:]:
-                ia2 = list(self.valid_ants_0based).index(a2)
-                b = BaselineIndex(blidx, a1+1, a2+1, ia1, ia2)
-                yield b
-                blidx += 1
-
+        return baseline_iter(self.valid_ants_0based)
                 
     @property
     def xrt_device_id(self):
@@ -831,12 +795,12 @@ class UvFitsFileSink:
         nchan = info.nchan // values.vis_fscrunch
         self.npol = 1 # card averager always sums polarisations
         npol = self.npol
-        tstart = (info.tstart.value + info.inttime.to(u.day).value)
+        tstart = (info.tstart.utc.value + info.inttime.to(u.day).value)
         self.total_nchan = nchan
         self.source_list = obs_info.sources().values()
         source_list = self.source_list
         log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
-
+        extra_header = {'BEAMID': beamno, 'TSCALE':'UTC'}
         self.uvout = CorrUvFitsFile(fileout,
                                     fcent,
                                     foff,
@@ -844,7 +808,9 @@ class UvFitsFileSink:
                                     npol,
                                     tstart,
                                     source_list,
-                                    antennas)
+                                    antennas,
+                                    extra_header=extra_header,
+                                    instrume='CRACO')
 
         # create extra tables so we can fix it later on. if the file is not closed properly
         self.uvout.fq_table().writeto(fileout+".fq_table", overwrite=True)
@@ -935,7 +901,7 @@ class UvFitsFileSink:
             # FID is for the beginning of the block.
             # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
             fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
-            mjd = info.fid_to_mjd(fid_itime)
+            mjd = info.fid_to_mjd(fid_itime).utc
             log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
             self.uvout.put_data_block(uvw_baselines, mjd.value, self.blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
 

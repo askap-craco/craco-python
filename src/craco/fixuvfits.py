@@ -39,16 +39,16 @@ def fix(fname, values):
     filesize = os.path.getsize(fname)
     hdr = fits.getheader(fname)
     #hdr = fits.header.Header.fromtextfile(fname+'.header')
-    gcount = hdr['GCOUNT'] 
-    if gcount != 1:
+    gcount = hdr['GCOUNT']
+    expected_gcount = (filesize - len(hdr.tostring())) // groupsize
+    if gcount == expected_gcount:
         print(f'File {fname} already fixed with GCOUNT={gcount}. not fixing')
         hdu = fits.open(fname)
         hdu.info()
         hdu.close()
         return
 
-    gcount = (filesize - len(hdr.tostring())) // groupsize
-    hdr['GCOUNT'] = gcount
+    hdr['GCOUNT'] = expected_gcount
     hdr['FIXED'] = True
     print(f'File {fname} is size {filesize} - header = {len(hdr.tostring())} gcount={gcount}')
     with open(fname, 'r+b') as fout: # can't be 'a' as it only appends, irrepsective of seek position
@@ -59,15 +59,16 @@ def fix(fname, values):
 
     fix_length(fname)
 
-    fq_table = fits.open(fname+'.fq_table')[1]
-    an_table = fits.open(fname+'.an_table')[1]
-    su_table = fits.open(fname+'.su_table')[1]
-    hdu = fits.open(fname, 'append')
-    #from IPython import embed
-    #embed()
-    hdu.append(fq_table)
-    hdu.append(an_table)
-    hdu.append(su_table)
+    if os.path.exists(fname+'.fq_table'):
+        print('Appending tables')
+        hdu = fits.open(fname, 'append')
+        fq_table = fits.open(fname+'.fq_table')[1]
+        an_table = fits.open(fname+'.an_table')[1]
+        su_table = fits.open(fname+'.su_table')[1]
+        hdu.append(fq_table)
+        hdu.append(an_table)
+        hdu.append(su_table)
+        
     newsize = os.path.getsize(fname)
     print(f'File {fname} fixed. new size is {newsize}')
     hdu.info()

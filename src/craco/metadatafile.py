@@ -16,10 +16,25 @@ from collections import OrderedDict
 from astropy.coordinates import SkyCoord
 from astropy import units as u
 import pylab
+from scipy import constants
+from craft.craco import ant2bl, baseline_iter
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
+uvw_dtype = [ ('UU', 'f4'), ('VV', 'f4'), ('WW','f4')]
+
+def to_uvw(uvwin):
+    '''
+    converts a normal array of 3 values into a uvw dtype
+    '''
+    assert len(uvwin) == 3
+    uvwout =  np.array([tuple(uvwin)], dtype=uvw_dtype)[0]
+    return uvwout
+
+def uvw_to_array(uvw):
+    return np.array([uvw['UU'], uvw['VV'], uvw['WW']])
 
 def get_uvw(ants):
     '''
@@ -229,6 +244,28 @@ class MetadataFile:
         :returns: np.array shape [NANT, NBEAM, 3] type float
         '''
         return self.uvw_interp(time.tai.mjd)
+
+
+    def baselines_at_time(self, time : Time, valid_ants_0based, beamid):
+        # UVW is a np array shape [nant, 3]
+        '''
+        Returns a diictionary of ['UU','VV','WW'] np.voids
+        key is baselineid (float)
+        Units are ... seconds?
+        'UU','VV','WW'
+        Units are
+        '''
+
+        uvw = self.uvw_at_time(time)[valid_ants_0based, beamid, :] / constants.c
+        bluvws = {}
+ 
+        for blinfo in baseline_iter(valid_ants_0based):
+            bluvw = uvw[blinfo.ia1, :] - uvw[blinfo.ia2, :]
+            assert np.all(bluvw != 0), f'UVWs were zero for {blinfo}={bluvw}'
+            d = np.array(bluvw, dtype=uvw_dtype)[0]
+            bluvws[float(blinfo.blid)] = d
+
+        return bluvws
 
     def sources(self, beam):
         '''
