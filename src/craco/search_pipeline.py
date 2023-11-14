@@ -1155,10 +1155,13 @@ def _main():
 
     # Create a plan
     f = uvfits.open(values.uv, skip_blocks=values.skip_blocks)
+    adapter = UvFitsVisInfoAdapter(f, 0)
+    update_uv_blocks = self.info.values.update_uv_blocks
     pipeline_wrapper = PipelineWrapper(f, values, values.device)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
+
 
     if values.wait:
         input('Press any key to continue...')
@@ -1169,6 +1172,12 @@ def _main():
         if values.nblocks is not None and iblk >= values.nblocks:
             log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
+
+        update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
+        
+        if update_now:
+            adapter = UvFitsVisInfoAdapter(f, iblk)
+            pipeline_wrapper.update_plan(adapter)
 
         pipeline_wrapper.write(input_flat)
         t.tick('written')

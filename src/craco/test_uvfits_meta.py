@@ -15,8 +15,7 @@ import pytest
 import craco.uvfits_meta
 import craft.uvfits
 from IPython import embed
-from craft.craco import ant2bl,bl2ant
-from craco.metadatafile import to_uvw, uvw_to_array
+from craft.craco import ant2bl,bl2ant,to_uvw, uvw_to_array, uvwbl2array
 from astropy.time import Time
 from numpy.testing import assert_allclose
 
@@ -118,33 +117,43 @@ def test_baselines_in_meta_match():
     tsamp = f2.tsamp
     tmid = tstart + tsamp / 2
 
-    x1 = []
-    x2 = []
-    y1 = []
-    y2 = []
-    for bl in b1.keys():
-        u1 = uvw_to_array(b1[bl])
-        u2 = uvw_to_array(b2[bl])
-        print(bl, bl2ant(bl), u1, u2, u1 - u2)
-        x1.append(u1[0])
-        x2.append(u2[0])
-        y1.append(u1[1])
-        y2.append(u2[1])
+    uvw1 = uvwbl2array(b1)
+    uvw2 = uvwbl2array(b2)
 
-    x1,x2,y1,y2 = map(np.array, (x1,x2,y1,y2))
-    assert_allclose(x1,x2,rtol=5e-7)
-    assert_allclose(y1,y2,rtol=5e-7)
+    assert_allclose(uvw1,uvw2,rtol=5e-7)
 
     plot = False
 
     if plot:
         import pylab
-        pylab.scatter(x1,y1)
-        pylab.scatter(x2,y2)
-        
+        pylab.scatter(uvw1[:,0], uvw1[:,1])
+        pylab.scatter(uvw2[:,0], uvw2[:,1])
+
+        diff = uvw1 - uvw[2]
         pylab.figure()
-        pylab.scatter(x2-x1,y2-y1)
+        pylab.scatter(diff[:,0], diff[:,1])
         pylab.show()
+
+
+def test_vis_metadata_makes_sense():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    vm1 = f1.vis_metadata(0)
+    vm2 = f2.vis_metadata(0)
+
+    uvw1 = uvwbl2array(vm1.baselines)
+    uvw2 = uvwbl2array(vm2.baselines)
+    assert_allclose(uvw1,uvw2, rtol=5e-7)
+
+    assert vm1.tstart == vm2.tstart
+    assert vm1.tsamp == vm2.tsamp
+    assert vm1.beamid == vm2.beamid
+    assert vm1.target_skycoord == vm2.target_skycoord
+    assert vm1.target_name == vm2.target_name
     
     
 def _main():

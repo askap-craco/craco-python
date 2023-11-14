@@ -38,7 +38,7 @@ class VisInfoAdapter:
         '''
         Set flag antennas as a list of 1-based integers
         '''
-        self.flag_ants = flag_ants
+        self.flag_ants = list(flag_ants)
 
     def get_max_uv(self):
         ''' Return umax, vmax'''
@@ -60,7 +60,7 @@ class VisInfoAdapter:
 
         # calculate the block when this VisInfo finishes
         nblk = self.info.values.update_uv_blocks
-        assert nblk >= 0,'Innvalid update uv blocks'
+        assert nblk >= 0,'Invalid update uv blocks'
         start_fid = self.info.fid_of_block(self.iblk)  # Frame ID of beginning
         # fid_mid is the frame ID of hte middle of the block starting at the beginning of iblk
         # and finishing at the beginning of iblk+nblk

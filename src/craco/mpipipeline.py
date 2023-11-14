@@ -301,7 +301,7 @@ class MpiObsInfo:
         '''
         return self.main_merger.target
 
-    def fid_to_mjd(self, fid:int):
+    def fid_to_mjd(self, fid:int)->Time:
         '''
         Convert the given frame ID into an MJD
         '''

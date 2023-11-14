@@ -16,23 +16,52 @@ import logging
 from craco.metadatafile import MetadataFile, to_uvw, uvw_to_array
 from craft import uvfits
 from craft.craco import ant2bl,bl2ant
+from craft.vis_metadata import VisMetadata
 from astropy.io import fits
 from scipy import constants
 import astropy.units as u
+from astropy.time import Time
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
 
 class UvfitsMeta(uvfits.UvFits):
     def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None):
         self.meta_file = MetadataFile(metadata_file)
         super().__init__(hdulist, max_nbl, mask, skip_blocks)
 
+    def vis_metadata(self, isamp:int):
+        '''
+        Return a vis info adapter for the given sample number
+        '''
+
+        tstart = self.tstart + self.tsamp*isamp
+
+        m = VisMetadata(
+            self.baselines_at_time(tstart),
+            self.freq_config,
+            self.target_name,
+            self.target_skycoord,
+            self.beamid,
+            tstart,
+            self.tsamp,
+            tstart)
+        m.isamp = isamp
+
+        return m
+    
     @property
     def baselines(self):
-        tstart = self.tstart
-        tuvw = tstart
+        bl = self.baselines_at_time(self.tstart)
+        return bl
+
+    def baselines_at_time(self, tuvw:Time):
+        '''
+        Returns baselines interpolated using the metadata to a particular
+        time
+        '''
         beamid = self.beamid
         uvw = self.meta_file.uvw_at_time(tuvw)[:, beamid, :] / constants.c
         bl = super().baselines

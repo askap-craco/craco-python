@@ -17,24 +17,11 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import pylab
 from scipy import constants
-from craft.craco import ant2bl, baseline_iter
+from craft.craco import ant2bl, baseline_iter, to_uvw, uvw_to_array
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
-
-uvw_dtype = [ ('UU', 'f4'), ('VV', 'f4'), ('WW','f4')]
-
-def to_uvw(uvwin):
-    '''
-    converts a normal array of 3 values into a uvw dtype
-    '''
-    assert len(uvwin) == 3
-    uvwout =  np.array([tuple(uvwin)], dtype=uvw_dtype)[0]
-    return uvwout
-
-def uvw_to_array(uvw):
-    return np.array([uvw['UU'], uvw['VV'], uvw['WW']])
 
 def get_uvw(ants):
     '''
