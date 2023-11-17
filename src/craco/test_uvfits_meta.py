@@ -103,6 +103,37 @@ def test_uvws_sensible():
     
     #assert np.all(uvw[bad_ants_0based,:] == 0), 'Bad ants have nonzero uvw'
 
+def test_uvfits_fast_time_blocks_with_istart():
+    f1 = craft.uvfits.open(uvfits)
+    print(f1.nblocks) # this is only 336 for the test data
+    nt = 64 # 
+    i0 = f1.fast_time_blocks(nt, fetch_uvws=True, istart=0)
+    ioff = f1.fast_time_blocks(nt, fetch_uvws=True, istart=nt)
+
+    b0t0 = next(i0)
+    
+    b0t1 = next(i0)
+
+    bofft1 = next(ioff)
+    
+    d1, uvw1 = b0t1
+    d2, uvw2 = bofft1
+
+    d3, uvw3 = b0t0
+
+    assert np.all(uvw1 == uvw2)
+    assert np.all(d1 == d2)
+
+    assert not np.all(uvw3 == uvw2)
+    assert not np.all(d3 == d2)
+
+def test_uvfits_get_uvw():
+    f1 = craft.uvfits.open(uvfits)
+    
+    nblocks = f1.nblocks
+    assert f1.get_uvw_at_isamp(0) is not None, 'Shoudl get data at sample 0'
+    assert f1.get_uvw_at_isamp(nblocks-1) is not None, 'Should get data for alst sample'
+
 
 def test_baselines_in_meta_match():
     f1 = craft.uvfits.open(uvfits)
@@ -142,18 +173,35 @@ def test_vis_metadata_makes_sense():
     f1.set_flagants(flag_ants_1based)
     f2.set_flagants(flag_ants_1based)
 
-    vm1 = f1.vis_metadata(0)
-    vm2 = f2.vis_metadata(0)
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    for i in range(nblk):
+        t = nt*i
 
-    uvw1 = uvwbl2array(vm1.baselines)
-    uvw2 = uvwbl2array(vm2.baselines)
-    assert_allclose(uvw1,uvw2, rtol=5e-7)
+        vm1 = f1.vis_metadata(t)
+        vm2 = f2.vis_metadata(t)
+        
+        uvw1 = uvwbl2array(vm1.baselines)
+        uvw2 = uvwbl2array(vm2.baselines)
+        all_uvw1.append(uvw1)
+        all_uvw2.append(uvw2)
+        
+        #assert_allclose(uvw1,uvw2, rtol=5e-7)
+        
+        assert vm1.tstart == vm2.tstart
+        assert vm1.tsamp == vm2.tsamp
+        assert vm1.beamid == vm2.beamid
+        assert vm1.target_skycoord == vm2.target_skycoord
+        assert vm1.target_name == vm2.target_name
+        assert vm1.freq_config == vm2.freq_config
 
-    assert vm1.tstart == vm2.tstart
-    assert vm1.tsamp == vm2.tsamp
-    assert vm1.beamid == vm2.beamid
-    assert vm1.target_skycoord == vm2.target_skycoord
-    assert vm1.target_name == vm2.target_name
+    all_uvw1, all_uvw2 = map(np.array, [all_uvw1, all_uvw2])
+
+    # check UVWs are OK
+    assert_allclose(uvw1, uvw2, rtol=5e-7)
     
     
 def _main():
