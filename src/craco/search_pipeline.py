@@ -21,7 +21,7 @@ from craft import sigproc
 
 from craft import uvfits
 from craft import craco
-from craco import calibration
+from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
@@ -886,6 +886,8 @@ def get_parser():
     parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
+    parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
+    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nxnt samples (for search_pipeline) or Nx112ms blocks (for MPIpipeline). Set to 0 to disable', type=int, default=256)
 
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
@@ -930,9 +932,12 @@ class VisSource:
             self.fv = FakeVisibility(plan, values.injection_file, vis_source = fitsfile)
 
     def __fits_file_iter(self):
-        for input_data in self.fitsfile.time_blocks(self.plan.nt):
-            input_flat = craco.bl2array(input_data) # convert to array - ordered by baseline
-            yield input_flat
+        for input_data, uvws in self.fitsfile.fast_time_blocks(self.plan.nt):
+            # strip out extra dimensions
+            # should now be (nbl, nf, nt)
+            input_data = input_data[:,0,0,0,:,0,:]
+            
+            yield input_data
 
     def __iter__(self):
         if self.fv is None:
@@ -1154,14 +1159,23 @@ def _main():
     assert values.max_ndm == NDM_MAX
 
     # Create a plan
-    f = uvfits.open(values.uv, skip_blocks=values.skip_blocks)
-    adapter = UvFitsVisInfoAdapter(f, 0)
-    update_uv_blocks = self.info.values.update_uv_blocks
-    pipeline_wrapper = PipelineWrapper(f, values, values.device)
+    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata)
+    update_uv_blocks = values.update_uv_blocks
+    nt = values.nt
+    if update_uv_blocks == 0:
+        isamp_uvw = 0
+    else:
+        assert nt % 2 == 0, 'Seems sensible given were about to divide by 2'
+        # half way through first block
+        isamp_update = update_uv_blocks * nt // 2
+
+    log.info('Creating UVW data for isamp=%d will update every %d samples', isamp_update, update_uv_blocks*nt)
+    adapter = f.vis_metadata(isamp_update)
+        
+    pipeline_wrapper = PipelineWrapper(adapter, values, values.device)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
-
 
     if values.wait:
         input('Press any key to continue...')
@@ -1176,7 +1190,9 @@ def _main():
         update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
         
         if update_now:
-            adapter = UvFitsVisInfoAdapter(f, iblk)
+            isamp_update += update_uv_blocks*nt
+            adapter = f.vis_metadata(isamp_update)
+            log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
             pipeline_wrapper.update_plan(adapter)
 
         pipeline_wrapper.write(input_flat)

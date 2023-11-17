@@ -1100,7 +1100,6 @@ def get_parser():
     parser = ArgumentParser(description='Run MPI pipeline', formatter_class=ArgumentDefaultsHelpFormatter, parents=[cardcap_parser, pipeline_parser], conflict_handler='resolve')
     
     parser.add_argument('--fcm', help='Path to FCM file for antenna positions')
-    parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
     parser.add_argument('--nfpga-per-rx', type=int, default=6, help='Number of FPGAS received by a single RX process')
     parser.add_argument('--vis-fscrunch', type=int, default=6, help='Amount to frequency average visibilities before transpose')
     parser.add_argument('--vis-tscrunch', type=int, default=1, help='Amount to time average visibilities before transpose')
@@ -1110,7 +1109,6 @@ def get_parser():
     parser.add_argument('--search-beams', help='Beams to search. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--save-uvfits-beams', help='Beams to save UV fits files for. Also requires --metadata and --fcm. e.g. 0-19', type=strrange, default=[])
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
-    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nx110ms blocks blocks. Set to 0 to disable', type=int, default=256)
     parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
     parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
     

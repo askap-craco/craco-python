@@ -82,7 +82,15 @@ class UvfitsMeta(uvfits.UvFits):
         return blout
 
 def open(*args, **kwargs):
-    return UvfitsMeta(fits.open(*args, **kwargs), **kwargs)
+    logging.info('Opening file %s', args[0])
+    mfile = kwargs.get('metadata_file', None)
+    if mfile is None:
+        x = uvfits.open(*args, **kwargs)
+    else:
+        x = UvfitsMeta(fits.open(*args, **kwargs), **kwargs)
+
+    return x
+
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
