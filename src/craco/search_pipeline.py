@@ -56,7 +56,7 @@ candidate_dtype = [('snr', np.int16),
                    ('time', np.uint8),
                    ('dm', np.uint16)]
 
-NBLK = 11
+NBLK = 5
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
 
