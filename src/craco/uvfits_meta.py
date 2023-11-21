@@ -85,6 +85,7 @@ def open(*args, **kwargs):
     logging.info('Opening file %s', args[0])
     mfile = kwargs.get('metadata_file', None)
     if mfile is None:
+        del kwargs['metadata_file']
         x = uvfits.open(*args, **kwargs)
     else:
         x = UvfitsMeta(fits.open(*args, **kwargs), **kwargs)
