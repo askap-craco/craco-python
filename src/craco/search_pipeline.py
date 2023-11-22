@@ -741,7 +741,7 @@ class Pipeline:
         noise_gain = np.sqrt(nsum)*fft_scale
         return (signal_gain, noise_gain)
 
-    def prepare_inbuf(self, input_flat, values, calibrate=True):
+    def prepare_inbuf(self, input_flat, values):
         '''
         Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
@@ -750,21 +750,17 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-        #input flat is (nbl, nf, nt) or (nbl, nf, npol nt)
-        if calibrate:
-            input_flat = self.calibrate_input(input_flat, values)
-
         self.fast_baseline2uv(input_flat.data, self.uv_out)
         nuvwide = self.uv_out.shape[0]
         self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
         self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
         return self
 
-    def copy_input(self, input_flat, values, calibrate=True):
+    def copy_input(self, input_flat, values):
         '''
         Prepares input buffer then copies to device
         '''
-        self.prepare_inbuf(input_flat, values, calibrate)
+        self.prepare_inbuf(input_flat, values)
         self.inbuf.copy_to_device()
 
     def copy_and_run_pipeline_parallel(self, iblk, values):
@@ -1114,22 +1110,13 @@ class PipelineWrapper:
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
 
-        p.prepare_inbuf(input_flat_cal, values, calibrate=False)
+        p.prepare_inbuf(input_flat_cal, values)
         t.tick('prepare_inbuf')
         
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
             t.tick('dump uv')
 
-        #p.copy_input(input_flat_cal, values, calibrate=False) # take the input into the device
-        #t.tick('copy')
-        #runs = p.run(iblk, values)
-        #t.tick('run')
-        #runs.wait() # Run pipeline
-        #t.tick('wait')
-        #candidates = p.get_candidates().copy()
-        #t.tick('get candidates')
-        
         cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
         t.tick('run')
         
