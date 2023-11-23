@@ -56,7 +56,7 @@ candidate_dtype = [('snr', np.int16),
                    ('time', np.uint8),
                    ('dm', np.uint16)]
 
-NBLK = 11
+NBLK = 5
 NCU = 4
 NTIME_PARALLEL = (NCU*2)
 
@@ -381,7 +381,9 @@ class Pipeline:
                                   values.dflag_ics_threshold,
                                   values.dflag_tblk)
         self.first_tstart = plan.tstart
-        self.update_plan(plan) 
+        self.update_plan(plan)
+        self.image_starts = None
+        self.fdmt_starts = None
 
     def _update_grid_lut(self,plan):
         # If we are on new version of pipeline
@@ -478,19 +480,26 @@ class Pipeline:
             
         return mainbuf
 
+    def run_fdmt(self, tblk):
+        '''
+        Run the FDMT kernel on the given internal block number and return a KernelStart representing the run
+        '''
+        assert 0 <= tblk < NBLK
+        nuv         = self.plan.fdmt_plan.nuvtotal
+        nurest      = nuv//8
+        log.info('Running fdmt on tblk=%d nurest=%d', tblk, nurest)
+        run = self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk)
+        starts = KernelStarts()
+        starts.append(run)
+        return starts
 
-    def run(self, blk, values):
-        p = self
-        if self.starts is not None:
-            raise ValueError('ALready started. Call wait()')
-
-        assert self.starts is None
-        
+    def run_image(self, tblk, values):
+        '''
+        Run the image pipeline and returna list of waitables
+        Clears candidate buffers before executing
+        '''
         ndm       = self.plan.nd
-
         nchunk_time = self.plan.nt//NTIME_PARALLEL
-        tblk = blk % NBLK
-
         nuv         = self.plan.fdmt_plan.nuvtotal
         nparallel_uv = nuv//2
         nurest       = nuv//8
@@ -528,45 +537,55 @@ class Pipeline:
 
         assert ndm < 1024,' It hangs for ndm=1024 - not sure why.'
 
-        starts = []
+        # need to clear candidates so if there are no candidates before it's run, nothing happens
+        self.clear_candidates()
+        log.info('Candidates cleared')
+        # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
+        starts = KernelStarts()
+        starts.append(self.boxcarcu(ndm, nchunk_time, threshold_boxcarval, self.boxcar_history, self.boxcar_history, self.candidates))
+        
+        for cu in self.ffts:
+            starts.append(cu(fft_cfg, fft_cfg))
+            
+        for cu, grid_lut in zip(self.grids, self.grid_luts):
+            starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
 
-        self.call_start = time.perf_counter()
+        starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
+
+        log.info('%d kernels running', len(starts))
+        self.starts = starts
+        self.total_retries = 0
+        assert starts is not None
+        return starts
+
+    def run(self, iblk, values):
+        '''
+        Runs both FDMT and image pipelines sequentially.
+        Not used in proper processing as we want to run then independently on different blocks
+        waits for the fdmt to finish but starts and leaves running the image pipeline
+        '''
+
+        tblk = iblk % NBLK
 
         if values.run_fdmt:
             # temporary: finish FDMT before starting image pipeline on same tblk
             #starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
             # you have to run teh FDMT on a tblk and run the image pipelien on tblk - 1 if you're doing to run them at the same time.
-            log.info('Running fdmt')
-            self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk).wait(0)
-            log.info('fdmt complete')
-        
+            self.run_fdmt(tblk).wait()
+
+        image_starts = None
         if values.run_image:
-            # need to clear candidates so if there are no candidates before it's run, nothing happens
-            self.clear_candidates()
-            log.info('Candidates cleared')
-            # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
-            starts.append(self.boxcarcu(ndm, nchunk_time, threshold_boxcarval, self.boxcar_history, self.boxcar_history, self.candidates))
+            image_starts = self.run_image(tblk, values)
+            assert image_starts is not None
 
-            for cu in self.ffts:
-                starts.append(cu(fft_cfg, fft_cfg))
-            
-            for cu, grid_lut in zip(self.grids, self.grid_luts):
-                starts.append(cu(ndm, nchunk_time, self.nparallel_uvin, self.nparallel_uvout, self.h_nparallel_uvout, grid_lut, load_luts))
+        return image_starts
 
-            starts.append(self.grid_reader(self.all_mainbufs[0], ndm, tblk, nchunk_time, nurest, self.ddreader_lut, load_luts))
-
-        log.info('%d kernels running', len(starts))
-        self.starts = starts
-        self.total_retries = 0
-        return self
 
     def wait(self):
         '''
         I'm not sure why I did it this way, rather than waiting on the starts
         Maybe the starts hang for some reason
         '''
-
-
         # new XRT doesn't need to poll register
         poll_registers = False
         if poll_registers:
@@ -596,8 +615,6 @@ class Pipeline:
             time.sleep(0.01)
 
         self.total_retries += retry
-
-        
 
     def clear_candidates(self):
         '''
@@ -724,28 +741,70 @@ class Pipeline:
         noise_gain = np.sqrt(nsum)*fft_scale
         return (signal_gain, noise_gain)
 
-    def copy_input(self, input_flat, values, calibrate=True):
+    def prepare_inbuf(self, input_flat, values):
         '''
         Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
         Input data can be 3 dimensionsal (assumign NPOL=1) or 4 dimensionsal (assumign NPOL=1 or 2)
         If 4 dimensional, the polarisations are averaged before continuing
-        the copies to the device
-
         if calibrate is True, calibrates input
 
         '''
-        #input flat is (nbl, nf, nt) or (nbl, nf, npol nt)
-        if calibrate:
-            input_flat = self.calibrate_input(input_flat, values)
-
         self.fast_baseline2uv(input_flat.data, self.uv_out)
         nuvwide = self.uv_out.shape[0]
         self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
         self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
+        return self
+
+    def copy_input(self, input_flat, values):
+        '''
+        Prepares input buffer then copies to device
+        '''
+        self.prepare_inbuf(input_flat, values)
         self.inbuf.copy_to_device()
 
-        return self
+    def copy_and_run_pipeline_parallel(self, iblk, values):
+        '''
+        Runs everythign in parallel
+        Assumes inbuf prepared with prepare_inbuf()
+        FDMT runs on iblk in parallel with pipeline on iblk-1
+        Returns cand_iblk, candidates - cand_iblk is the block relevatn to the candidates we have.
+        Currently cand_iblk = iblk - 2 as thats the depth of the pipeline
+        
+        :iblk: = input block number. Increments by 1 for every call.
+        :returns: cand_iblk, candidates
+        '''
+
+        fdmt_tblk = iblk % NBLK
+        img_tblk = (iblk -1) % NBLK
+        cand_iblk = iblk - 2 # candidate block coming from pipeline
+
+
+        # wait for FDMT
+        if self.fdmt_starts is not None:
+            self.fdmt_starts.wait()
+
+        # copy input
+        self.inbuf.copy_to_device()
+
+        # run fdmt
+        self.fdmt_starts = self.run_fdmt(fdmt_tblk)
+
+        # wait for image pipeline
+        if self.image_starts is not None:
+            self.image_starts.wait()
+
+        # if we've waited successfuly then we can get candidates
+        if cand_iblk >= 0:
+            candidates = self.get_candidates()
+        else:
+            candidates = np.zeros(0, dtype=candidate_dtype)
+
+        # only start running once we've run an FDMT
+        if iblk >= 1:
+            self.image_starts = self.run_image(img_tblk, values)
+
+        return cand_iblk, candidates
         
 def location2pix(location, npix=256):
 
@@ -816,29 +875,6 @@ def waitall(starts):
     for istart, start in enumerate(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
-
-def wait_for_starts(starts, call_start, timeout_ms: int=1000):
-    '''
-    Wait for all the runs.
-    call_start is a timestamp so we can debug how long it took to run
-    timeout_ms is a timeout in milliseconds (int)
-    '''
-
-    log.info('Waiting for %d starts', len(starts))
-    # I don't know why this helps, but it does, and I don't like it!
-    # It was really reliable when it was in there, lets see if its still ok when we remove it.
-    #time.sleep(0.1)
-
-    wait_start = time.perf_counter()
-    for istart, start in enumerate(starts):
-        log.debug(f'Waiting for istart={istart} start={start}')
-        # change to wait2 as this is meant to throw a command_error execption
-        # https://xilinx.github.io/XRT/master/html/xrt_native.main.html?highlight=wait#classxrt_1_1run_1ab1943c6897297263da86ef998c2e419c
-        # see Also CRACO-128
-        # Ah, but wait2 doesn't exist in PYXRT
-        result = start.wait(timeout_ms) # 0 means wait forever
-        wait_end = time.perf_counter()
-        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -1074,24 +1110,19 @@ class PipelineWrapper:
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
 
-        p.copy_input(input_flat_cal, values, calibrate=False) # take the input into the device
-        t.tick('copy')
+        p.prepare_inbuf(input_flat_cal, values)
+        t.tick('prepare_inbuf')
         
         if do_dump(values.dump_uvdata, iblk):
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
             t.tick('dump uv')
 
-        runs = p.run(iblk, values)
+        cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
         t.tick('run')
-        runs.wait() # Run pipeline
-        t.tick('wait')
         
-        candidates = p.get_candidates().copy()
-        t.tick('get candidates')
-
-        log.info('Got %d candidates in block %d', len(candidates), iblk)
+        log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
-        self.candout.interpret_and_write_candidates(candidates, iblk, plan, p.first_tstart, p.last_bc_noise_level)
+        self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.first_tstart, p.last_bc_noise_level)
         t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1163,7 +1194,7 @@ def _main():
     update_uv_blocks = values.update_uv_blocks
     nt = values.nt
     if update_uv_blocks == 0:
-        isamp_uvw = 0
+        isamp_update = 0
     else:
         assert nt % 2 == 0, 'Seems sensible given were about to divide by 2'
         # half way through first block
@@ -1192,11 +1223,13 @@ def _main():
         if update_now:
             isamp_update += update_uv_blocks*nt
             adapter = f.vis_metadata(isamp_update)
+            t.tick('get_adapter')
             log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
             pipeline_wrapper.update_plan(adapter)
+            t.tick('update_plan')
 
         pipeline_wrapper.write(input_flat)
-        t.tick('written')
+        t.tick('write_data')
         log.info("Read for loop %s", t)
         t = Timer()
 
