@@ -23,6 +23,8 @@ def make_parameter_cols(arr, uvws = None):
     pardata = []
     parbzeros = []
     first_date = arr['DATE'][0]
+    if uvws is not None:
+        reshaped_uvws = uvws.transpose(1, 2, 0).reshape(3, -1)
     for parname in arr.dtype.names:
         if parname != "DATA":
             parnames.append(parname)
@@ -31,16 +33,16 @@ def make_parameter_cols(arr, uvws = None):
                 pardata.append(arr[parname] - first_date)
                 parbzeros.append(first_date)
 
-            elif parname == 'UU' and uvws:
-                pardata.append(uvws[0, :])
+            elif parname == 'UU' and uvws is not None:
+                pardata.append(reshaped_uvws[0, :])
                 parbzeros.append(0)
 
-            elif parname == 'VV' and uvws:
-                pardata.append(uvws[1, :])
+            elif parname == 'VV' and uvws is not None:
+                pardata.append(reshaped_uvws[1, :])
                 parbzeros.append(0)
 
-            elif parname == 'WW' and uvws:
-                pardata.append(uvws[2, :])
+            elif parname == 'WW' and uvws is not None:
+                pardata.append(reshaped_uvws[2, :])
                 parbzeros.append(0)
             else:
                 pardata.append(arr[parname])
@@ -126,7 +128,7 @@ class UvfitsSnippet:
         '''
         It can swap the data with new_data.
         new_data can be np.ndarray or np.ma.core.MaskedArray
-        new_uvws - dict of arrays keyed by blid and arr.shape = [3, nt]
+        new_uvws - numpy array containing uvw values shape = [nbl, 3, nt]
 
         You can provide arrays with any of the following types:
         shape (nbl * nt, 1, 1, 1, nf, npol, 3) -- output of uvfits.vis[slice]['DATA']
