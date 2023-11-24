@@ -754,7 +754,11 @@ class Pipeline:
         if calibrate:
             input_flat = self.calibrate_input(input_flat, values)
 
-        self.fast_baseline2uv(input_flat.data, self.uv_out)
+        if values.simulate_data:
+            #If we have simulated data, the array won't be a masked array hence this if-else
+            self.fast_baseline2uv(input_flat, self.uv_out)
+        else:
+            self.fast_baseline2uv(input_flat.data, self.uv_out)
         nuvwide = self.uv_out.shape[0]
         self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
         self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
@@ -913,6 +917,7 @@ def get_parser():
     parser.add_argument('--dump-input', type=int, help='Dump calibrated baseline data every N blocks', metavar='N')
     parser.add_argument('--show-candidate-grid', choices=('count','candidx','snr','loc_2dfft','boxc_width','time','dm'), help="Show plot of candidates per block")
     parser.add_argument('--injection-file', help='YAML file to use to create injections. If not specified, it will use the data in the FITS file')
+    parser.add_argument('--simulate-data', action='store_true', help="Simulate data using the injector instead of reading it from the file. Only to be used in conjunction with the --injection-file option.")
     parser.add_argument('--calibration', help='Calibration .bin file or root of Miriad files to apply calibration')
     parser.add_argument('--target-input-rms', type=float, default=512, help='Target input RMS')
     parser.add_argument('--subtract', type=int, default=256, help='Update subtraction every this number of samples. If <=0 no subtraction will be performed. Must be a multiple of nt or divide evenly into nt')
@@ -969,7 +974,12 @@ class VisSource:
             log.info('Reading data from fits %s', self.fitsfile)
         else:
             log.info('Injecting data described by %s', values.injection_file)
-            self.fv = FakeVisibility(plan, values.injection_file, vis_source = fitsfile)
+            if values.simulate_data:
+                vis_source = 'fake'
+            else:
+                vis_source = None
+
+            self.fv = FakeVisibility(plan, values.injection_file, vis_source = vis_source)
 
     def __fits_file_iter(self):
         for input_data, uvws in self.fitsfile.fast_time_blocks(self.plan.nt):
@@ -983,8 +993,10 @@ class VisSource:
         if self.fv is None:
             myiter = self.__fits_file_iter()
         else:
-            #myiter = self.fv.get_fake_data_block()
-            myiter = self.__fits_file_iter()
+            if self.values.simulate_data:
+                myiter = self.fv.gen_fake_blocks()
+            else:
+                myiter = self.__fits_file_iter()
 
         return myiter
 
@@ -1095,11 +1107,19 @@ class PipelineWrapper:
 
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
 
-        input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer)
-        t.tick('flag')
-        
-        input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
-        t.tick('calibrate')
+        if values.simulate_data:
+            #Now to make sure that the input data has the desired target input rms I am just going to assume that the simulated data
+            #always has an rms of 1 (despite the fact that it is a configurable parameter)
+
+            input_flat_cal = input_flat * values.target_input_rms
+
+        else:
+            input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer)
+            t.tick('flag')
+            
+            input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
+            t.tick('calibrate')
+
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
             t.tick('dump input')
@@ -1109,7 +1129,12 @@ class PipelineWrapper:
             t.tick('inject')
 
         if pc_filterbank is not None:
-            d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
+            #if we've simulated data, the array will not be a masked array, so we have to treat it differently
+            if values.simulate_data:
+                d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
+            else:
+                d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
+
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
@@ -1135,8 +1160,9 @@ class PipelineWrapper:
         
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
-        self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.first_tstart, p.last_bc_noise_level)
-        t.tick('Write candidates')
+        if len(candidates) > 0:
+            self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.first_tstart, p.last_bc_noise_level)
+            t.tick('Write candidates')
 
         if values.print_dm0_stats:
             bc = p.boxcar_history.copy_from_device().nparr
