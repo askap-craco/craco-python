@@ -249,6 +249,33 @@ def test_time_blocks_with_uvws_equal():
     # check UVWs are OK
     assert_allclose(u1,u2, rtol=5e-7)
 
+
+def test_vis_property_equal():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        istart=t*f1.raw_nbl
+        iend=istart+nt*f1.raw_nbl
+        v1 = f1.vis[istart:iend]
+        v2 = f2.vis[istart:iend]
+        assert np.all(v1['DATE'] == v2['DATE'])
+        assert np.all(v1['BASELINE'] == v2['BASELINE'])
+        assert np.all(v1['DATA'] == v2['DATA'])
+        for x in ('UU','VV','WW'):
+            assert_allclose(v1[x], v2[x], rtol=5e-7)
+
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
