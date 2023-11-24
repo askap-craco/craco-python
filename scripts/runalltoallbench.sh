@@ -27,17 +27,17 @@ which osu_alltoall
 # Sheesh
 
 use_roce=1
-enable_hcoll=0
+enable_hcoll=1
 verbose=0
 
 if [[ $use_roce == 1 ]] ; then
     echo "Setting up for RoCE"
-    export UCX_NET_DEVICES=mlx5_1:1
-    export UCX_TLS=self,tcp,mm,cma,rc,rc_mlx5,ud,ud_mlx5
-    export UCX_IB_GID_INDEX=3
+    export UCX_NET_DEVICES=mlx5_2:1,mlx5_0:1
+    export UCX_TLS=self,mm,cma,rc,rc_mlx5,ud,ud_mlx5
+    export UCX_IB_GID_INDEX=0
 else
     echo "Setting up for TCP"
-    export UCX_NET_DEVICES=enp216s0
+    export UCX_NET_DEVICES=ens3f0np0,ens6f0np0
     export UCX_TLS=self,tcp,mm,cma
 fi
 
@@ -45,12 +45,15 @@ echo UCX_TLS=$UCX_TLS
 echo UCX_IB_GID_INDEX=$UCX_IB_GID_INDEX
 echo UCX_IB_SL=$UCX_IB_SL
 echo UCX_NET_DEVICES=$UCX_NET_DEVICES
+echo enable_hcoll=$enable_hcoll
 
-commonargs="--mca oob_tcp_if_include eno1 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll"
+
+commonargs="--mca oob_tcp_if_include eno8303 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll"
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca pml_ucx_verbose $verbose"
 tcpargs="--mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces"
 
-cmd="mpirun -v --map-by ppr:1:socket  $ucxargs $commonargs  -hostfile mpi_seren.txt  `which osu_alltoall`  -m 2048:800000 -i 100000  -f"
+hostfile=mpi_skadi.txt
+cmd="mpirun -v --map-by ppr:1:socket  $ucxargs $commonargs  -hostfile $hostfile  `which osu_alltoall`  -m 2048:8000000  -f"
 #cmd="mpirun -v -map-by ppr:1:node  $ucxargs $commonargs  -host seren-01,seren-02,seren-03  `which osu_alltoall`  -m 2:20000 -f"
 echo $cmd
 $cmd
