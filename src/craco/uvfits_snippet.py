@@ -18,8 +18,7 @@ def copy_data_and_masks(new_data, desired_data):
     if isinstance(new_data, np.ma.core.MaskedArray):
         desired_data[:, 0, 0, 0, :, :, 2] = 1 - new_data.mask.astype(int)
 
-
-def make_parameter_cols(arr):
+def make_parameter_cols(arr, uvws = None):
     parnames = []
     pardata = []
     parbzeros = []
@@ -31,6 +30,18 @@ def make_parameter_cols(arr):
             if parname == 'DATE':
                 pardata.append(arr[parname] - first_date)
                 parbzeros.append(first_date)
+
+            elif parname == 'UU' and uvws:
+                pardata.append(uvws[0, :])
+                parbzeros.append(0)
+
+            elif parname == 'VV' and uvws:
+                pardata.append(uvws[1, :])
+                parbzeros.append(0)
+
+            elif parname == 'WW' and uvws:
+                pardata.append(uvws[2, :])
+                parbzeros.append(0)
             else:
                 pardata.append(arr[parname])
                 parbzeros.append(0)
@@ -111,10 +122,11 @@ class UvfitsSnippet:
             #I am assuming here that the new_data can be swapped in as is, even if it has more/less no. of rows than the original data
             self._GroupData = new_data
 
-    def swap_with_data(self, new_data, parnames=None, pardata=None, bzero=0, bscale=1):
+    def swap_with_data(self, new_data, new_uvws = None, parnames=None, pardata=None, bzero=0, bscale=1):
         '''
         It can swap the data with new_data.
         new_data can be np.ndarray or np.ma.core.MaskedArray
+        new_uvws - dict of arrays keyed by blid and arr.shape = [3, nt]
 
         You can provide arrays with any of the following types:
         shape (nbl * nt, 1, 1, 1, nf, npol, 3) -- output of uvfits.vis[slice]['DATA']
@@ -152,7 +164,7 @@ class UvfitsSnippet:
             raise ValueError(f"I expect new data to have shape - {gd_shape} or {gd_squeezed_shape} or {expected_complex_block_shape}. Given - {new_data.shape}")
 
         if parnames is None or pardata is None:
-            parnames, pardata, parbzeros = make_parameter_cols(self.data)
+            parnames, pardata, parbzeros = make_parameter_cols(self.data, new_uvws)
 
         self._GroupData = fits.GroupData(desired_data,
                                        parnames = parnames,
