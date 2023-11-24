@@ -15,7 +15,7 @@ import sys
 import logging
 from craco.metadatafile import MetadataFile, to_uvw, uvw_to_array
 from craft import uvfits
-from craft.craco import ant2bl,bl2ant
+from craft.craco import ant2bl,bl2ant,time_block_with_uvw_range
 from craft.vis_metadata import VisMetadata
 from astropy.io import fits
 from scipy import constants
@@ -80,6 +80,27 @@ class UvfitsMeta(uvfits.UvFits):
             blout[blid] = bluvw2
             
         return blout
+    
+    def time_block_with_uvw_range(self, trange):
+        """
+        return a block of data and uvw within a given index range
+        :trange: tuple (istart,istop) samples
+        """
+        d, uvw, (sstart, send) = time_block_with_uvw_range(
+            vis=self.vis, trange=trange, flagant=self.flagant,
+            flag_autos=self.ignore_autos, mask=self.mask
+        )
+
+        nsamp = send - sstart + 1
+        assert nsamp >= 1
+        for isamp in range(nsamp):
+            t = self.sample_to_time(isamp + sstart)
+            bl = self.baselines_at_time(t)
+            for k in sorted(bl.keys()):
+                uvw[k][:,isamp] = uvw_to_array(bl[k])
+
+        return d, uvw, (sstart, send)
+        
 
 def open(*args, **kwargs):
     logging.info('Opening file %s', args[0])
