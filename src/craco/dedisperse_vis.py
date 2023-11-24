@@ -1,11 +1,12 @@
-from craft import uvfits_snippet, craco
+from craft import craco
+from craco import uvfits_snippet
 from craco.preprocess import Dedisp
 import argparse
 
 
 def main(args):
     print("Instantiating the UvfitsSnippet")
-    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend)
+    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend, args.metadata_file)
     print("Instantiating the Dedisp class")
     if args.dm_samps is None:
         ddp = Dedisp(f.uvsource.channel_frequencies, f.uvsource.tsamp.value, dm_pccc = args.dm_pccc)
@@ -38,6 +39,7 @@ def get_parser():
     g = a.add_mutually_exclusive_group(required = True)
     g.add_argument("-dm_samps", type=int, help="DM in sample units to de-disperse to", default=None)
     g.add_argument("-dm_pccc", type=float, help="DM in pc/cc to de-disperse to", default=None)
+    a.add_argument('-metadata-file', type=str, help='Metadata file to use for UVws instead of defaults', default=None)
     
     args = a.parse_args()
     return args

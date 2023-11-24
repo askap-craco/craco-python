@@ -40,6 +40,7 @@ def _main():
     parser.add_argument('-a','--card', help='Cards to download', default='1-12')
     parser.add_argument('--block', help='Blocks to download', default='5-7')
     parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
+    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -70,11 +71,16 @@ def _main():
     os.symlink(scandir, targetlink)
     target_file = os.path.join(scandir, 'ccap.fits')
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
-    cmdname='mpicardcap.sh'
+
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
     hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     shutil.copy(hostfile, scandir)
     #pol='--pol-sum'
+
+    if values.transpose:
+        cmdname = 'mpipipeline.sh'
+    else:
+        cmdname = 'mpicardcap.sh'
 
     beam = values.beam # all beams, tscrucnh
     #beam = 0 # given beam no tscrunch
@@ -93,8 +99,8 @@ def _main():
         tscrunch = ''
         spi = '--samples-per-integration 32'
 
-    card  = f'-a {values.card}'
-    block = f'-b {values.block}'
+    card  = f'--card {values.card}'
+    block = f'--block {values.block}'
     fpga = ''
     fpga_mask = ''
 
@@ -110,13 +116,15 @@ def _main():
         
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
+    fcm = '--fcm /home/ban115/20220714.fcm'
 
     # for mpicardcap
-    cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
+    if values.transpose:
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4'
+    else:
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
 
     # for mpipipeline
-    #cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --outdir {scandir}'
-
 
     log.info(f'Running command {cmd}')
 
