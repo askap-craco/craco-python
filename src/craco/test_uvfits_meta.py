@@ -313,7 +313,69 @@ def test_source_name_and_position():
 
     assert f2.target_skycoord == f2.target_skycoord
     assert f1.target_name == f2.target_name
-    
+
+def test_time_block_and_vis_agree():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    #f1.set_flagants(flag_ants_1based)
+    #f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        d1, uvws1, (sstart1, send1) = f1.time_block_with_uvw_range(trange)
+        d2, uvws2, (sstart2, send2) = f2.time_block_with_uvw_range(trange)
+        uvws1 = bl2array(uvws1, dtype=np.float32)
+        uvws2 = bl2array(uvws2, dtype=np.float32)
+        all_uvw1.append(uvws1)
+        all_uvw2.append(uvws2)
+
+        istart = i*nt*f1.raw_nbl
+        iend = istart + nt*f1.raw_nbl
+        v1v = f1.vis[istart:iend]
+        v2v = f2.vis[istart:iend]
+
+        assert len(v1v) == (iend - istart)
+        assert (iend - istart) == nt*f1.raw_nbl
+        
+        v1v = v1v.reshape(nt,-1).T
+        v2v = v2v.reshape(nt,-1).T
+
+
+
+        assert v1v.shape == uvws1[:,0,:].shape
+
+        for ix,x in enumerate(('UU','VV','WW')):
+            diff = v2v[x] - uvws2[:, ix, :]
+            equal = np.all(v2v[x] == uvws2[:,ix,:])
+            # I think you need rtol = 6e-7 rather than 5e-7 for the unflagged data
+            # maybe the flagged values are somehow a little worse
+            assert_allclose(v1v[x], uvws1[:,ix,:], rtol=6e-7)
+            assert_allclose(v2v[x], uvws2[:,ix,:], rtol=6e-7)
+
+
+
+    all_uvw1, all_uvw2 = map(np.array, [all_uvw1, all_uvw2])
+    u1 = all_uvw1.transpose(1,2,0,3).reshape(231,3,-1)
+    u2 = all_uvw2.transpose(1,2,0,3).reshape(231,3,-1)
+
+    plot = False
+    if plot:
+        import pylab
+        pylab.plot(u1[0,0,:])
+        pylab.plot(u2[0,0,:])
+        pylab.show()
+
+    # check UVWs are OK
+    assert_allclose(u1,u2, rtol=6e-7)
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
