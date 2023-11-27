@@ -344,7 +344,7 @@ def _main():
             mjds = mjds_times.tai.value
             mainflag = mf.mainflag
 
-            uvws = mf.uvw_at_time(mjds) # (time, nant, nbeam, 3)
+            uvws = mf.uvw_at_time(mjds_times) # (time, nant, nbeam, 3)
             nant = uvws.shape[1]
             bluvws = []
 
