@@ -1,16 +1,18 @@
 #!/bin/bash
-# Runs an mpi job that launches the 1 process per beam on the correct node
-# uses the rankfile from the job to work out the beam <-> host mapping
-# Arguments;
-# indir = local directory containing mpipieline.rank on skadi-00 and
-# the data on all the other nodes e.g. /data/craco/craco/SB054986/scans/00/20231127051745/
-# the remaining arguments are passed to mpirun as-is. e.g. the script you want to run and. #
-# the script is also passed INDIR is set as an environment variable with -x
 indir=$1
 shift  # don't pass indir to mpirun
 
 if [[ ! -d  $indir ]] ; then
     echo "Input directory doesn't exist"
+    echo "$0: INDIR CMD [ARGS...]"
+    echo Runs an mpi job that launches the 1 process per beam on the correct node
+    echo "uses the rankfile from the job to work out the beam <-> host mapping"
+    echo Arguments;
+    echo indir = local directory containing mpipieline.rank on skadi-00 and
+    echo The data on all the other nodes e.g. /data/craco/craco/SB054986/scans/00/20231127051745/
+    echo the remaining arguments are passed to mpirun as-is. e.g. the script you want to run and. #
+    echo the script is also passed INDIR is set as an environment variable with -x
+
     exit 1
 fi
 
