@@ -99,7 +99,8 @@ if __name__ == '__main__':
                                 "cracoslackbot=craco.craco_slackbot:_main",
                                 'calibrate_vis=craco.calibrate_vis:main',
                                 'sky_subtract_vis=craco.sky_subtract_vis:main',
-                                'dedisperse_vis=craco.dedisperse_vis:main'
+                                'dedisperse_vis=craco.dedisperse_vis:main',
+                                'attach_uvws_uvfits=craco.attach_uvws_uvfits:main',
                                 
             ],
         },

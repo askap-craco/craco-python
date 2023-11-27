@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 
 def main():
+    args = get_parser()
     f = uvfits_snippet.UvfitsSnippet(args.uvpath, start_samp=args.start_samp, end_samp=args.end_samp, metadata_file=args.metadata_file)
     if args.outname== None:
         outname = args.uvpath.replace(".uvfits", ".attached.uvfits")
@@ -16,8 +17,7 @@ def main():
 
     f.save(outname=outname, overwrite=True)
 
-
-if __name__ == '__main__':
+def get_parser():
     a = argparse.ArgumentParser()
     a.add_argument("uvpath", type=str, help="Path to the raw uvfits file")
     a.add_argument("metadata_file", type=str, help="Path to the metadata file from which to fetch uvw values")
@@ -27,4 +27,8 @@ if __name__ == '__main__':
     a.add_argument("-use_visrows", action='store_true', help="Use the faster visrows instead of time_block_with_ivw_range() (def:False)", default=False)
 
     args = a.parse_args()
+    return args
+
+
+if __name__ == '__main__':
     main()
