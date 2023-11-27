@@ -108,7 +108,7 @@ class UvfitsSnippet:
         HDUList = fits.HDUList([GroupsHDU, *self.uvsource.hdulist[1:]])
         row = HDUList[3].data[0]
         row['SOURCE'] = self.uvsource.target_name
-        row['RAEP0'] = self.uvsource.target_skycoord.ra.deg
+        row['RAEPO'] = self.uvsource.target_skycoord.ra.deg
         row['DECEPO'] = self.uvsource.target_skycoord.dec.deg
 
         HDUList.writeto(outname, overwrite=overwrite)
