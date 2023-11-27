@@ -25,6 +25,8 @@ iqrm
  pyyaml
  coloredlogs
 
+# mpi4py - # mpi4py is a pain to install. We only need it on the cluster anyway
+
  # (the -e above is optional). you could also just install the package
  # normally with just the line below (after uncommenting)
  # .

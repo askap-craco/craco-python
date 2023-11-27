@@ -73,7 +73,8 @@ def _main():
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
 
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
-    hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
+    #hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
+    hostfile = os.environ['HOSTFILE']
     shutil.copy(hostfile, scandir)
     #pol='--pol-sum'
 
@@ -122,7 +123,7 @@ def _main():
     if values.transpose:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4'
     else:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2'
 
     # for mpipipeline
 

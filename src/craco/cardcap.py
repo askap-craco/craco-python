@@ -196,8 +196,12 @@ def get_net_dev_of_gid(device, port, gididx):
     # $ cat /sys/class/net/enp175s0/address
     # 0c:42:a1:55:c1:ee
     ndev = f'/sys/class/infiniband/{device}/ports/{port}/gid_attrs/ndevs/{gididx}'
-    with open(ndev, 'rt') as f:
-        nd = f.read().strip()
+    try:
+        with open(ndev, 'rt') as f:
+            nd = f.read()
+            nd = nd.strip()
+    except Exception as e:
+        raise ValueError(f'Could not read net dev of {device} {port} {gididx} {ndev}') from e
 
     return nd
 
@@ -230,15 +234,19 @@ class FpgaCapturer:
         card = values.card
         send_delay = 0
         num_cmsgs = num_cmsgs
-        rx = RdmaTransport(mode,
-                           msg_size,
-                           num_blks,
-                           num_cmsgs,
-                           nmsg,
-                           send_delay,
-                           device,
-                           rdmaPort,
-                           gidIndex)
+        try:
+            rx = RdmaTransport(mode,
+                               msg_size,
+                               num_blks,
+                               num_cmsgs,
+                               nmsg,
+                               send_delay,
+                               device,
+                               rdmaPort,
+                               gidIndex)
+        except Exception as e:
+            raise ValueError(f'Could not  open RDMA transport for {device}:{rdmaPort} gid={gidIndex}') from e
+        
 
         self.rx = rx
         rx.checkImmediate = False
@@ -249,6 +257,7 @@ class FpgaCapturer:
         
         qpn = rx.getQueuePairNumber()
         dst_gid = np.frombuffer(rx.getGidAddress(), dtype=np.uint8)
+        assert not np.all(dst_gid==0), f'GIT address is all blank. Weird? Maybe needs a reboot {dst_gid}'
         gids = '-'.join([f'{x:d}' for x in dst_gid])
     
         log.info('RX PSN %d QPN %d =0x%x GID: %s %s', psn, qpn, qpn, mac_str(dst_gid), gids)
@@ -479,7 +488,8 @@ class FpgaCapturer:
     def __del__(self):
         log.info(f'Deleting RX for card {self.ccap.values.card}  FPGA {self.fpga}')
         del self.rx
-        del self.rdma_buffers
+        if hasattr(self, 'rdma_buffers'):
+            del self.rdma_buffers
 
 class CardCapturer:
     def __init__(self, values, primary=False, pvcache={}):
@@ -820,6 +830,7 @@ def dump_rankfile(values):
 
     rank = 0
     cardno = 0
+    net_devices = values.devices.split(',')
     with open(values.dump_rankfile, 'w') as fout:
         for block in values.block:
             for card in values.card:
@@ -831,11 +842,9 @@ def dump_rankfile(values):
                     hostidx = (rank // nranks_per_host) % len(hosts)
                     hostrank = rank % nranks_per_host
                     host = hosts[hostidx]
-                    slot = 1 # fixed because both cards are on NUMA=1
-                    # Put different FPGAs on differnt cores
                     evenfpga = fpga % 2 == 0
-                    core = rank % 10
-                    slot = 1
+                    core = hostrank % 10
+                    slot = fpga % len(net_devices) # TODO: Check this mapping is right
                     s = f'rank {rank}={host} slot={slot}:{core} # Block {block} card {card} fpga {fpga}\n'
                     fout.write(s)
                     rank += 1
@@ -897,7 +906,6 @@ class MpiCardcapController:
             #devices =['mlx5_0','mlx5_0']
             if len(my_fpga) == 1:
                 devidx = my_fpga[0] % len(devices)
-                #devidx = my_card % len(devices)
             else:
                 devidx = my_card % len(devices)
 
@@ -910,7 +918,7 @@ class MpiCardcapController:
                 fpga_names = ''.join([f'{f:d}' for f in my_fpga])
                 my_values.outfile += f'_b{my_block:02d}_c{my_card:02d}+f{fpga_names}.fits'
                 
-            log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloaing card={my_values.card} block {my_values.block} fpga={my_values.fpga} to {my_values.outfile}')
+            log.info(f'MPI CARDCAP: My rank is {rank}/{numprocs}. Downloading card={my_values.card} block {my_values.block} fpga={my_values.fpga} to {my_values.outfile} on {my_values.device}')
             ccap = CardCapturer(my_values, primary, pvcache)
         else:
             log.info(f'Launched too may processes for me to do anything useful. Rank {rank} goin to sleep to get out of the way')
@@ -983,7 +991,7 @@ class MpiCardcapController:
 
         nmissing = -1 if ccap is None else ccap.total_missing[0]
         nmissing = comm.gather(nmissing)
-
+        block_cards = self.block_cards
         if rank == 0:
             log.info('Total completions=%s missing=%s', completions[:len(block_cards)], nmissing[:len(block_cards)])
         
@@ -993,7 +1001,7 @@ def add_arguments(parser):
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-d','--device', help='RDMA device', default='mlx5_0')
     parser.add_argument('-p','--port', help='RDMA port', type=int, default=1)
-    parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=2)
+    parser.add_argument('-g','--gid-index', help='RDMA GID index', type=int, default=0)
     parser.add_argument('-n','--num-blks', help='Number of ringbuffer slots', type=int, default=16)
     parser.add_argument('-c','--num-cmsgs', help='Numebr of messages per slot', type=int, default=1)
     parser.add_argument('-N', '--num-msgs', help='Total number of messages to download before quitting', default=100, type=int)
@@ -1003,7 +1011,7 @@ def add_arguments(parser):
     parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=strrange) 
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=strrange)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
-    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_0,mlx5_1')
+    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_0,mlx5_2')
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ak')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
