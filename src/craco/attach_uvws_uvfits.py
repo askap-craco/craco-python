@@ -11,7 +11,7 @@ def main():
         outname = args.outname
 
     data, uvws = f.read_as_data_block_with_uvws()
-    f.swap_with_data(bl2array(data), bl2array(uvws, dtype=np.float))
+    f.swap_with_data(bl2array(data), bl2array(uvws, dtype=np.float64))
     f.save(outname=outname, overwrite=True)
 
 
