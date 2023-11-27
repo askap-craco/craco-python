@@ -1,11 +1,12 @@
-from craft import uvfits_snippet, craco, craco_plan
+from craft import craco, craco_plan
+from craco import uvfits_snippet
 from craco.preprocess import Calibrate
 import argparse
 import numpy as np
 
 def main(args):
     print("Instantiating the UvfitsSnippet")
-    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend)
+    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend, args.metadata_file)
     print("Instantiating the Calibration class")
     plan = craco_plan.PipelinePlan(f.uvsource, " ")
     calibrator = Calibrate(plan = plan, block_dtype=np.ndarray, 
@@ -28,12 +29,14 @@ def main(args):
 
 def get_parser():
     a = argparse.ArgumentParser()
+
     a.add_argument("uvpath", type=str, help="Path to the uvfits file to read from")
     a.add_argument("-tstart", type=int, help="Start sample (inclusive), (def:0)", default=0)
     a.add_argument("-tend", type=int, help="End sample (inclusive), say -1 to indicate full file (def:-1)", default=-1)
     a.add_argument("-outname", type=int, help="Name of the output vis", default = None)
     a.add_argument("-cal", type=str, help="Path to the calibration soln", default=None, required = True)
     a.add_argument("-force_dtype", action='store_true', help="Try doing an unsafe casting of data to match the data type from the file (def:False)", default=False)
+    a.add_argument('-metadata-file', type=str, help='Metadata file to use for UVws instead of defaults', default=None)
     args = a.parse_args()
     return args
 

@@ -97,6 +97,9 @@ if __name__ == '__main__':
                                 'candpipe=craco.candpipe.candpipe:_main',
                                 'mpicalibrate=craco.mpicalibrate:_main',
                                 "cracoslackbot=craco.craco_slackbot:_main",
+                                'calibrate_vis=craco.calibrate_vis:main',
+                                'sky_subtract_vis=craco.sky_subtract_vis:main',
+                                'dedisperse_vis=craco.dedisperse_vis:main'
                                 
             ],
         },

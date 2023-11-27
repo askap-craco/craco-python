@@ -15,7 +15,7 @@ import pytest
 import craco.uvfits_meta
 import craft.uvfits
 from IPython import embed
-from craft.craco import ant2bl,bl2ant,to_uvw, uvw_to_array, uvwbl2array
+from craft.craco import ant2bl,bl2ant,to_uvw, uvw_to_array, uvwbl2array,bl2array
 from astropy.time import Time
 from numpy.testing import assert_allclose
 
@@ -202,7 +202,117 @@ def test_vis_metadata_makes_sense():
 
     # check UVWs are OK
     assert_allclose(uvw1, uvw2, rtol=5e-7)
+
+def test_time_blocks_with_uvws_equal():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        d1, uvws1, (sstart1, send1) = f1.time_block_with_uvw_range(trange)
+        print(type(uvws1), len(uvws1))
+        d2, uvws2, (sstart2, send2) = f2.time_block_with_uvw_range(trange)
+        assert np.all(bl2array(d1) == bl2array(d2))
+        assert type(uvws1) == type(uvws2)
+        assert len(uvws1) == len(uvws2)
+        uvws1 = bl2array(uvws1, dtype=np.float)
+        uvws2 = bl2array(uvws2, dtype=np.float)
+        all_uvw1.append(uvws1)
+        all_uvw2.append(uvws2)
+        #assert_allclose(uvws1, uvws2, rtol=5e-7)
+        assert np.all(bl2array(d1) == bl2array(d2))
+        assert sstart1 == sstart2
+        assert send1 == send2
+        
+       
+
+    all_uvw1, all_uvw2 = map(np.array, [all_uvw1, all_uvw2])
+    u1 = all_uvw1.transpose(1,2,0,3).reshape(231,3,-1)
+    u2 = all_uvw2.transpose(1,2,0,3).reshape(231,3,-1)
+
+    plot = False
+    if plot:
+        import pylab
+        pylab.plot(u1[0,0,:])
+        pylab.plot(u2[0,0,:])
+        pylab.show()
+
+    # check UVWs are OK
+    assert_allclose(u1,u2, rtol=5e-7)
+
+
+def test_vis_property_equal():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
     
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        istart=t*f1.raw_nbl
+        iend=istart+nt*f1.raw_nbl
+        v1 = f1.vis[istart:iend]
+        v2 = f2.vis[istart:iend]
+        assert np.all(v1['DATE'] == v2['DATE'])
+        assert np.all(v1['BASELINE'] == v2['BASELINE'])
+        assert np.all(v1['DATA'] == v2['DATA'])
+        for x in ('UU','VV','WW'):
+            assert_allclose(v1[x], v2[x], rtol=5e-7)
+
+def test_vis_size_is_sensible():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        istart=t*f1.raw_nbl
+        iend=istart+nt*f1.raw_nbl
+        v1 = f1.vis[istart:iend]
+        v2 = f2.vis[istart:iend]
+        print(i, v1.size, v2.size, nt, f1.nbl)
+        assert v1.size == f1.nbl*nt
+        assert v1.size == v2.size
+
+
+def test_source_name_and_position():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+
+    assert f2.target_skycoord == f2.target_skycoord
+    assert f1.target_name == f2.target_name
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

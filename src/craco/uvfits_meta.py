@@ -15,7 +15,7 @@ import sys
 import logging
 from craco.metadatafile import MetadataFile, to_uvw, uvw_to_array
 from craft import uvfits
-from craft.craco import ant2bl,bl2ant
+from craft.craco import ant2bl,bl2ant,time_block_with_uvw_range
 from craft.vis_metadata import VisMetadata
 from astropy.io import fits
 from scipy import constants
@@ -26,6 +26,50 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+def calc_uvw_for_blid(uvw, blid):
+    a1,a2 = bl2ant(blid)
+    ia1, ia2 = (a1 - 1), (a2 - 1)
+    bluvw = uvw[ia1,:] - uvw[ia2,:]
+    return bluvw
+
+class VisViewMeta:
+    def __init__(self, uvfits_meta):
+        self.uvfits_meta = uvfits_meta
+        self.offset_view = uvfits.VisView(uvfits_meta)
+
+    @property
+    def size(self):
+        return self.offset_view.size
+
+    def __getitem__(self, sidx):
+        data = self.offset_view[sidx]
+        dates = sorted(np.unique(data['DATE']))
+        uvws = {}
+        for d in dates:
+            dtime = Time(d, scale=self.uvfits_meta.tscale, format='jd')
+            uvws[d] = self.uvfits_meta.uvw_array_at_time(dtime)
+
+        
+        dates = data['DATE']
+        blids = data['BASELINE']
+
+        try:
+            nbl = len(blids)
+        except:
+            nbl= 1
+            dates = [dates]
+            blids = [blids]
+                
+        uvw_out = np.zeros((3, nbl))
+        for i, (d,blid) in enumerate(zip(dates, blids)):
+            uvwarr = uvws[d]
+            uvw_out[:, i] = calc_uvw_for_blid(uvwarr, blid)
+
+        data['UU'] = uvw_out[0,:]
+        data['VV'] = uvw_out[1,:]
+        data['WW'] = uvw_out[2,:]
+
+        return data
 
 class UvfitsMeta(uvfits.UvFits):
     def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None):
@@ -51,25 +95,36 @@ class UvfitsMeta(uvfits.UvFits):
         m.isamp = isamp
 
         return m
+
+    @property
+    def vis(self):
+        return VisViewMeta(self)
     
     @property
     def baselines(self):
         bl = self.baselines_at_time(self.tstart)
         return bl
 
-    def baselines_at_time(self, tuvw:Time):
+    def uvw_array_at_time(self, tuvw:Time):
         '''
-        Returns baselines interpolated using the metadata to a particular
-        time
+        Returns interpolated UVW array.
+        For all baselines
         '''
         beamid = self.beamid
         uvw = self.meta_file.uvw_at_time(tuvw)[:, beamid, :] / constants.c
+        return uvw
+
+    def baselines_at_time(self, tuvw:Time):
+        '''
+        Returns baselines interpolated using the metadata to a particular
+        time. Restricts contents of dictionary to wht's returned in superlass .baselines
+        '''
         bl = super().baselines
+        uvw = self.uvw_array_at_time(tuvw)
+
         blout = {}
         for blid in bl.keys():
-            a1,a2 = bl2ant(blid)
-            ia1, ia2 = (a1 - 1), (a2 - 1)
-            bluvw = uvw[ia1,:] - uvw[ia2,:]
+            bluvw = calc_uvw_for_blid(uvw, blid)
             bluvw2 = to_uvw(bluvw)
             origuvw = uvw_to_array(bl[blid])
             do_check = np.any(origuvw != 0) and False
@@ -80,6 +135,38 @@ class UvfitsMeta(uvfits.UvFits):
             blout[blid] = bluvw2
             
         return blout
+    
+    def time_block_with_uvw_range(self, trange):
+        """
+        return a block of data and uvw within a given index range
+        :trange: tuple (istart,istop) samples
+        """
+        d, uvw, (sstart, send) = time_block_with_uvw_range(
+            vis=self.vis, trange=trange, flagant=self.flagant,
+            flag_autos=self.ignore_autos, mask=self.mask
+        )
+
+        nsamp = send - sstart + 1
+        assert nsamp >= 1
+        for isamp in range(nsamp):
+            t = self.sample_to_time(isamp + sstart)
+            bl = self.baselines_at_time(t)
+            for k in sorted(bl.keys()):
+                uvw[k][:,isamp] = uvw_to_array(bl[k])
+
+        return d, uvw, (sstart, send)
+
+    @property
+    def target_name(self):
+        name = self.meta_file.source_name_at_time(self.tstart)
+        return name
+
+    @property
+    def target_skycoord(self):
+        src = self.meta_file.source_at_time(self.beamid, self.tstart)
+        coord = src['skycoord']
+        return coord
+        
 
 def open(*args, **kwargs):
     logging.info('Opening file %s', args[0])
