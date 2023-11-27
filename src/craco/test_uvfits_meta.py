@@ -276,6 +276,43 @@ def test_vis_property_equal():
         for x in ('UU','VV','WW'):
             assert_allclose(v1[x], v2[x], rtol=5e-7)
 
+def test_vis_size_is_sensible():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+    all_uvw1 = []
+    all_uvw2 = []
+    assert nblk*nt <= f1.nblocks
+    
+    for i in range(nblk):
+        t = nt*i
+        trange = (t, t+nt-1)
+        istart=t*f1.raw_nbl
+        iend=istart+nt*f1.raw_nbl
+        v1 = f1.vis[istart:iend]
+        v2 = f2.vis[istart:iend]
+        print(i, v1.size, v2.size, nt, f1.nbl)
+        assert v1.size == f1.nbl*nt
+        assert v1.size == v2.size
+
+
+def test_source_name_and_position():
+    f1 = craft.uvfits.open(uvfits)
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+
+    f1.set_flagants(flag_ants_1based)
+    f2.set_flagants(flag_ants_1based)
+
+    nt = 64
+    nblk = 4
+
+    assert f2.target_skycoord == f2.target_skycoord
+    assert f1.target_name == f2.target_name
     
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

@@ -155,6 +155,17 @@ class UvfitsMeta(uvfits.UvFits):
                 uvw[k][:,isamp] = uvw_to_array(bl[k])
 
         return d, uvw, (sstart, send)
+
+    @property
+    def target_name(self):
+        name = self.meta_file.source_name_at_time(self.tstart)
+        return name
+
+    @property
+    def target_skycoord(self):
+        src = self.meta_file.source_at_time(self.beamid, self.tstart)
+        coord = src['skycoord']
+        return coord
         
 
 def open(*args, **kwargs):
