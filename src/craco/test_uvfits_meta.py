@@ -28,7 +28,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 # so they should match
 metafile = 'testdata/SB053972/SB53972.json.gz'
 uvfits = 'testdata/SB053972/b00.uvfits'# this file has 2 bad antennas ak19 and ak25 and nothing above ak30
-flag_ants_1based = [19,25,30,31,32,33,34,35,36]
+flag_ants_1based = [8, 19,25,30,31,32,33,34,35,36] # ant 8 isin the file but we want to remove it from baselines
 
 
 def check_baselines_equal(b1,b2):
@@ -77,6 +77,24 @@ def test_valid_ants_after_flag():
         ants.remove(a)
 
     assert f1.valid_ants == ants
+
+def test_baselines_after_flag():
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+    f2f = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+    ants = [a+1 for a in range(36)]
+
+    bl_unflagged = f2.baselines
+    unflagged_valid_ants = f2.valid_ants
+
+    f2f.set_flagants(flag_ants_1based)
+    for a in flag_ants_1based:
+        ants.remove(a)
+
+    bl_flagged = f2f.baselines
+    flagged_valid_ants = f2.valid_ants
+
+    assert len(bl_flagged) < len(bl_unflagged)
+
 
 def test_times_sensible():
     f1 = craft.uvfits.open(uvfits)
@@ -224,8 +242,8 @@ def test_time_blocks_with_uvws_equal():
         assert np.all(bl2array(d1) == bl2array(d2))
         assert type(uvws1) == type(uvws2)
         assert len(uvws1) == len(uvws2)
-        uvws1 = bl2array(uvws1, dtype=np.float)
-        uvws2 = bl2array(uvws2, dtype=np.float)
+        uvws1 = bl2array(uvws1, dtype=np.float64)
+        uvws2 = bl2array(uvws2, dtype=np.float64)
         all_uvw1.append(uvws1)
         all_uvw2.append(uvws2)
         #assert_allclose(uvws1, uvws2, rtol=5e-7)
