@@ -57,7 +57,7 @@ def main(args):
 
 
 def get_parser():
-    args = argparse.ArgumentParser()
+    a = argparse.ArgumentParser()
     a.add_argument("uvpath", type=str, help="Path to the uvfits file to read from")
     a.add_argument('-metadata', type=str, help='Metadata file to use for UVws instead of defaults', default=None)
     a.add_argument("-tstart", type=int, help="Start sample (inclusive), (def:0)", default=0)
