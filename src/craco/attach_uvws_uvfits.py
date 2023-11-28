@@ -11,7 +11,7 @@ def main():
     else:
         outname = args.outname
 
-    if not args.use_visrows:    
+    if args.use_time_blocks:    
         data, uvws = f.read_as_data_block_with_uvws()
         f.swap_with_data(bl2array(data), bl2array(uvws, dtype=np.float64))
 
@@ -24,7 +24,7 @@ def get_parser():
     a.add_argument("-outname", type=str, help="Name of the output filename (def=*.uvw.uvfits)", default=None)
     a.add_argument("-start_samp", type=int, help="Starting sample number (Def=0)", default=0)
     a.add_argument("-end_samp", type=int, help="Last sample number (inclusive range); say -1 to go to the end of the file (Def=-1)", default=-1)
-    a.add_argument("-use_visrows", action='store_true', help="Use the faster visrows instead of time_block_with_ivw_range() (def:False)", default=False)
+    a.add_argument("-use_time_blocks", action='store_true', help="Use the time_block_with_uvw_range() instead of faster uvsource.vis() (def:False)", default=False)
 
     args = a.parse_args()
     return args
