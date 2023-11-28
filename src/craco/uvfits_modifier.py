@@ -3,7 +3,7 @@ from craco import preprocess, uvfits_snippet
 import argparse
 
 def main(args):
-    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend, metdatafile = args.metadata)
+    f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend, metadata_file = args.metadata)
     outname = args.uvpath.strip(".uvfits")
 
     if args.metadata:
@@ -51,7 +51,7 @@ def main(args):
     if swap_later:
         f.swap_with_data(data)
 
-    f.save(outname)
+    f.save(outname, True)
     
 
 
@@ -62,7 +62,7 @@ def get_parser():
     a.add_argument('-metadata', type=str, help='Metadata file to use for UVws instead of defaults', default=None)
     a.add_argument("-tstart", type=int, help="Start sample (inclusive), (def:0)", default=0)
     a.add_argument("-tend", type=int, help="End sample (inclusive), say -1 to indicate full file (def:-1)", default=-1)
-    a.add_argument("-outname", type=int, help="Name of the output vis (def:<uvpath>.<options>.uvfits)", default = None)
+    a.add_argument("-outname", type=str, help="Name of the output vis (def:<uvpath>.<options>.uvfits)", default = None)
     a.add_argument("-calib", type=str, help="Path to the calibration soln", default=None)
     a.add_argument("-sky_subtract", action='store_true', help="Run sky subtraction on the data (def:False)", default=False)
     a.add_argument("-dedisp", type=float, help="DM value (pc/cc) to dedisperse the visibilities by", default=None)
