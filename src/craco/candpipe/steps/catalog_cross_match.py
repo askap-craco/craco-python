@@ -68,6 +68,7 @@ class Step(ProcessingStep):
         
         # select catalogue objects located within the observation field of view 
         for i, catpath in enumerate(config['catpath']):
+            log.debug('Crossmatching with existing catalogue %s', catpath)
             catdf, catcoord = self.filter_cat(ra=ra, 
                                               dec=dec, 
                                               catpath=catpath, 
@@ -75,12 +76,16 @@ class Step(ProcessingStep):
                                               racol=config['catcols']['ra'][i], 
                                               deccol=config['catcols']['dec'][i])
 
+            log.debug('Filtering in-field sources finished %s', catpath)
+
             outd = self.cross_matching(candidates=ind, 
                                        catalogue=catdf, 
                                        coord=catcoord, 
                                        threshold=config['threshold_crossmatch'][i], 
                                        col_prefix=config['catcols']['output_prefix'][i], 
                                        key=config['catcols']['input_colname'][i])
+
+            log.debug('Crossmatch finished for %s', catpath)
             
             ind = outd    
         
@@ -98,17 +103,26 @@ class Step(ProcessingStep):
         radius: float, int
             in degrees
         """
-        # later on take catalogue from buffer?
-        ctrcoord = SkyCoord(ra, dec, unit=units.degree)
+        # # later on take catalogue from buffer?
+        # ctrcoord = SkyCoord(ra, dec, unit=units.degree)
 
-        ### load catalog here - assume it is csv
+        # ### load catalog here - assume it is csv
+        # catdf = pd.read_csv(catpath)
+        # catcoord = SkyCoord(catdf[racol], catdf[deccol], unit=units.degree) # this step is really slow 
+        # sep = ctrcoord.separation(catcoord)
+
+        # select_bool = sep.value < radius
+
+        # load the catalog here
         catdf = pd.read_csv(catpath)
-        catcoord = SkyCoord(catdf[racol], catdf[deccol], unit=units.degree)
-        sep = ctrcoord.separation(catcoord)
+        catra, catdec = catdf[racol], catdf[deccol]
 
-        select_bool = sep.value < radius
-
-        return catdf.iloc[select_bool], catcoord[select_bool]
+        # separation - to improve the speed, so did a improper selection
+        rasep, decsep = np.abs(catra-ra), np.abs(catdec-dec)
+        select_bool = np.array(rasep < radius) & np.array(decsep < radius)
+        catcoord = SkyCoord(catdf.iloc[select_bool][racol], catdf.iloc[select_bool][deccol], unit=units.degree)
+        
+        return catdf.iloc[select_bool], catcoord
 
 
     def cross_matching(self, candidates, catalogue, coord, 
