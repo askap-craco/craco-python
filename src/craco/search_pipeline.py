@@ -1217,6 +1217,7 @@ def _main():
 
     # Create a plan
     f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata)
+    f.set_flagants(values.flag_ants)
     update_uv_blocks = values.update_uv_blocks
     nt = values.nt
     if update_uv_blocks == 0:
