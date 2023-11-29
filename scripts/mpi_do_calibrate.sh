@@ -23,6 +23,10 @@ echo "Got fits $uvfits writing to $outfits with metafile $metafile $rootdir"
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/CRACO/SOFTWARE/craco/wan342/Software/conda3/envs/craco38/lib
 export PATH=$PATH:/CRACO/SOFTWARE/craco/wan342/bin
 
+source /home/craftop/.conda/.remove_conda.sh
+source /home/wan342/.conda/.activate_conda.sh
+conda activate craco38
+
 logfile=${uvfits}.cal.log
 
 fixuvfits $uvfits 
@@ -30,10 +34,6 @@ fixuvfits $uvfits
 if [[ ! -f $outfits ]] ; then
     attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile
 fi
-
-source /home/craftop/.conda/.remove_conda.sh
-source /home/wan342/.conda/.activate_conda.sh
-conda activate craco38
 
 
 cmd="/CRACO/SOFTWARE/craco/wan342/Software/craco_calib/calib_skadi.py -uv $outfits"
