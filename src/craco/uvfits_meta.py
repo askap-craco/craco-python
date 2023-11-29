@@ -119,7 +119,7 @@ class UvfitsMeta(uvfits.UvFits):
         Returns baselines interpolated using the metadata to a particular
         time. Restricts contents of dictionary to wht's returned in superlass .baselines
         '''
-        bl = super().baselines
+        bl = super().baselines # get the baselines that are valid
         uvw = self.uvw_array_at_time(tuvw)
 
         blout = {}

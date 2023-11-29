@@ -160,6 +160,8 @@ def _main():
             level=logging.INFO,
             datefmt='%Y-%m-%d %H:%M:%S')
 
+    logging.debug("Executing candpipe...")
+
     config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
     with open(config_file, 'r') as yaml_file:
         config = yaml.safe_load(yaml_file)
@@ -170,6 +172,8 @@ def _main():
             p.run()
         except:
             logging.info(f"failed to run candpipe on {f}... aborted...")
+        # p = Pipeline(f, args, config)
+        # p.run()
 
     
     
