@@ -28,7 +28,7 @@ logfile=${uvfits}.cal.log
 fixuvfits $uvfits 
 
 if [[ ! -f $outfits ]] ; then
-    attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile -use_visrows 
+    attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile
 fi
 
 source /home/craftop/.conda/.remove_conda.sh
