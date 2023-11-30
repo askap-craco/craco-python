@@ -31,6 +31,18 @@ uvfits = 'testdata/SB053972/b00.uvfits'# this file has 2 bad antennas ak19 and a
 flag_ants_1based = [8, 19,25,30,31,32,33,34,35,36] # ant 8 isin the file but we want to remove it from baselines
 
 
+@pytest.fixture
+def f1():
+    f = craft.uvfits.open(uvfits)
+    f.set_flagants(flag_ants_1based)
+    return f
+
+@pytest.fixture
+def f2():
+    f = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+    f.set_flagants(flag_ants_1based)
+    return f
+
 def check_baselines_equal(b1,b2):
     assert type(b1) == type(b2)
     assert len(b1) == len(b2)
@@ -59,7 +71,7 @@ def test_baseline_order_and_baselines_match():
 def test_beam_from_filename():
     assert craft.uvfits.parse_beam_id_from_filename(uvfits) == 0
 
-def test_beamid_sensible():
+def test_beamid_sensible(f1):
     f1 = craft.uvfits.open(uvfits)
     assert f1.beamid == 0
 
@@ -145,21 +157,13 @@ def test_uvfits_fast_time_blocks_with_istart():
     assert not np.all(uvw3 == uvw2)
     assert not np.all(d3 == d2)
 
-def test_uvfits_get_uvw():
-    f1 = craft.uvfits.open(uvfits)
-    
+def test_uvfits_get_uvw(f1):
     nblocks = f1.nblocks
     assert f1.get_uvw_at_isamp(0) is not None, 'Shoudl get data at sample 0'
     assert f1.get_uvw_at_isamp(nblocks-1) is not None, 'Should get data for alst sample'
 
 
-def test_baselines_in_meta_match():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_baselines_in_meta_match(f1,f2):
     b1 = f1.baselines
     b2 = f2.baselines
     tstart = f2.tstart
@@ -184,13 +188,7 @@ def test_baselines_in_meta_match():
         pylab.show()
 
 
-def test_vis_metadata_makes_sense():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_vis_metadata_makes_sense(f1,f2):
     nt = 64
     nblk = 4
     all_uvw1 = []
@@ -221,13 +219,7 @@ def test_vis_metadata_makes_sense():
     # check UVWs are OK
     assert_allclose(uvw1, uvw2, rtol=5e-7)
 
-def test_time_blocks_with_uvws_equal():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_time_blocks_with_uvws_equal(f1,f2):
     nt = 64
     nblk = 4
     all_uvw1 = []
@@ -254,8 +246,8 @@ def test_time_blocks_with_uvws_equal():
        
 
     all_uvw1, all_uvw2 = map(np.array, [all_uvw1, all_uvw2])
-    u1 = all_uvw1.transpose(1,2,0,3).reshape(231,3,-1)
-    u2 = all_uvw2.transpose(1,2,0,3).reshape(231,3,-1)
+    u1 = all_uvw1.transpose(1,2,0,3).reshape(f1.nbl,3,-1)
+    u2 = all_uvw2.transpose(1,2,0,3).reshape(f2.nbl,3,-1)
 
     plot = False
     if plot:
@@ -268,13 +260,7 @@ def test_time_blocks_with_uvws_equal():
     assert_allclose(u1,u2, rtol=5e-7)
 
 
-def test_vis_property_equal():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_vis_property_equal(f1,f2):
     nt = 64
     nblk = 4
     all_uvw1 = []
@@ -294,19 +280,13 @@ def test_vis_property_equal():
         for x in ('UU','VV','WW'):
             assert_allclose(v1[x], v2[x], rtol=5e-7)
 
-def test_vis_size_is_sensible():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_vis_size_is_sensible(f1,f2):
     nt = 64
     nblk = 4
     all_uvw1 = []
     all_uvw2 = []
     assert nblk*nt <= f1.nblocks
-    
+    # VIS SIZE works on raw_nbl
     for i in range(nblk):
         t = nt*i
         trange = (t, t+nt-1)
@@ -315,18 +295,13 @@ def test_vis_size_is_sensible():
         v1 = f1.vis[istart:iend]
         v2 = f2.vis[istart:iend]
         print(i, v1.size, v2.size, nt, f1.nbl)
-        assert v1.size == f1.nbl*nt
+        assert v1.size == f1.raw_nbl*nt
         assert v1.size == v2.size
 
 
-def test_source_name_and_position():
-    f1 = craft.uvfits.open(uvfits)
-    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
-
-    f1.set_flagants(flag_ants_1based)
-    f2.set_flagants(flag_ants_1based)
-
+def test_source_name_and_position(f1,f2):
     nt = 64
+    
     nblk = 4
 
     assert f2.target_skycoord == f2.target_skycoord
