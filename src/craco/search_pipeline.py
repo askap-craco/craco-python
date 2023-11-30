@@ -880,6 +880,10 @@ def waitall(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
 
+def my_mjd(s):
+    m = Time(s, scale='tai', format='mjd')
+    return m
+
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     plan_parser = craft.craco_plan.get_parser()
@@ -896,6 +900,8 @@ def get_parser():
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
+    parser.add_argument('--start-mjd', type=my_mjd, help='Start MJD (TAI)')
+    parser.add_argumnet('--stop-mjd', type=my_mjd, help='Stop MJD (TAI)')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
     # These three are not used in PipelinePlan ...
@@ -1216,7 +1222,8 @@ def _main():
     assert values.max_ndm == NDM_MAX
 
     # Create a plan
-    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata)
+    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata, start_mjd=values.start_mjd, end_mjd=values.end_mjd)
+    
     update_uv_blocks = values.update_uv_blocks
     nt = values.nt
     if update_uv_blocks == 0:
