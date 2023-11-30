@@ -72,9 +72,9 @@ class VisViewMeta:
         return data
 
 class UvfitsMeta(uvfits.UvFits):
-    def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None):
+    def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None, start_mjd=None,end_mjd=None):
         self.meta_file = MetadataFile(metadata_file)
-        super().__init__(hdulist, max_nbl, mask, skip_blocks)
+        super().__init__(hdulist, max_nbl, mask, skip_blocks, start_mjd, end_mjd)
 
     def vis_metadata(self, isamp:int):
         '''
