@@ -14,7 +14,7 @@ if [[ ! -f $uvfits ]] ; then
     exit 1
 fi
 
-nsamp=20000
+nsamp=5000
 outfits=$uvfits.uvw.uvfits
 rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
 metafile=$rootdir/../../../SB*.json.gz
@@ -28,7 +28,7 @@ logfile=${uvfits}.cal.log
 fixuvfits $uvfits 
 
 if [[ ! -f $outfits ]] ; then
-    attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile -use_visrows 
+    attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile 
 fi
 
 source /home/craftop/.conda/.remove_conda.sh
