@@ -42,10 +42,15 @@ def main():
 
     elif args.use_fast_time_blocks:
         print("Using fast_time_blocks()")
-        fast_blocker = f.uvsource.fast_time_blocks(nt = args.end_samp - args.start_samp + 1, fetch_uvws=True)
+        if args.end_samp == -1:
+            end_samp = f.uvsource.nsamps
+        else:
+            end_samp = args.end_samp
+
+        fast_blocker = f.uvsource.fast_time_blocks(nt = end_samp - args.start_samp + 1, fetch_uvws=True)
         data, uvws = next(fast_blocker)
         uvws = convert_uvws_list_to_array(uvws)
-        f.swap_with_data(data[:, 0, 0, 0], bl2array(uvws))
+        f.swap_with_data(data[:, 0, 0, 0], bl2array(uvws, dtype=np.float64))
     elif args.use_visrows:
         print("Using visrows()")
         pass
