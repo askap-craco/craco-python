@@ -42,14 +42,14 @@ def main(args):
                                 dm_pccc = args.dedisp)
         outname += ".ddp_{args.dedisp:.1f}"
         print(f"Finished de-dispersion")
-
+    
+    if swap_later:
+        f.swap_with_data(data)
+    
     outname += ".uvfits"
 
     if args.outname:
         outname = args.outname
-
-    if swap_later:
-        f.swap_with_data(data)
 
     f.save(outname, True)
     

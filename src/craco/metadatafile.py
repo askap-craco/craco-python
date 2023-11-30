@@ -400,9 +400,6 @@ def _main():
             axs[1].set_ylabel('UU,VV,WW')
             axs[1].set_xlabel('Sample')
 
-            
-
-    
             pylab.show()
             
             

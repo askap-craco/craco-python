@@ -20,7 +20,7 @@ hostfile=$indir/mpihosts.txt
 rankfile=$indir/mpipipeline.rank
 
 if [[ ! -f $hostfile ]] ; then
-    echo "Hostfile $hostfile doesnt exit"
+    echo "Hostfile $hostfile doesnt exist"
     exit 1
 fi
 
