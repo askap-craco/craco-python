@@ -101,6 +101,8 @@ if __name__ == '__main__':
                                 'sky_subtract_vis=craco.sky_subtract_vis:main',
                                 'dedisperse_vis=craco.dedisperse_vis:main',
                                 'attach_uvws_uvfits=craco.attach_uvws_uvfits:main',
+                                'beam_cand_sender=craco.beam_cand_sender:_main',
+                                'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main'
                                 
             ],
         },
