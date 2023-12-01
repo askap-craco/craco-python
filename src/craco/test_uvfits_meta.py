@@ -141,14 +141,11 @@ def test_uvfits_fast_time_blocks_with_istart():
     ioff = f1.fast_time_blocks(nt, fetch_uvws=True, istart=nt)
 
     b0t0 = next(i0)
-    
     b0t1 = next(i0)
-
     bofft1 = next(ioff)
     
     d1, uvw1 = b0t1
     d2, uvw2 = bofft1
-
     d3, uvw3 = b0t0
 
     assert np.all(uvw1 == uvw2)
@@ -340,9 +337,6 @@ def test_time_block_and_vis_agree():
         
         v1v = v1v.reshape(nt,-1).T
         v2v = v2v.reshape(nt,-1).T
-
-
-
         assert v1v.shape == uvws1[:,0,:].shape
 
         for ix,x in enumerate(('UU','VV','WW')):
@@ -368,6 +362,42 @@ def test_time_block_and_vis_agree():
 
     # check UVWs are OK
     assert_allclose(u1,u2, rtol=6e-7)
+
+def test_time_conversions(f1):
+    s1 = 100
+    t1 = f1.sample_to_time(s1)
+    s1t = f1.time_to_sample(t1)
+
+    assert s1 == int(np.round(s1t))
+
+def test_start_mjd_offset(f1):
+    nt = 64
+    s1 = nt
+    t1 = f1.sample_to_time(s1)
+
+    f2 = craft.uvfits.open(uvfits, start_mjd=t1)
+    f2.set_flagants(flag_ants_1based)
+
+    i0 = f1.fast_time_blocks(nt, fetch_uvws=True, istart=self.skip_blocks)
+    ioff = f2.fast_time_blocks(nt, fetch_uvws=True, istart=0)
+
+
+    b0t0 = next(i0)
+    b0t1 = next(i0)
+    bofft1 = next(ioff)
+    
+    d1, uvw1 = b0t1
+    d2, uvw2 = bofft1
+    d3, uvw3 = b0t0
+
+    embed()
+
+    assert np.all(uvw1 == uvw2)
+    assert np.all(d1 == d2)
+
+    assert not np.all(uvw3 == uvw2)
+    assert not np.all(d3 == d2)
+
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

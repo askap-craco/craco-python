@@ -3,7 +3,7 @@ from craft.craco_kernels import Prepare, Gridder, Imager ,CracoPipeline, FdmtGri
 from craft import craco_plan
 from craft import uvfits
 from craft.cmdline import strrange
-from craco import preprocess, postprocess
+from craco import preprocess, postprocess, uvfits_meta
 from craft.craco import bl2array
 from craco.timer import Timer
 import matplotlib.pyplot as plt
@@ -68,6 +68,7 @@ def plot_block(block, title = None):
 
 def get_parser():
     parser = craco_plan.get_parser()
+    parser.add_argument("--metadata", type=str, help="Path to the metadata file", default=None)
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file", default=None)
     parser.add_argument("--seek_s", type=float, help="Seek (in seconds) into the file (def:0)", default=None)
     parser.add_argument("--seek_samps", type=float, help="Seek (in samps) into the file (def:0)", default=None)
@@ -110,7 +111,8 @@ def main():
 
     assert ss < tmp.vis.size, f"Can't seek to {ss} samps which is beyond the nsamps in file {tmp.size}"
     del tmp
-    uvsource = uvfits.open(values.uv, skip_blocks=ss)
+    #uvsource = uvfits.open(values.uv, skip_blocks=ss)
+    uvsource = uvfits_meta.open(values.uv, skip_blocks=ss, metadata_file = args.metadata)
 
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
