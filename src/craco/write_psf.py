@@ -1,7 +1,8 @@
 from craft import uvfits, craco_kernels, craco_plan
-from craco import postprocess
+from craco import postprocess, uvfits_meta
 import numpy as np
 import matplotlib.pyplot as plt
+from craft.cmdline import strrange
 
 def write_psf(outname, plan):
     print(f"HELLOOOO, {outname}")
@@ -45,9 +46,9 @@ def write_psf(outname, plan):
                                             image_data = imgout)
 
 def run_test(args):
-    f = uvfits.open(args.uv, skip_blocks=args.seek_samps)
+    f = uvfits_meta.open(args.uv, skip_blocks=args.seek_samps, metadata_file = args.metadata)
     values = craco_plan.get_parser().parse_args([])
-    values.flag_ants = list(np.arange(22, 31))
+    values.flag_ants = args.flag_ants
     plan = craco_plan.PipelinePlan(f, values)
     write_psf(outname = args.o, plan = plan)
 
@@ -56,7 +57,9 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("-o", type=str, help="Outname", required = True)
     a.add_argument("-uv", type=str, help="Path to a uvfits file to make plan from", required=True)
+    a.add_argument("-metadata", type=str, help="Path to the metadata file", default=None)
     a.add_argument("-seek_samps", type=int, help="Seek samps into the uvfits file before creating a plan (def:0)", default=0)
+    a.add_argument("-flag_ants", type=strrange, help="Flag these antennas (def=None)", default=None)
 
     args = a.parse_args()
     run_test(args)
