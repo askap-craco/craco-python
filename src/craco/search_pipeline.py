@@ -901,7 +901,7 @@ def get_parser():
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
     parser.add_argument('--start-mjd', type=my_mjd, help='Start MJD (TAI)')
-    parser.add_argumnet('--stop-mjd', type=my_mjd, help='Stop MJD (TAI)')
+    parser.add_argument('--stop-mjd', type=my_mjd, help='Stop MJD (TAI)')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
     # These three are not used in PipelinePlan ...
@@ -1037,6 +1037,8 @@ class PipelineWrapper:
                'foff':plan.foff/1e6,
                #'source_name':'UNKNOWN'
         }
+
+        os.makedirs(values.outdir, exist_ok=True)
 
         if values.phase_center_filterbank is None:
             self.pc_filterbank = None
@@ -1222,7 +1224,7 @@ def _main():
     assert values.max_ndm == NDM_MAX
 
     # Create a plan
-    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata, start_mjd=values.start_mjd, end_mjd=values.end_mjd)
+    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata, start_mjd=values.start_mjd, end_mjd=values.stop_mjd)
     f.set_flagants(values.flag_ants)
 
     update_uv_blocks = values.update_uv_blocks
