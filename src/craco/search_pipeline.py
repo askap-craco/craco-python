@@ -7,6 +7,7 @@ from .pyxrtutil import *
 import time
 import pickle
 import copy
+from astropy.time import Time
 from craft.cmdline import strrange
 
 import craft.craco_plan
