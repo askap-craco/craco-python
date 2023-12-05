@@ -119,6 +119,7 @@ class Pipeline:
         fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
         log.info('Saving final candidates to %s', fout)
         cand_out.to_csv(fout)
+        log.debug('Saved final candidates to %s', fout)
 
         for step in self.steps:
             step.close()
@@ -147,9 +148,19 @@ def _main():
     
     args = parser.parse_args()
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        # logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(
+            format='%(asctime)s.%(msecs)03d %(levelname)-8s %(message)s',
+            level=logging.DEBUG,
+            datefmt='%Y-%m-%d %H:%M:%S')
     else:
-        logging.basicConfig(level=logging.INFO)
+        # logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(
+            format='%(asctime)s.%(msecs)03d %(levelname)-8s %(message)s',
+            level=logging.INFO,
+            datefmt='%Y-%m-%d %H:%M:%S')
+
+    logging.debug("Executing candpipe...")
 
     config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
     with open(config_file, 'r') as yaml_file:
@@ -161,6 +172,8 @@ def _main():
             p.run()
         except:
             logging.info(f"failed to run candpipe on {f}... aborted...")
+        # p = Pipeline(f, args, config)
+        # p.run()
 
     
     

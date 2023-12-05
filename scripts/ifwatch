@@ -1,0 +1,3 @@
+#!/bin/bash
+theif=$1
+watch -n 0.1 -d "ethtool -S $theif | grep -v ': 0'"

@@ -34,9 +34,9 @@ def get_parser():
     '''
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='cluster arguments', formatter_class=ArgumentDefaultsHelpFormatter, add_help=False)
-    parser.add_argument('--min_flux', type=float, help='Minimum signal flux for querying the catalogue', default=None)
-    parser.add_argument('--ra_err', type=float, help='Maximum error to be allowed in RA measurement for querying the catalogue', default=None)
-    parser.add_argument('--dec_err', type=float, help='Maximum error to be allowed in DEC measurement for querying the catalogue', default=None)
+    # parser.add_argument('--min_flux', type=float, help='Minimum signal flux for querying the catalogue', default=None)
+    # parser.add_argument('--ra_err', type=float, help='Maximum error to be allowed in RA measurement for querying the catalogue', default=None)
+    # parser.add_argument('--dec_err', type=float, help='Maximum error to be allowed in DEC measurement for querying the catalogue', default=None)
     return parser
 
 
@@ -68,6 +68,7 @@ class Step(ProcessingStep):
         
         # select catalogue objects located within the observation field of view 
         for i, catpath in enumerate(config['catpath']):
+            log.debug('Selecting sources from existing catalogue %s', catpath)
             catdf, catcoord = self.filter_cat(ra=ra, 
                                               dec=dec, 
                                               catpath=catpath, 
@@ -75,17 +76,36 @@ class Step(ProcessingStep):
                                               racol=config['catcols']['ra'][i], 
                                               deccol=config['catcols']['dec'][i])
 
+            log.debug('Starting in-field sources crossmatch %s', catpath)
+
             outd = self.cross_matching(candidates=ind, 
                                        catalogue=catdf, 
                                        coord=catcoord, 
                                        threshold=config['threshold_crossmatch'][i], 
                                        col_prefix=config['catcols']['output_prefix'][i], 
                                        key=config['catcols']['input_colname'][i])
+
+            log.debug('Crossmatch finished for %s', catpath)
             
             ind = outd    
         
         return outd
-    
+
+
+    def angular_offset(self, ra1, dec1, ra2, dec2):
+        # in unit of degree
+        # just don't use stupid astropy separation - that's too slow!! 
+
+        phi1 = ra1 * np.pi / 180
+        phi2 = ra2 * np.pi / 180
+        theta1 = dec1 * np.pi / 180
+        theta2 = dec2 * np.pi / 180
+
+        cos_sep_radian = np.sin(theta1) * np.sin(theta2) + np.cos(theta1) * np.cos(theta2) * np.cos(phi1-phi2)
+        sep = np.arccos(cos_sep_radian) * 180 / np.pi
+
+        return sep
+
 
     def filter_cat(self, ra, dec, catpath, radius=2, racol="RA", deccol="Dec"):
         """
@@ -98,17 +118,16 @@ class Step(ProcessingStep):
         radius: float, int
             in degrees
         """
-        # later on take catalogue from buffer?
-        ctrcoord = SkyCoord(ra, dec, unit=units.degree)
-
         ### load catalog here - assume it is csv
         catdf = pd.read_csv(catpath)
-        catcoord = SkyCoord(catdf[racol], catdf[deccol], unit=units.degree)
-        sep = ctrcoord.separation(catcoord)
+        catra, catdec = np.array(catdf[racol]), np.array(catdf[deccol])
 
-        select_bool = sep.value < radius
+        sep = self.angular_offset(ra, dec, catra, catdec)
+        select_bool = sep < radius
 
-        return catdf.iloc[select_bool], catcoord[select_bool]
+        catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
+
+        return catdf.iloc[select_bool], catcoord
 
 
     def cross_matching(self, candidates, catalogue, coord, 

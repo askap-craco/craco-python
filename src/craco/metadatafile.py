@@ -344,7 +344,7 @@ def _main():
             mjds = mjds_times.tai.value
             mainflag = mf.mainflag
 
-            uvws = mf.uvw_at_time(mjds) # (time, nant, nbeam, 3)
+            uvws = mf.uvw_at_time(mjds_times) # (time, nant, nbeam, 3)
             nant = uvws.shape[1]
             bluvws = []
 
@@ -400,9 +400,6 @@ def _main():
             axs[1].set_ylabel('UU,VV,WW')
             axs[1].set_xlabel('Sample')
 
-            
-
-    
             pylab.show()
             
             

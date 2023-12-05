@@ -15,7 +15,7 @@ from craft import uvfits
 from craft import sigproc
 from craft import craco_plan
 from craft.craco import pointsource, coord2lm, bl2array
-from craco import preprocess
+from craco import preprocess, uvfits_meta
 
 from craft.cmdline import strrange
 
@@ -95,7 +95,7 @@ def get_ant_idx(nbl, flag_ant=None):
         return (~np.isin(blant[:, 0], flag_ant)) & (~np.isin(blant[:, 1], flag_ant))
 
 
-def open_after_seeking(fname, seek_sec = None, seek_samps = None):
+def open_after_seeking(fname, seek_sec = None, seek_samps = None, metadata_file = None):
     tmp = uvfits.open(fname)
     nsamps_total = int(tmp.vis.size // tmp.nbl)
 
@@ -107,7 +107,7 @@ def open_after_seeking(fname, seek_sec = None, seek_samps = None):
 
     tmp.close()
 
-    f = uvfits.open(fname, skip_blocks=seek_samps)
+    f = uvfits_meta.open(fname, skip_blocks=seek_samps, metadata_file = metadata_file)
 
     return f
 
@@ -117,7 +117,7 @@ def run(f, values):
     block_dtype = np.ma.core.MaskedArray
     
 
-    uvsource = open_after_seeking(values.uv, seek_samps = values.seek_samps)
+    uvsource = open_after_seeking(values.uv, seek_samps = values.seek_samps, metadata_file = values.metadata_file)
     nsamps_total = int(uvsource.vis.size // uvsource.nbl)
     nsamps_to_process = values.process_samps
 
@@ -224,6 +224,7 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Produces a tied array beam filterbank from a UVFITS file', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument("-uv", "--uv", type=str, help="Path to the uvfits file", default=None)
+    parser.add_argument("-mf", "--metadata_file", type=str, help="Path to the metadata file", default=None)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-c','--calibration',  type=str, help="Path to the calibration file", default=None)
     parser.add_argument("-t", "--target", type=str, help="coordinate of the phase center", default="pc")

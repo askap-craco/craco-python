@@ -293,10 +293,10 @@ class CardcapFile:
         Zero indexed
         '''
         if self.nbeam == NBEAM:
-            b = np.arange(36, dtype=np.int)
+            b = np.arange(36, dtype=int)
         else:
             thebeam = self.mainhdr['BEAM']
-            b = np.array([thebeam], dtype=np.int)
+            b = np.array([thebeam], dtype=int)
 
         return b
 
@@ -327,7 +327,7 @@ class CardcapFile:
         '''Returns a list of fpgas in this file (1 based)'''
         fstr = self.mainhdr['FPGA']
         fpga = ast.literal_eval(fstr)
-        return np.array(fpga, dtype=np.int)
+        return np.array(fpga, dtype=int)
 
 
     @property

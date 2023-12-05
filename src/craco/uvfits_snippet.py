@@ -4,6 +4,7 @@ import numpy as np
 from astropy.io import fits
 #from astropy.io.fits.fitsrec import FITS_rec
 
+import IPython
 DTYPE2BITPIX = {'uint8': 8, 'int16': 16, 'uint16': 16, 'int32': 32,
                 'uint32': 32, 'int64': 64, 'uint64': 64, 'float32': -32,
                 'float64': -64, 'complex64':-32, 'complex128':-64}
@@ -30,7 +31,7 @@ def make_parameter_cols(arr, uvws = None):
             parnames.append(parname)
             
             if parname == 'DATE':
-                pardata.append(arr[parname] - first_date)
+                pardata.append((arr[parname] - first_date).astype('float32'))
                 parbzeros.append(first_date)
 
             elif parname == 'UU' and uvws is not None:
@@ -53,6 +54,8 @@ def make_parameter_cols(arr, uvws = None):
 def makeGroupData(visrows):
     parnames, pardata, parbzeros= make_parameter_cols(visrows)
     GroupData = fits.GroupData(visrows['DATA'], parnames = parnames, pardata = pardata, bzero = 0.0, bscale = 1.0, parbzeros=parbzeros)
+    #IPython.embed()
+
     return GroupData
 
 class UvfitsSnippet:
@@ -108,9 +111,9 @@ class UvfitsSnippet:
         HDUList = fits.HDUList([GroupsHDU, *self.uvsource.hdulist[1:]])
         row = HDUList[3].data[0]
         row['SOURCE'] = self.uvsource.target_name
-        row['RAEP0'] = self.uvsource.target_skycoord.ra.deg
+        row['RAEPO'] = self.uvsource.target_skycoord.ra.deg
         row['DECEPO'] = self.uvsource.target_skycoord.dec.deg
-
+        #IPython.embed()
         HDUList.writeto(outname, overwrite=overwrite)
 
 

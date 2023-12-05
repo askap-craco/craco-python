@@ -881,13 +881,17 @@ def waitall(starts):
         log.info(f'Waiting for istart={istart} start={start}')
         start.wait(0)
 
+def my_mjd(s):
+    m = Time(s, scale='tai', format='mjd')
+    return m
+
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     plan_parser = craft.craco_plan.get_parser()
 
     parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
 
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=8)
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=6)
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
@@ -897,6 +901,8 @@ def get_parser():
     parser.add_argument('-d', '--device',    action='store', type=int, help='Device number')
     parser.add_argument('-x', '--xclbin',    action='store', type=str, help='XCLBIN to load.')
     parser.add_argument('--skip-blocks', type=int, default=0, help='Skip this many bllocks in teh UV file before usign it for UVWs and data')
+    parser.add_argument('--start-mjd', type=my_mjd, help='Start MJD (TAI)')
+    parser.add_argument('--stop-mjd', type=my_mjd, help='Stop MJD (TAI)')
     parser.add_argument('-s', '--show',      action='store_true',      help='Show plots')
     
     # These three are not used in PipelinePlan ...
@@ -1033,6 +1039,8 @@ class PipelineWrapper:
                'foff':plan.foff/1e6,
                #'source_name':'UNKNOWN'
         }
+
+        os.makedirs(values.outdir, exist_ok=True)
 
         if values.phase_center_filterbank is None:
             self.pc_filterbank = None
@@ -1218,7 +1226,9 @@ def _main():
     assert values.max_ndm == NDM_MAX
 
     # Create a plan
-    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata)
+    f = uvfits_meta.open(values.uv, skip_blocks=values.skip_blocks, metadata_file=values.metadata, start_mjd=values.start_mjd, end_mjd=values.stop_mjd)
+    f.set_flagants(values.flag_ants)
+
     update_uv_blocks = values.update_uv_blocks
     nt = values.nt
     if update_uv_blocks == 0:
