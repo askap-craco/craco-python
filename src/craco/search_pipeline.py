@@ -1257,6 +1257,11 @@ def _main():
             log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
 
+        if iblk == 0 and values.save_psf:
+            psf_name = os.path.join(values.outdir, f"psf.iblk{iblk}.fits")
+            log.info("Saving the psf to disk with name=%s", psf_name)
+            PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
+
         update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
         
         if update_now:
@@ -1267,7 +1272,6 @@ def _main():
             latest_plan = pipeline_wrapper.update_plan(adapter)
             if values.save_psf:
                 psf_name = os.path.join(values.outdir, f"psf.iblk{iblk}.fits")
-                #psf_name = f"psf.iblk{iblk}.fits"
                 log.info("Saving the psf to disk with name=%s", psf_name)
                 PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
 
