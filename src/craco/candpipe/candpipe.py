@@ -63,15 +63,29 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
+        # self.wcs_fname = self.get_file( f'wcs_b{self.beamno:02d}.fits')
         self.config = config
 
-        self.steps = [
-            steps.cluster.Step(self),
-            # steps.time_space_filter.Step(self),
-            steps.catalog_cross_match.Step(self),
-            # steps.check_filterbanks.Step(self),
-            # steps.check_visibilities.Step(self),
-        ]
+        if self.args.wcsfits is None:
+            self.steps = [
+                steps.cluster.Step(self),
+                steps.catalog_cross_match.Step(self),
+            ]
+        else:
+            self.steps = [
+                steps.cluster.Step(self),
+                steps.catalog_cross_match.Step(self),
+                steps.alias_filter.Step(self), 
+            ]
+
+        # self.steps = [
+        #     steps.cluster.Step(self),
+        #     # steps.time_space_filter.Step(self),
+        #     steps.catalog_cross_match.Step(self),
+        #     steps.alias_filter.Step(self), 
+        #     # steps.check_filterbanks.Step(self),
+        #     # steps.check_visibilities.Step(self),
+        # ]
         
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,
