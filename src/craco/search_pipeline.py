@@ -729,10 +729,11 @@ class Pipeline:
     
     def apply_static_flag_chans(self, input_flat, chanrange):
         '''
+        TODO -- the axis number of the freq has been hardwired to be the second last axis. Fix it later!
         '''
         assert type(input_flat) == np.ma.core.MaskedArray, f"I expected the input block to be a masked array, got {type(input_flat)}"
-        input_flat.mask[..., chanrange, :, :] = True
-        input_flat.data[..., chanrange, :, :] = 0
+        input_flat.mask[..., chanrange, :] = True
+        input_flat.data[..., chanrange, :] = 0
         print(f"I've now applied the static channel masks and 0-ed the data. Shape of the input_flat was f{input_flat.shape}")
         return input_flat
 
