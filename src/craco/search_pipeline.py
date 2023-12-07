@@ -1278,7 +1278,7 @@ def _main():
             break
 
         if iblk == 0 and values.save_psf:
-            psf_name = os.path.join(values.outdir, f"psf.iblk{iblk}.fits")
+            psf_name = os.path.join(values.outdir, f"psf.beam{plan.beamid}.iblk{iblk}.fits")
             log.info("Saving the psf to disk with name=%s", psf_name)
             PSF.write_psf(outname=psf_name, plan=plan, iblk=iblk)
 
