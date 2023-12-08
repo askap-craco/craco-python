@@ -115,6 +115,10 @@ class Pipeline:
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
+
+        if len(cand_in) == 0:
+            return None
+
         self.create_dir()
 
         for istep, step in enumerate(self.steps):
@@ -174,7 +178,7 @@ def _main():
             level=logging.INFO,
             datefmt='%Y-%m-%d %H:%M:%S')
 
-    logging.debug("Executing candpipe...")
+    log.debug("Executing candpipe...")
 
     config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
     with open(config_file, 'r') as yaml_file:
