@@ -33,7 +33,6 @@ def get_parser():
     '''
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='cluster arguments', formatter_class=ArgumentDefaultsHelpFormatter, add_help=False)
-    parser.add_argument('--wcsfits', help='fitsfile for psf wcs info, useful for alias check', default=None)
  #   parser.add_argument('--cluster-min-sn', type=float, help='Minimum S/N of cluster output', default=None)
     return parser
 
@@ -49,9 +48,9 @@ class Step(ProcessingStep):
         self.wcs_info = self.get_wcs()
         # You might want to use some of these attributes
 
-        log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
+        log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s psf=%s arguments=%s',
                  p.srcdir, p.beamno, p.cand_fname, p.uvfits_fname,
-                 p.cas_fname, p.ics_fname, p.pcb_fname, p.args)
+                 p.cas_fname, p.ics_fname, p.pcb_fname, p.psf_fname, p.args)
                   
 
     def __call__(self, context, ind):
@@ -101,6 +100,8 @@ class Step(ProcessingStep):
         # save the candidates file
         outd = self.save_back_candfile(ind, alias_df)
 
+        log.info("Find %s possible aliasing sources", sum(outd['ALIAS_name'].isna()))
+
         # outd = self.alias_filtering(ind, wcs_info, radius, threshold)
         
         # apply command line argument for minimum S/N and only return those values
@@ -112,7 +113,7 @@ class Step(ProcessingStep):
 
     def get_wcs(self):
         # read the wcs fitsfile 
-        fitsfile = self.pipeline.args.wcsfits
+        fitsfile = self.pipeline.psf_fname
 
         # Open the FITS file and get the header
         with fits.open(fitsfile) as hdul:

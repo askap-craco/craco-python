@@ -63,10 +63,10 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
-        # self.wcs_fname = self.get_file( f'wcs_b{self.beamno:02d}.fits')
+        self.psf_fname = self.get_file( f'psf.beam{self.beamno}.iblk0.fits')
         self.config = config
 
-        if self.args.wcsfits is None:
+        if not os.path.exists(self.psf_fname):
             self.steps = [
                 steps.cluster.Step(self),
                 steps.catalog_cross_match.Step(self),
@@ -185,7 +185,7 @@ def _main():
             p = Pipeline(f, args, config)
             p.run()
         except:
-            logging.info(f"failed to run candpipe on {f}... aborted...")
+            log.warning(f"failed to run candpipe on {f}... aborted...")
         # p = Pipeline(f, args, config)
         # p.run()
 
