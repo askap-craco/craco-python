@@ -1291,7 +1291,7 @@ def _main():
             log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
             latest_plan = pipeline_wrapper.update_plan(adapter)
             if values.save_psf:
-                psf_name = os.path.join(values.outdir, f"psf.iblk{iblk}.fits")
+                psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid}.iblk{iblk}.fits")
                 log.info("Saving the psf to disk with name=%s", psf_name)
                 PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
 
