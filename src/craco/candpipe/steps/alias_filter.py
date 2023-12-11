@@ -100,8 +100,6 @@ class Step(ProcessingStep):
         # save the candidates file
         outd = self.save_back_candfile(ind, alias_df)
 
-        log.info("Find %s possible aliasing sources", sum(outd['ALIAS_name'].isna()))
-
         # outd = self.alias_filtering(ind, wcs_info, radius, threshold)
         
         # apply command line argument for minimum S/N and only return those values
@@ -196,6 +194,8 @@ class Step(ProcessingStep):
         if alias_idx.sum() == 0:
             log.debug("No possible alias sources")
             return df
+
+        log.info("Find %s possible aliasing sources", alias_idx.sum())
 
         # find unique idx with possible alias 
         alias_df = alias_df[alias_idx]
