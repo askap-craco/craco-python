@@ -726,21 +726,6 @@ class Pipeline:
         Update input flagging mask based on running CAS and ICS and IQRM standard deviation
         '''
         return self.flagger(input_flat, cas, ics, mask_fil_writer)
-    
-    def apply_static_flag_chans(self, input_flat, chanrange):
-        '''
-        '''
-        assert type(input_flat) == np.ma.core.MaskedArray, f"I expected the input block to be a masked array, got {type(input_flat)}"
-        input_flat.mask[..., chanrange, :, :] = True
-        return input_flat
-
-
-    def apply_static_flag_freqs(self, input_flat, freqrange):
-        '''
-        '''
-        assert type(input_flat) == np.ma.core.MaskedArray, f"I expected the input block to be a masked array, got {type(input_flat)}"
-        raise NotImplementedError("I have not implemented this feature yet -- kill VG")
-        
 
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
@@ -1078,11 +1063,17 @@ class PipelineWrapper:
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
-        #VG: -- Commenting out these lines because I think they are not used/needed anywhere
-        # if f.freq_config.nmasked_channels > 0:
-        #    log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
-        #    p.set_channel_flags(f.freq_config.channel_mask, True)
+        if f.freq_config.nmasked_channels > 0:
+            log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
+            p.set_channel_flags(f.freq_config.channel_mask, True)
             
+        if values.flag_chans:
+            log.info('Flagging %d channels %s from command line', len(values.flag_chans), values.flag_chans)
+            p.set_channel_flags(values.flag_chans, True)
+
+        if values.flag_frequency_file:
+            log.info('Flagging channels from file %s', values.flag_frequency_file)
+            p.flag_frequencies_from_file(values.flag_frequency_file, True)
             
         self.pipeline = p
         p.clear_buffers(values)
@@ -1122,14 +1113,6 @@ class PipelineWrapper:
         plan = self.plan
 
         log.debug("Running block %s input shape=%s dtype=%s", iblk, input_flat.shape, input_flat.dtype)
-
-        if values.flag_chans:
-            log.info('Flagging %d channels %s from command line', len(values.flag_chans), values.flag_chans)
-            p.apply_static_flag_chans(input_flat, values.flag_chans)
-
-        if values.flag_frequency_file:
-            log.info('Flagging channels from file %s', values.flag_frequency_file)
-            p.apply_static_flag_freqs(input_flat, values.flag_frequency_file)
 
         if values.simulate_data:
             #Now to make sure that the input data has the desired target input rms I am just going to assume that the simulated data
