@@ -732,8 +732,6 @@ class Pipeline:
         '''
         assert type(input_flat) == np.ma.core.MaskedArray, f"I expected the input block to be a masked array, got {type(input_flat)}"
         input_flat.mask[..., chanrange, :, :] = True
-        input_flat.data[..., chanrange, :, :] = 0
-        print(f"I've now applied the static channel masks and 0-ed the data. Shape of the input_flat was f{input_flat.shape}")
         return input_flat
 
 
