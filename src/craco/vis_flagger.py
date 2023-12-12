@@ -89,7 +89,7 @@ class VisFlagger:
             cas.fill_value = 0
             cas_fil_data = cas.astype(np.float32).filled()
             print(f"type of cas is", type(cas), type(cas_fil_data))
-            cas_fil_data.tofile(cas_fil_writer.fin)
+            cas_fil_data.T.tofile(cas_fil_writer.fin)
 
         cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
             
