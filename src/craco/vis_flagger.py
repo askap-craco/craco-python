@@ -87,7 +87,7 @@ class VisFlagger:
         
         if cas_fil_writer is not None:
             cas.fill_value = 0
-            cas_fil_data = cas.astype(np.int16).filled()
+            cas_fil_data = cas.astype(np.float32).filled()
             print(f"type of cas is", type(cas), type(cas_fil_data))
             cas_fil_data.tofile(cas_fil_writer.fin)
 

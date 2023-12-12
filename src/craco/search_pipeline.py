@@ -1058,7 +1058,7 @@ class PipelineWrapper:
         self.cas_fil_writer = None
         if values.cas_fil:
             cas_fil_hdr = hdr.copy()
-            cas_fil_hdr['nbits'] = 16
+            cas_fil_hdr['nbits'] = 32
             cas_fil_fname = os.path.join(values.outdir, f"CAS_unnorm.b{beamid:02d}.fil")
             self.cas_fil_writer = sigproc.SigprocFile(cas_fil_fname, 'wb', cas_fil_hdr)
         
