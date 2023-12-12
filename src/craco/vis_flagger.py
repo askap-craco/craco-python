@@ -87,9 +87,8 @@ class VisFlagger:
         
         if cas_fil_writer is not None:
             cas.fill_value = 0
-            cas_fil_data = cas.astype(np.float32).filled()
-            print(f"type of cas is", type(cas), type(cas_fil_data))
-            cas_fil_data.T.tofile(cas_fil_writer.fin)
+            cas_fil_data = cas.filled().astype(np.float32)
+            cas_fil_data.T.ravel().tofile(cas_fil_writer.fin)
 
         cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
             
@@ -132,7 +131,6 @@ class VisFlagger:
         nbl, nf, nt = input_flat.shape
         tblk = self.tblk if self.tblk is not None else nt
 
-            
         assert nt % tblk == 0, f'Invalid tblk={tblk} or nt ={nt}'
         nblk = nt //tblk
 
@@ -142,7 +140,7 @@ class VisFlagger:
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
-            input_slice = input_flat[:, idx]
+            input_slice = input_flat[..., idx]
             cas_slice, ics_slice = None, None
             if cas is not None:
                 cas_slice = cas[:, idx]
