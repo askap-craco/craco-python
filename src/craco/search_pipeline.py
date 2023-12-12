@@ -7,6 +7,7 @@ from .pyxrtutil import *
 import time
 import pickle
 import copy
+from astropy.time import Time
 from craft.cmdline import strrange
 
 import craft.craco_plan
@@ -26,6 +27,7 @@ from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
 from craco.candidate_writer import CandidateWriter
+from craco import write_psf as PSF
 
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
@@ -911,6 +913,7 @@ def get_parser():
     parser.add_argument('--fft-shift1', type=int, help='Shift value for FFT1', default=0)
     parser.add_argument('--fft-shift2', type=int, help='Shift value for FFT2', default=0)
     parser.add_argument('-C','--cand-file', help='Candidate output file txt', default='candidates.txt')
+    parser.add_argument('-psf','--save-psf', action='store_true', help='Save psf to disk as fits file every plan_update', default='False')
     parser.add_argument('--dump-mainbufs', type=int, help='Dump main buffer every N blocks', metavar='N')
     parser.add_argument('--dump-fdmt-hist-buf', type=int, help='Dump FDMT history buffer every N blocks', metavar='N')
     parser.add_argument('--dump-boxcar-hist-buf', type=int, help='Dump Boxcar history buffer every N blocks', metavar='N')
@@ -1267,6 +1270,11 @@ def _main():
             log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
 
+        if iblk == 0 and values.save_psf:
+            psf_name = os.path.join(values.outdir, f"psf.beam{plan.beamid:02g}.iblk{iblk}.fits")
+            log.info("Saving the psf to disk with name=%s", psf_name)
+            PSF.write_psf(outname=psf_name, plan=plan, iblk=iblk)
+
         update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
         
         if update_now:
@@ -1274,7 +1282,12 @@ def _main():
             adapter = f.vis_metadata(isamp_update)
             t.tick('get_adapter')
             log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
-            pipeline_wrapper.update_plan(adapter)
+            latest_plan = pipeline_wrapper.update_plan(adapter)
+            if values.save_psf:
+                psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
+                log.info("Saving the psf to disk with name=%s", psf_name)
+                PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
+
             t.tick('update_plan')
 
         pipeline_wrapper.write(input_flat)

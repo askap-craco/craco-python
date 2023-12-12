@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from craft.cmdline import strrange
 
-def write_psf(outname, plan):
-    print(f"HELLOOOO, {outname}")
+def write_psf(outname, plan, iblk=None):
+    #print(f"HELLOOOO, {outname}")
     gridder_obj = craco_kernels.Gridder("", plan, "")
     imager_obj = craco_kernels.Imager("", plan, "")
     block = np.ones((plan.nbl, plan.nf, 2), dtype=np.complex128)
@@ -22,7 +22,9 @@ def write_psf(outname, plan):
         'CH_BW_Hz': plan.foff,
         'NANT': plan.nant,
         'NBL': plan.nbl,
+        'BEAM': plan.beamid,
         'STARTMJD': plan.tstart.mjd,
+        'IBLK': iblk,
         'TARGET': plan.target_name,
         'UV': str(plan.values.uv),
         'BSCALE': 1.0,
@@ -33,11 +35,6 @@ def write_psf(outname, plan):
 
     img = imager_obj(np.fft.fftshift(grid[..., 0])).astype(np.complex64)
     imgout = (img.real + img.imag) / 2
-    #imgout = img.real
-    #plt.figure()
-    #plt.imshow(imgout, aspect='auto', interpolation='None')
-    
-    #plt.show()
     postprocess.create_header_for_image_data(outname,
                                             wcs = plan.wcs,
                                             im_shape = (plan.npix, plan.npix), 

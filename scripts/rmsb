@@ -10,7 +10,7 @@
 for sb in $@ ; do
     if [[ $sb == SB* ]] ; then
 	sbdir=$(echo $sb | cut -d/ -f 1)
-	fullpath="/data/seren*/big/craco/$sbdir"
+	fullpath="/CRACO/DATA*/craco/$sbdir"
 	echo Deleting $fullpath
 	rm -Rf $fullpath
     else
