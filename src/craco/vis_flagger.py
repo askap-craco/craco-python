@@ -65,7 +65,7 @@ class VisFlagger:
         self.total_tfflag = 0
         self.total_blocks = 0
 
-    def flag_block(self, input_flat, cas, ics):
+    def flag_block(self, input_flat, cas, ics, cas_fil_writer):
         '''
         Uses the provided cas and ics to compute masks for input_block
         if cas is None, it computes it internally
@@ -85,6 +85,11 @@ class VisFlagger:
             cas = abs(input_flat).mean(axis=0)
             factor = 1
         
+        if cas_fil_writer is not None:
+            cas_fil_data = cas.astype(np.int16)
+            print(f"type of cas is", type(cas), type(cas_fil_data))
+            cas_fil_data.tofile(cas_fil_writer.fin)
+
         cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
             
         if ics is not None:
@@ -143,15 +148,11 @@ class VisFlagger:
             if ics is not None:
                 ics_slice = ics[:, idx]
 
-            _, tfmask = self.flag_block(input_slice, cas_slice, ics_slice)
+            _, tfmask = self.flag_block(input_slice, cas_slice, ics_slice, cas_fil_writer)
 
             if mask_fil_writer is not None:
                 np.packbits(tfmask.T.ravel()).tofile(mask_fil_writer.fin)
 
-            if cas_fil_writer is not None:
-                cas_fil_data = cas_slice.astype(np.int16)
-                print(f"type of cas_fil is", type(cas_slice), type(cas_fil_data))
-                cas_fil_data.tofile(cas_fil_writer.fin)
 
         tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag
         tflagd = tflag1 - tflag0
