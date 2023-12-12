@@ -149,8 +149,8 @@ class VisFlagger:
                 np.packbits(tfmask.T.ravel()).tofile(mask_fil_writer.fin)
 
             if cas_fil_writer is not None:
-                print(
                 cas_fil_data = cas_slice.astype(np.int16)
+                print(f"type of cas_fil is", type(cas_slice), type(cas_fil_data))
                 cas_fil_data.tofile(cas_fil_writer.fin)
 
         tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag
