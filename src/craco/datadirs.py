@@ -37,23 +37,25 @@ class DataDirs:
         assert os.path.isdir(self.cracodata), f'CRACO DATA dir {self.cracodata} not a directory'
         
         self.disktype = self.cracodata.split('/')[2] #
-        assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
+        self.disktype = ''
+        #assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
 
     def node_dir(self, sid):
-        ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
+        #ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
+        ddir = f'/CRACO/DATA_{sid:02d}/craco/'
         return ddir
 
 
     @property
     def node_dirs(self):
-        for s in range(1,11):
+        for s in range(1,18):
             sdir = self.node_dir(s)
             yield sdir
 
     @property
     def node_names(self):
-        for s in range(1,11):
-            yield f'seren-{s:02d}'
+        for s in range(1,18):
+            yield f'skadi-{s:02d}'
         
     @property
     def schedblocks_by_node(self):
@@ -145,6 +147,10 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+
+    d = DataDirs()
+    print(d.schedblocks_by_node)
     
 
 if __name__ == '__main__':
