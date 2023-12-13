@@ -65,33 +65,46 @@ class VisFlagger:
         self.total_tfflag = 0
         self.total_blocks = 0
 
-    def flag_block(self, input_flat, cas, ics, use_local_cas=True):
+    def flag_block(self, input_flat, cas, ics, cas_fil_writer):
+        '''
+        Uses the provided cas and ics to compute masks for input_block
+        if cas is None, it computes it internally
+        if ics is None, it ignores ics and does not computes any mask based on that
+        If takes the 'OR' of both masks at the end and returns the combined masks
+        '''
 
         (nbl, nf, nt) = input_flat.shape
-        assert cas.shape == ics.shape
-        nfcas, nt2 = cas.shape
-        assert nt == nt2, f"input_flat ({nt}) and cas ({nt2}) don't have the same nt"
 
-        assert nfcas >= nf
-        factor = nfcas // nf
+        if cas is not None:
+            nfcas, ntcas = cas.shape
+            assert nfcas >= nf
+            assert nt == ntcas, f"input_flat ({nt}) and cas ({ntcas}) don't have the same nt"
+            factor = nfcas // nf
 
-
-        ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.ics_threshold)
-
-        # The input CAS is rescaled per channel, which makes it not so great at detecting RFI
-        # Vivek claims it's much better to compute unrescaled CAS and use that
-        # The easiest thing to do is do it here. Note; this isn't calibrated yet, so it's
-        # possibly a bit biased towards antennas with higher gains, but it appears not to hurt
-        # for the purposes of RFI mitigation
-
-        if use_local_cas:
+        else:
             cas = abs(input_flat).mean(axis=0)
             factor = 1
-            
-        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
+        
+        if cas_fil_writer is not None:
+            cas.fill_value = 0
+            cas_fil_data = cas.filled().astype(np.float32)
+            cas_fil_data.T.ravel().tofile(cas_fil_writer.fin)
 
-        fmask = ics_fmask | cas_fmask
-        tmask = ics_tmask | cas_tmask
+        cas_fmask, cas_tmask = calc_mask(cas, factor, self.fradius, self.tradius, self.cas_threshold)
+            
+        if ics is not None:
+            nfics, ntics = ics.shape
+            assert nfics >= nf
+            assert nt == ntics, f"input_flat ({nt}) and ics ({ntics}) don't have the same nt"
+            factor = nfics // nf
+            ics_fmask, ics_tmask = calc_mask(ics, factor, self.fradius, self.tradius, self.ics_threshold)
+
+            fmask = ics_fmask | cas_fmask
+            tmask = ics_tmask | cas_tmask
+
+        else:
+            fmask = cas_fmask
+            tmask = cas_tmask
 
         self.total_tflag += sum(tmask)
         self.total_fflag += sum(fmask)
@@ -104,24 +117,20 @@ class VisFlagger:
         return input_flat, tfmask
         
         
-    def __call__(self, input_flat, cas, ics, mask_fil_writer = None):
+    def __call__(self, input_flat, cas, ics, mask_fil_writer = None, cas_fil_writer = None):
         '''
         Updates input flat mask shape (nbl, nf, nt)
         Expects cas, ics as (nf, nt) and ors the mask together
         Computes in blocks of self.tblk to capture shorter RFI
         Writes the computed tfmask to a craft.sigproc.SigprocFile obj
+
+        Changed behavior - 05.12.2023 - is cas and/or ics are provided
+        it uses those to flag the data. Otherwise it computes its own
+        CAS internally and flags based on that only.
         '''
-
-        if cas is None or ics is None:
-            if self.fradius > 0 or self.tradius > 0:
-                raise ValueError('Requested flagging but cas or ICS not supplied')
-            
-            return input_flat
-
         nbl, nf, nt = input_flat.shape
         tblk = self.tblk if self.tblk is not None else nt
 
-            
         assert nt % tblk == 0, f'Invalid tblk={tblk} or nt ={nt}'
         nblk = nt //tblk
 
@@ -131,9 +140,18 @@ class VisFlagger:
             start = iblk*tblk
             end = start + tblk
             idx = slice(start, end)
-            _, tfmask = self.flag_block(input_flat[:,:,idx], cas[:,idx], ics[:,idx])
+            input_slice = input_flat[..., idx]
+            cas_slice, ics_slice = None, None
+            if cas is not None:
+                cas_slice = cas[:, idx]
+            if ics is not None:
+                ics_slice = ics[:, idx]
+
+            _, tfmask = self.flag_block(input_slice, cas_slice, ics_slice, cas_fil_writer)
+
             if mask_fil_writer is not None:
                 np.packbits(tfmask.T.ravel()).tofile(mask_fil_writer.fin)
+
 
         tflag1, fflag1, tfflag1 = self.total_tflag, self.total_fflag, self.total_tfflag
         tflagd = tflag1 - tflag0

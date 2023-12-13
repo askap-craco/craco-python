@@ -721,11 +721,11 @@ class Pipeline:
         return input_flat
 
 
-    def flag_input(self, input_flat, cas, ics, mask_fil_writer):
+    def flag_input(self, input_flat, cas, ics, mask_fil_writer, cas_fil_writer):
         '''
         Update input flagging mask based on running CAS and ICS and IQRM standard deviation
         '''
-        return self.flagger(input_flat, cas, ics, mask_fil_writer)
+        return self.flagger(input_flat, cas, ics, mask_fil_writer, cas_fil_writer)
 
     def calculate_processing_gain(self, fft_shift1, fft_shift2):
         '''
@@ -934,6 +934,7 @@ def get_parser():
     parser.add_argument('--dflag-cas-threshold', help='Dynamic flagging threshold for CAS. >0 to enable CAS flagging', default=0, type=float)
     parser.add_argument('--dflag-ics-threshold', help='Dynamic flagging threshold for ICS. >0 to enable ICS flagging', default=0, type=float)
     parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
+    parser.add_argument('--cas-fil', action='store_true', help="Enable saving of the CAS as a filterbank", default=False)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
     parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
@@ -1054,6 +1055,13 @@ class PipelineWrapper:
         mask_fil_fname = os.path.join(values.outdir, f"RFI_tfmask.b{beamid:02d}.fil")
         self.mask_fil_writer = sigproc.SigprocFile(mask_fil_fname, 'wb', mask_fil_hdr)
 
+        self.cas_fil_writer = None
+        if values.cas_fil:
+            cas_fil_hdr = hdr.copy()
+            cas_fil_hdr['nbits'] = 32
+            cas_fil_fname = os.path.join(values.outdir, f"CAS_unnorm.b{beamid:02d}.fil")
+            self.cas_fil_writer = sigproc.SigprocFile(cas_fil_fname, 'wb', cas_fil_hdr)
+        
         # Create a pipeline
         alloc_device_only = values.dump_mainbufs is not None or \
                             values.dump_fdmt_hist_buf is not None or \
@@ -1108,6 +1116,7 @@ class PipelineWrapper:
         p = self.pipeline
         pc_filterbank = self.pc_filterbank
         mask_fil_writer = self.mask_fil_writer
+        cas_fil_writer = self.cas_fil_writer
         iblk = self.iblk
         values = self.values
         plan = self.plan
@@ -1121,7 +1130,7 @@ class PipelineWrapper:
             input_flat_cal = input_flat * values.target_input_rms
 
         else:
-            input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer)
+            input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer, cas_fil_writer)
             t.tick('flag')
             
             input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
@@ -1200,6 +1209,7 @@ class PipelineWrapper:
         candout = self.candout
         pc_filterbank = self.pc_filterbank
         mask_fil_writer = self.mask_fil_writer
+        cas_fil_writer = self.cas_fil_writer
         values = self.values
         cmdstr =  ' '.join(sys.argv)
         now = datetime.datetime.now()
@@ -1214,6 +1224,9 @@ class PipelineWrapper:
         if mask_fil_writer is not None:
             mask_fil_writer.fin.close()
         
+        if cas_fil_writer is not None:
+            cas_fil_writer.fin.close()
+
 def _main():
     parser = get_parser()
     values = parser.parse_args()
@@ -1257,6 +1270,11 @@ def _main():
             log.info('Finished due to values.nblocks=%d', values.nblocks)
             break
 
+        if iblk == 0 and values.save_psf:
+            psf_name = os.path.join(values.outdir, f"psf.beam{plan.beamid:02g}.iblk{iblk}.fits")
+            log.info("Saving the psf to disk with name=%s", psf_name)
+            PSF.write_psf(outname=psf_name, plan=plan, iblk=iblk)
+
         update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
         
         if update_now:
@@ -1266,7 +1284,7 @@ def _main():
             log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
             latest_plan = pipeline_wrapper.update_plan(adapter)
             if values.save_psf:
-                psf_name = f"psf.iblk{iblk}.fits"
+                psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
                 log.info("Saving the psf to disk with name=%s", psf_name)
                 PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
 

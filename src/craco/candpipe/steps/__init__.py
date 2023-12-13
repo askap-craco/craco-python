@@ -5,6 +5,7 @@
 __all__ = ['cluster',
            'time_space_filter',
            'catalog_cross_match',
+           'alias_filter', 
            'check_filterbanks',
            'check_visibilities']
 

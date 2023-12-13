@@ -63,15 +63,29 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
+        self.psf_fname = self.get_file( f'psf.beam{self.beamno}.iblk0.fits')
         self.config = config
 
-        self.steps = [
-            steps.cluster.Step(self),
-            # steps.time_space_filter.Step(self),
-            steps.catalog_cross_match.Step(self),
-            # steps.check_filterbanks.Step(self),
-            # steps.check_visibilities.Step(self),
-        ]
+        if not os.path.exists(self.psf_fname):
+            self.steps = [
+                steps.cluster.Step(self),
+                steps.catalog_cross_match.Step(self),
+            ]
+        else:
+            self.steps = [
+                steps.cluster.Step(self),
+                steps.catalog_cross_match.Step(self),
+                steps.alias_filter.Step(self), 
+            ]
+
+        # self.steps = [
+        #     steps.cluster.Step(self),
+        #     # steps.time_space_filter.Step(self),
+        #     steps.catalog_cross_match.Step(self),
+        #     steps.alias_filter.Step(self), 
+        #     # steps.check_filterbanks.Step(self),
+        #     # steps.check_visibilities.Step(self),
+        # ]
         
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,
@@ -101,6 +115,10 @@ class Pipeline:
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
+
+        if len(cand_in) == 0:
+            return None
+
         self.create_dir()
 
         for istep, step in enumerate(self.steps):
@@ -160,7 +178,7 @@ def _main():
             level=logging.INFO,
             datefmt='%Y-%m-%d %H:%M:%S')
 
-    logging.debug("Executing candpipe...")
+    log.debug("Executing candpipe...")
 
     config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
     with open(config_file, 'r') as yaml_file:
@@ -171,7 +189,7 @@ def _main():
             p = Pipeline(f, args, config)
             p.run()
         except:
-            logging.info(f"failed to run candpipe on {f}... aborted...")
+            log.warning(f"failed to run candpipe on {f}... aborted...")
         # p = Pipeline(f, args, config)
         # p.run()
 
