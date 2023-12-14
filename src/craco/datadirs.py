@@ -29,6 +29,33 @@ def get_dir_size(start_path = '.'):
 
     return total_size
 
+class Schedblock:
+    def __init__(self, datadirs):
+        self.datadirs = datadirs
+
+    @propery
+    def scans(self):
+        raise NotImplemented
+    
+
+
+class ScanDir:
+    def __init__(self, schedblock):
+        self.schedblock = schedblock
+
+    @property
+    def has_uvfits(self):
+        pass
+
+    @property
+    def scan_start_time(self):
+        # parse SCAN_START or SCAN_STOP files, for example
+        pass
+
+    @property
+    def recorded_duration(self):
+        # recorded duration - parse uvfits file
+        pass
 
 class DataDirs:
     def __init__(self):
@@ -45,6 +72,8 @@ class DataDirs:
         ddir = f'/CRACO/DATA_{sid:02d}/craco/'
         return ddir
 
+    def open_schedblock(self, sid):
+        return Schedblock(self, sid)
 
     @property
     def node_dirs(self):
@@ -64,6 +93,15 @@ class DataDirs:
             all_sbs.append(list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*')))))
 
         return all_sbs
+
+    @property
+    def schedblocks_by_node_dict(self):
+        all_sbs = {}
+        for ddir,name in zip(self.node_dirs, self.node_names):
+            all_sbs[name] = list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*'))))
+
+        return all_sbs
+
     
     @property
     def all_schedblocks(self):
