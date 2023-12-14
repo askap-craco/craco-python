@@ -27,6 +27,24 @@ def mycaget(s):
     
     return r
 
+def touchfile(f, directory=None, check_exists=True):
+    date = datetime.datetime.utcnow()
+    if directory is None:
+        fout = f
+    else:
+        fout = os.path.join(directory, f)
+
+    if check_exists and os.path.exists(fout):
+        raise ValueError(f'touchfile {fout} exists. Somehting bad has happend')
+    
+    with open(fout, 'w') as outfile:
+        outfile.write(date.isoformat() + '\n')
+
+    return fout
+
+
+scandir = None # Yuck. 
+
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -66,8 +84,10 @@ def _main():
     targetdir = os.path.join(bigdir, f'SB{sbid:06}', 'targets', target.replace(' ','_'))
     targetlink = os.path.join(targetdir, nowstr)
     os.makedirs(scandir)
+    touchfile('SCAN_START', directory=scandir)
     os.chdir(scandir)
     os.makedirs(targetdir, exist_ok=True)
+    
     os.symlink(scandir, targetlink)
     target_file = os.path.join(scandir, 'ccap.fits')
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
@@ -178,6 +198,8 @@ def _main():
 def exit_function():
     log.info('Stopping CRACO in exit_function')
     caput('ak:cracoStop', 1)
+    touchfile('SCAN_STOP', directory=scandir, check_exists=False)
+
 
 if __name__ == '__main__':
     _main()
