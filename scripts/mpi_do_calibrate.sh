@@ -24,8 +24,8 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/CRACO/SOFTWARE/craco/wan342/Software/co
 export PATH=$PATH:/CRACO/SOFTWARE/craco/wan342/bin
 
 source /home/craftop/.conda/.remove_conda.sh
-source /home/wan342/.conda/.activate_conda.sh
-conda activate craco38
+source /home/craftop/.conda/.activate_conda.sh
+conda activate calib
 
 logfile=${uvfits}.cal.log
 

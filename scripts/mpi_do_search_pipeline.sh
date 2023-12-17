@@ -20,7 +20,7 @@ fi
 
 ### activate my environment
 source /home/craftop/.conda/.remove_conda.sh
-source /home/wan342/.conda/.activate_conda.sh
+source /home/craftop/.conda/.activate_conda.sh
 conda activate craco
 
 # Andy environment breaks XRT wit this eror
