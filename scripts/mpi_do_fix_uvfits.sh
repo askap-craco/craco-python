@@ -13,6 +13,11 @@ if [[ ! -f $uvfits ]] ; then
     echo "UVFITS not found! $uvfits"
     exit 1
 fi
+
+source /home/craftop/.conda/.remove_conda.sh
+source /home/craftop/.conda/.activate_conda.sh
+conda activate craco
+
 cmd="fixuvfits $uvfits"
 echo running $cmd
 $cmd
