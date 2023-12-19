@@ -9,11 +9,13 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import re
 import sys
-import logging
 import glob
+import json
 import pandas as pd
 
+import logging
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
@@ -28,168 +30,298 @@ def get_dir_size(start_path = '.'):
                 total_size += os.path.getsize(fp)
 
     return total_size
-
-class Schedblock:
-    def __init__(self, datadirs):
-        self.datadirs = datadirs
-
-    @propery
-    def scans(self):
-        raise NotImplemented
     
+def format_sbid(sbid, padding=True, prefix=True):
+    """
+    format sbid into a desired format
+    """
+    if isinstance(sbid, str): sbid = int(
+        "".join([i for i in sbid if i.isdigit()])
+    )
 
+    sbidstr = ""
+    if prefix: sbidstr += "SB"
+    if padding: sbidstr += f"{sbid:0>6}"
+    else: sbidstr += f"{sbid}"
 
-class ScanDir:
-    def __init__(self, schedblock):
-        self.schedblock = schedblock
+    return sbidstr
 
-    @property
-    def has_uvfits(self):
-        pass
-
-    @property
-    def scan_start_time(self):
-        # parse SCAN_START or SCAN_STOP files, for example
-        pass
-
-    @property
-    def recorded_duration(self):
-        # recorded duration - parse uvfits file
-        pass
+def check_path(path):
+    return True if os.path.exists(path) else False
 
 class DataDirs:
     def __init__(self):
-        self.cracodata = os.environ['CRACO_DATA'] # local data dir when recording usuall /data/fast/craco or /data/big/craco
-        assert self.cracodata is not None, 'Set CRACO_DATA environment variable'
-        assert os.path.isdir(self.cracodata), f'CRACO DATA dir {self.cracodata} not a directory'
-        
-        self.disktype = self.cracodata.split('/')[2] #
-        self.disktype = ''
-        #assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
+        self.cracodata = os.environ["CRACO_DATA"]
+        if self.cracodata is None: 
+            self.cracodata = "/data/craco/craco/"
+            log.info("no CRACO_DATA environ var found... use `/data/craco/craco/`")
 
-    def node_dir(self, sid):
-        #ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
-        ddir = f'/CRACO/DATA_{sid:02d}/craco/'
-        return ddir
-
-    def open_schedblock(self, sid):
-        return Schedblock(self, sid)
+    def node_dir(self, nidx=0):
+        return f"/CRACO/DATA_{nidx:0>2}/craco/" # by default head node
 
     @property
-    def node_dirs(self):
-        for s in range(1,18):
-            sdir = self.node_dir(s)
-            yield sdir
+    def data_nodes(self, ):
+        for nidx in range(1, 19):
+            yield self.node_dir(nidx)
+
+    def sched_dir(self, sbid, nidx=0):
+        node_dir = self.node_dir(nidx = nidx)
+        return os.path.join(node_dir, format_sbid(sbid))
+
+    def scan_dir(self, sbid, scan=None, nidx=0):
+        sched_dir = self.sched_dir(sbid, nidx=nidx)
+        if scan is None: # work out the first scan 
+            scans = sorted(glob.glob(f"{sched_dir}/scans/??/??????????????"))
+            if len(scans) == 0: return None
+            return scans[0]
+        return os.path.join(sched_dir, f"scans/{scan}")
+
+    def run_dir(self, sbid, scan=None, run="results", nidx=0):
+        scan_dir = self.scan_dir(sbid, scan=scan, nidx=nidx)
+        return os.path.join(scan_dir, f"{run}/")
+
+    ### function to extract information from the path
+    def _re_match_pat(self, pat, text):
+        matched = re.findall(pat, text)
+        if len(matched) == 0: return None
+        return matched[0]
+
+    def path_to_scan(self, path):
+        return self._re_match_pat("(\d{2}/\d{14})", path)
+
+    def path_to_sbid(self, path):
+        return self._re_match_pat("(SB\d{6})", path)
+
+    def path_to_node(self, path):
+        return self._re_match_pat("DATA_(\d{2})", path)
+
+    def path_to_runname(self, path):
+        return self._re_match_pat("\d{14}/(.*)/", path)
+
+    ### TODO - add deletor here as well?
+
+class SchedDir:
+    def __init__(self, sbid, datadirs=None):
+        self.datadirs = DataDirs() if datadirs is None else datadirs
+        self.sbid = sbid # can be string, int, with or without SB
+
+        ### get basic information from flagfile
+        self._load_flagfile()
 
     @property
-    def node_names(self):
-        for s in range(1,18):
-            yield f'skadi-{s:02d}'
-        
-    @property
-    def schedblocks_by_node(self):
-        all_sbs = []
-        for ddir in self.node_dirs:
-            all_sbs.append(list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*')))))
-
-        return all_sbs
+    def sched_head_dir(self):
+        return self.datadirs.sched_dir(self.sbid, )
 
     @property
-    def schedblocks_by_node_dict(self):
-        all_sbs = {}
-        for ddir,name in zip(self.node_dirs, self.node_names):
-            all_sbs[name] = list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*'))))
+    def scans(self):
+        """
+        use head node to list all available scans
+        """
+        allscanpaths = glob.glob(os.path.join(self.sched_head_dir, "scans/??/??????????????/"))
+        return sorted([self.datadirs.path_to_scan(path) for path in allscanpaths])
 
-        return all_sbs
+    @property
+    def metafile(self):
+        metapath = "{}/{}.json.gz".format(
+            self.sched_head_dir, format_sbid(self.sbid, padding=False)
+        )
+        return metapath if check_path(metapath) else None
 
+    @property
+    def flagfile(self):
+        flagpath = "{}/{}.antflag.json".format(
+            self.sched_head_dir, format_sbid(self.sbid)
+        )
+        return flagpath if check_path(flagpath) else None
+
+    @property
+    def run_dir(self):
+        return f"{self.sched_head_dir}/runscript"
+
+    @property
+    def sched_data_dirs(self, ):
+        for data_node in self.datadirs.data_nodes:
+            yield f"{data_node}/{format_sbid(self.sbid)}"
+
+    # TODO - get calibration
+    # TODO - get beam_only rank
+    # TODO - run folder
+
+    def _load_flagfile(self):
+        if self.flagfile is None: 
+            self.start_mjd = None; self.flagant = None
+            return
+        with open(self.flagfile) as fp:
+            metaf = json.load(fp)
+
+        self.start_mjd = eval(metaf["trange"])[0]
+        self.flagant = eval(metaf["flagants"])
+
+    def get_size(self):
+        """
+        get the space used for this schedule block
+        """
+        self.sched_sizes = {
+            f"DATA_{self.datadirs.path_to_node(data_dir)}": 
+            get_dir_size(data_dir) / 1024 / 1024 / 1024
+            for data_dir in self.sched_data_dirs
+        }
+
+        return self.sched_sizes
+
+class ScanDir:
+    def __init__(self, sbid, scan=None):
+        self.scheddir = SchedDir(sbid)
+        self.datadirs = self.scheddir.datadirs
+
+        self.scan = scan if scan is not None else self.scheddir.scans[0]
+
+        if not check_path(self.scan_head_dir): 
+            raise ValueError(f"no scan {scan} found under {sbid}")
+
+        self._get_beam_node_dict()
+
+    @property
+    def scan_data_dirs(self):
+        for data_node in self.datadirs.data_nodes:
+            yield f"{data_node}/{format_sbid(self.scheddir.sbid)}/scans/{self.scan}"
     
     @property
-    def all_schedblocks(self):
-        allsbs = set()
-        for sbs in self.schedblocks_by_node:
-            allsbs.update(sbs)
-
-        return sorted(list(allsbs))
-
-    def sb_sizes(self, sb):
-        sizes = np.array(list(map(get_dir_size, [os.path.join(ddir, sb) for ddir in self.node_dirs])))
-        return sizes
-
-    def sb_scan_dumps(self, sb):
-        '''
-        Returns a list of data dumps in teh given SB
-        of the form scans/00/20230204105616
-        '''
-        topdir = os.path.join(self.cracodata, sb)
-        if not os.path.isdir(topdir):
-            raise ValueError(f'SB {sb} not found in {self.cracodata}')
-
-        globpath = os.path.join(topdir, 'scans/*/*')
-        sb_dumps = glob.glob(globpath)
-        log.debug('Globbing path %s had %d results', globpath, len(sb_dumps))
-
-        
-        # strip leding bits including /
-        sb_dumps = [d[len(topdir)+1:] for d in sb_dumps]
-
-        return sb_dumps
-
-    def data_dirs(self, sb):
-        '''
-        Returns a list of all directorys in the given SB - removes topdir
-        '''
-        topdir = os.path.join(self.cracodata, sb)
-        if not os.path.isdir(topdir):
-            raise ValueError(f'SB {sb} not found in {self.cracodata}')
-
-
-        globpath = os.path.join(topdir, '*/')
-        sb_dumps = glob.glob(globpath, recursive=True)
-        log.debug('Globbing path %s had %d results', globpath, len(sb_dumps))
-
-        # strip leding bits including /
-        sb_dumps = [d[len(topdir)+1:] for d in sb_dumps]
-
-        return sb_dumps
-
+    def scan_head_dir(self):
+        return self.datadirs.scan_dir(self.scheddir.sbid, scan=self.scan)
 
     @property
-    def sb_size_table(self, sbs=None):
-        columns = ['SB']
-        columns.extend(list(self.node_names))
-        columns.append('Total')
-        all_data = []
-        if sbs is None:
-            sbs = self.all_schedblocks
-            
-        for sbid in sbs:
-            row = [sbid]
-            sz = self.sb_sizes(sbid)/1024/1024/1024 # conver tto GB
-            row.extend(sz) 
-            row.append(sz.sum())
-            all_data.append(row)
+    def scan_rank_file(self):
+        return f"{self.scan_head_dir}/beam_only.rank"
 
-        df = pd.DataFrame(all_data, columns=columns)
-        #df.style.concat(df.agg(['sum']).style) # add sum to botom https://stackoverflow.com/questions/21752399/pandas-dataframe-total-row needs later version of python
-        return df
+    @property
+    def runs(self):
+        runpaths = glob.glob(f"{self.scan_head_dir}/*/")
+        return sorted([
+            self.datadirs.path_to_runname(runpath) for runpath in runpaths
+        ])
+
+    def _get_beam_node_dict(self):
+        """ beam (int) - node (str) mapping """
+        if not check_path(self.scan_rank_file):
+            raise NotImplementedError("get beam node mapping without rank file has not been implemented")
+        # load it from rank file
+        with open(self.scan_rank_file) as fp:
+            rank_file_text = fp.read()
+        node_beam_map = re.findall(
+            "=skadi-(\d{2}).*# Beam (\d{1,2}) xrtdevid",
+            rank_file_text
+        )
+
+        if len(node_beam_map) != 36:
+            log.info("not all beam recorded...")
         
+        self.beam_node_dict = {int(beam): node for node, beam in node_beam_map}
 
-def _main():
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument(dest='files', nargs='+')
-    parser.set_defaults(verbose=False)
-    values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
+    def beam_uvfits_path(self, beam):
+        scan_dir = self.datadirs.scan_dir(
+            self.scheddir.sbid, self.scan, 
+            nidx = self.beam_node_dict[int(beam)]
+        )
+        return f"{scan_dir}/b{int(beam):0>2}.uvfits"
+
+    @property
+    def uvfits_paths(self):
+        return [self.beam_uvfits_path(beam) for beam in range(0, 36)]
+
+    @property
+    def uvfits_count(self):
+        count = 0
+        for path in self.uvfits_paths:
+            if check_path(path): count += 1
+        return count
+
+    def beam_ics_path(self, beam):
+        scan_dir = self.datadirs.scan_dir(
+            self.scheddir.sbid, self.scan, 
+            nidx = self.beam_node_dict[int(beam)]
+        )
+        return f"{scan_dir}/ics_b{int(beam):0>2}.fil"
+
+    def beam_cas_path(self, beam):
+        # note - cas_b??.fil file is rubbish
+        return None
+
+    def get_size(self):
+        self.scan_sizes = {
+            f"DATA_{self.datadirs.path_to_node(data_dir)}":
+            get_dir_size(data_dir) / 1024 / 1024 / 1024
+            for data_dir in self.scan_data_dirs
+        }
+
+        return self.scan_sizes
 
 
-    d = DataDirs()
-    print(d.schedblocks_by_node)
-    
+class RunDir:
+    def __init__(self, sbid, scan=None, run="results"):
+        self.scandir = ScanDir(sbid, scan=scan)
+        self.scheddir = self.scandir.scheddir
+        self.datadirs = self.scheddir.datadirs
 
-if __name__ == '__main__':
-    _main()
+        self.run = run
+        self.beam_node_dict = self.scandir.beam_node_dict
+
+    @property
+    def run_data_dirs(self):
+        for data_node in self.datadirs.data_nodes:
+            yield f"{data_node}/{format_sbid(self.scheddir.sbid)}/scans/{self.scandir.scan}/{self.run}/"
+
+    @property
+    def run_head_dir(self):
+        return os.path.join(self.scandir.scan_head_dir, f"{self.run}/")
+
+    @property
+    def run_file(self):
+        """
+        get the latest run file
+        """
+        ### get all files
+        scannum, scantime = self.scandir.scan.split("/")
+        scantime = scantime[-6:]
+        runfiles = sorted(
+            glob.glob(f"{self.scheddir.run_dir}/run.{format_sbid(self.scheddir.sbid)}.{scannum}.{scantime}.{self.run}.*.sh")
+        )
+        ### get latest run file
+        if len(runfiles) == 0: return None
+        return runfiles[-1]
+
+    def _extract_bash_param(self, par, text):
+        matched = re.findall(par, text)
+        if len(matched) == 0: return None
+        return matched[0]
+
+    def get_run_params(self):
+        with open(self.run_file) as fp:
+            run_file_content = fp.read()
+        ### startmjd
+        self.startmjd = self._extract_bash_param("startmjd=(.*)\n", run_file_content)
+        self.flagant = self._extract_bash_param("flagant=(.*)\n", run_file_content)
+        ### note - add more attributes here if more is needed
+
+    ### candidate related
+    def beam_folder(self, beam):
+        nidx = self.scandir.beam_node_dict[int(beam)]
+        return self.datadirs.run_dir(
+            sbid=self.scheddir.sbid,
+            scan=self.scandir.scan,
+            run=self.run, nidx=nidx,
+        )
+
+    def beam_candidate(self, beam):
+        return f"{self.beam_folder(beam)}/candidates.b{beam:0>2}.txt"
+
+    def beam_pcb(self, beam):
+        return f"{self.beam_folder(beam)}/pcb{beam:0>2}.fil"
+
+    def beam_rfimask(self, beam):
+        return f"{self.beam_folder(beam)}/RFI_tfmask.b{beam:0>2}.fil"
+
+    def beam_unique_cand(self, beam):
+        return f"{self.beam_folder(beam)}/clustering_output/candidates.b{beam:0>2}.txt.uniq.csv"
+
+    # note - for any additional files, add it here
