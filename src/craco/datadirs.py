@@ -29,6 +29,33 @@ def get_dir_size(start_path = '.'):
 
     return total_size
 
+class Schedblock:
+    def __init__(self, datadirs):
+        self.datadirs = datadirs
+
+    @propery
+    def scans(self):
+        raise NotImplemented
+    
+
+
+class ScanDir:
+    def __init__(self, schedblock):
+        self.schedblock = schedblock
+
+    @property
+    def has_uvfits(self):
+        pass
+
+    @property
+    def scan_start_time(self):
+        # parse SCAN_START or SCAN_STOP files, for example
+        pass
+
+    @property
+    def recorded_duration(self):
+        # recorded duration - parse uvfits file
+        pass
 
 class DataDirs:
     def __init__(self):
@@ -37,23 +64,27 @@ class DataDirs:
         assert os.path.isdir(self.cracodata), f'CRACO DATA dir {self.cracodata} not a directory'
         
         self.disktype = self.cracodata.split('/')[2] #
-        assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
+        self.disktype = ''
+        #assert self.disktype == 'fast' or self.disktype == 'big', f'Unexpected disk type in cracodata environtment variable {self.cracodata}={self.disktype}'
 
     def node_dir(self, sid):
-        ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
+        #ddir = f'/data/seren-{sid:02d}/{self.disktype}/craco'
+        ddir = f'/CRACO/DATA_{sid:02d}/craco/'
         return ddir
 
+    def open_schedblock(self, sid):
+        return Schedblock(self, sid)
 
     @property
     def node_dirs(self):
-        for s in range(1,11):
+        for s in range(1,18):
             sdir = self.node_dir(s)
             yield sdir
 
     @property
     def node_names(self):
-        for s in range(1,11):
-            yield f'seren-{s:02d}'
+        for s in range(1,18):
+            yield f'skadi-{s:02d}'
         
     @property
     def schedblocks_by_node(self):
@@ -62,6 +93,15 @@ class DataDirs:
             all_sbs.append(list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*')))))
 
         return all_sbs
+
+    @property
+    def schedblocks_by_node_dict(self):
+        all_sbs = {}
+        for ddir,name in zip(self.node_dirs, self.node_names):
+            all_sbs[name] = list(map(os.path.basename, glob.glob(os.path.join(ddir, 'SB*'))))
+
+        return all_sbs
+
     
     @property
     def all_schedblocks(self):
@@ -145,6 +185,10 @@ def _main():
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+
+    d = DataDirs()
+    print(d.schedblocks_by_node)
     
 
 if __name__ == '__main__':

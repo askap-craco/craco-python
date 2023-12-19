@@ -22,6 +22,7 @@ def write_psf(outname, plan, iblk=None):
         'CH_BW_Hz': plan.foff,
         'NANT': plan.nant,
         'NBL': plan.nbl,
+        'BEAM': plan.beamid,
         'STARTMJD': plan.tstart.mjd,
         'IBLK': iblk,
         'TARGET': plan.target_name,
