@@ -166,7 +166,26 @@ class UvfitsMeta(uvfits.UvFits):
         src = self.meta_file.source_at_time(self.beamid, self.tstart)
         coord = src['skycoord']
         return coord
-        
+
+    def _create_masked_data(self, dout_data, start_sampno):
+        dout_complex_data = dout_data[..., 0, :] + 1j*dout_data[..., 1, :]
+        mask = np.zeros(dout_complex_data.shape, dtype=bool)
+        nt = mask.shape[-1]
+        t0 = self.sample_to_time(start_sampno)
+        t1 = self.sample_to_time(start_sampno+nt)
+        flags_t0 = self.meta_file.flags_at_time(t0)
+        flags_t1 = self.meta_file.flags_at_time(t1)
+        flags = flags_t0 | flags_t1
+        if self.mask:
+            for ibl, blid in enumerate(self.internal_baseline_order):
+                a1,a2 = bl2ant(blid)
+                ia1, ia2 = (a1 - 1), (a2 - 1)
+                f = flags[ia1] or flags[ia2] 
+                mask[ibl,...] = f
+            
+            dout_complex_data = np.ma.MaskedArray(data = dout_complex_data, mask = mask)
+
+        return dout_complex_data
 
 def open(*args, **kwargs):
     logging.info('Opening file %s', args[0])
