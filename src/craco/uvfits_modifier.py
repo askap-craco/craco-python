@@ -1,6 +1,7 @@
 from craft import craco, craco_plan
 from craco import preprocess, uvfits_snippet
 import argparse
+import numpy as np
 
 def main(args):
     f = uvfits_snippet.UvfitsSnippet(args.uvpath, args.tstart, args.tend, metadata_file = args.metadata)
@@ -13,7 +14,7 @@ def main(args):
     if args.calib or args.sky_subtract or args.dedisp:
         print(f"Reading the data from samp {args.tstart} to {args.tend}")
         data, uvws = f.read_as_data_block_with_uvws()
-        data = craco.bl2array(craco)
+        data = craco.bl2array(data)
         swap_later = True
         print(f"Done reading")
     
