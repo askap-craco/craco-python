@@ -182,7 +182,6 @@ class UvfitsMeta(uvfits.UvFits):
                 ia1, ia2 = (a1 - 1), (a2 - 1)
                 f = flags[ia1] or flags[ia2] 
                 mask[ibl,...] = f
-                print(ibl,blid,a1,a2,ia1,ia2,f, flags[ia1], flags[ia2])
             
             dout_complex_data = np.ma.MaskedArray(data = dout_complex_data, mask = mask)
 
