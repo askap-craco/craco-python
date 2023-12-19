@@ -176,9 +176,6 @@ class UvfitsMeta(uvfits.UvFits):
         flags_t0 = self.meta_file.flags_at_time(t0)
         flags_t1 = self.meta_file.flags_at_time(t1)
         flags = flags_t0 | flags_t1
-        from IPython import embed
-        embed()
-
         if self.mask:
             for ibl, blid in enumerate(self.internal_baseline_order):
                 a1,a2 = bl2ant(blid)
