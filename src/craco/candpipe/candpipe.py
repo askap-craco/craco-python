@@ -63,7 +63,7 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
-        self.psf_fname = self.get_file( f'psf.beam{self.beamno}.iblk0.fits')
+        self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
         self.config = config
 
         if not os.path.exists(self.psf_fname):
