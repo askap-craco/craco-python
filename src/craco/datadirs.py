@@ -143,9 +143,18 @@ class SchedDir:
         for data_node in self.datadirs.data_nodes:
             yield f"{data_node}/{format_sbid(self.sbid)}"
 
-    # TODO - get calibration
-    # TODO - get beam_only rank
-    # TODO - run folder
+    @property
+    def cal_dir(self):
+        return f"{self.sched_head_dir}/cal"
+
+    @property
+    def cal_sbid(self):
+        cal_dir_path = os.readlink(self.cal_dir)
+        return self.datadirs.path_to_sbid(cal_dir_path)
+
+    def beam_cal_path(self, beam):
+        beam = f"{int(beam):0>2}"
+        return f"{self.cal_dir}/{beam}/b{beam}.aver.4pol.smooth.npy"
 
     def _load_flagfile(self):
         if self.flagfile is None: 
