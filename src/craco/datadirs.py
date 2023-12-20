@@ -51,7 +51,8 @@ def check_path(path):
 
 class DataDirs:
     def __init__(self):
-        self.cracodata = os.environ["CRACO_DATA"]
+        try: self.cracodata = os.environ["CRACO_DATA"]
+        except: self.cracodata = None
         if self.cracodata is None: 
             self.cracodata = "/data/craco/craco/"
             log.info("no CRACO_DATA environ var found... use `/data/craco/craco/`")
