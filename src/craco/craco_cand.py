@@ -100,6 +100,40 @@ def filterbank_roll(tf, dm, freqs, tint, tstart=0, keepnan=True):
         
     return newtf, (trange[0], trange[-1])
 
+
+def _get_overlap_index(value1, value2):
+    """
+    get overlaid index based on two value ranges
+    
+    for example, we are provided with value1 (10, 15) (both inclusive),
+    value2 (11, 13). We want to know the overlapping region indices...
+    
+    #index1  0   1   2   3   4   5
+    value1: 10, 11, 12, 13, 14, 15
+    value2:     11, 12, 13
+    #index2      0   1   2
+    
+    We want to get (1, 3) and (0, 2)
+    
+    Params
+    ----------
+    range1, range2: 2 elements of tuples
+        starting and ending index of two series
+        
+    Returns
+    ----------
+    range1_, range2_: 2 elements of tuples
+        overlaid index in the range1 and range2
+    """
+    # get overlapping value first...
+    overlap_value = (max(value1[0], value2[0]), min(value1[1], value2[1]),)
+    
+    ### 
+    range1_ = (overlap_value[0] - value1[0], overlap_value[1] - value1[0],)
+    range2_ = (overlap_value[0] - value2[0], overlap_value[1] - value2[0],)
+    
+    return range1_, range2_
+
 class Cand:
     """
     craco candidate class
@@ -197,6 +231,115 @@ class Cand:
 
         ### get image data
         self.imgcube = self.datasnippet.image_data(ddata, plan=plan)
+
+    ### make plots
+    ### plot filterbank
+    def plot_filtb(
+        self, dm=0., keepnan=True, 
+    ):
+        filterbank_plot, trange_ = self.datasnippet.dedisp_filtb(
+            filtb=self.filtb, dm=dm, keepnan=keepnan, 
+            tstart=cand.canduvfits.datarange[0],
+        )
+        filterbank_plot[filterbank_plot == 0.] = np.nan
+
+        grid = mpl.gridspec.GridSpec(
+            nrows=5, ncols=5, wspace=0., hspace=0.
+        )
+        fig = plt.figure(figsize=(6, 4))
+        ax1 = fig.add_subplot(grid[1:, :-1])
+
+        extent = [
+            self.canduvfits.tsamp * trange_[0], # starting time
+            self.canduvfits.tsamp * trange_[1], # ending time
+            self.canduvfits.fmin / 1e6, 
+            self.canduvfits.fmax / 1e6,
+        ]
+
+        ax1.imshow(
+            filterbank_plot, 
+            aspect="auto", origin="lower", 
+            extent=extent, interpolation="none"
+        )
+
+        ax2 = fig.add_subplot(grid[0, :-1], sharex=ax1)
+        ### this is something as a function of time
+        t = np.linspace(trange_[0], trange_[1], trange_[1]-trange_[0]+1) * self.canduvfits.tsamp
+        tmin = np.nanmin(filterbank_plot, axis=0)
+        tmax = np.nanmax(filterbank_plot, axis=0)
+        tmea = np.nanmean(filterbank_plot, axis=0)
+        ax2.plot(t, tmin, color="C0")
+        ax2.plot(t, tmax, color="C1")
+        ax2.plot(t, tmea, color="C2")
+        ax2.tick_params(labelbottom=False)
+
+        ax3 = fig.add_subplot(grid[1:, -1], sharey=ax1)
+        ax3.tick_params(labelleft=False)
+        ### this is something as a function of freq
+        f = np.linspace(
+            self.canduvfits.fmin / 1e6, 
+            self.canduvfits.fmax / 1e6, 
+            self.canduvfits.nchan,
+        )
+        fmin = np.nanmin(filterbank_plot, axis=1)
+        fmax = np.nanmax(filterbank_plot, axis=1)
+        fmea = np.nanmean(filterbank_plot, axis=1)
+        ax3.plot(fmin, f, color="C0")
+        ax3.plot(fmax, f, color="C1")
+        ax3.plot(fmea, f, color="C2")
+
+        return fig, (ax1, ax2, ax3)
+
+    ### butterfly plot
+    def _calculate_dmt(self, dmfact=1e2, ndm=100):
+        dm_step = self.dm_pccm3 / dmfact
+        dmrange = self.dm_pccm3 + np.arange(-ndm // 2, ndm // 2) * dm_step
+        ndm = dmrange.shape[0]
+
+        trange = (
+            self.canduvfits.datarange[0],
+            2 * self.canduvfits.datarange[1] - self.canduvfits.datarange[0]
+        )
+        nt = trange[1] - trange[0] + 1
+
+        dmt = np.zeros((ndm, nt)) * np.nan
+        for idm, dm in enumerate(dmrange):
+            filtb_, trange_ = self.datasnippet.dedisp_filtb(
+                filtb=self.filtb, dm=dm, keepnan=True,
+                tstart=cand.canduvfits.datarange[0],
+            )
+            tf_ts = np.nanmedian(filtb_, axis=0)
+            range1_, range2_ = _get_overlap_index(trange, trange_)
+
+            dmt[idm, range1_[0]:range1_[1]+1] = tf_ts[range2_[0]:range2_[1]+1]
+        return dmt, dmrange, trange
+
+    def plot_dmt(self, dmfact=1e2, ndm=100):
+        dmt, dm_range, trange = self._calculate_dmt(dmfact=dmfact, ndm=ndm)
+
+        fig = plt.figure(figsize=(6, 4))
+        ax = fig.add_subplot(1, 1, 1)
+
+        extent = (
+            trange[0] * self.canduvfits.tsamp, 
+            trange[1] * self.canduvfits.tsamp,
+            dm_range[0], dm_range[-1]
+        )
+
+        ax.imshow(
+            dmt, aspect="auto", extent=extent, 
+            interpolation=None, origin="lower",
+        )
+
+        ax.scatter(
+            self.search_output["obstime_sec"], self.search_output["dm_pccm3"],
+            marker="X", s=200, fc="none", ec="black"
+        )
+
+        ax.set_xlabel("Time after the observation (s)")
+        ax.set_ylabel("Despersion Measure (pc cm^-3)")
+
+        return fig, ax
 
 class CandUvfits:
     def __init__(
