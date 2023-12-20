@@ -371,7 +371,7 @@ class Cand:
         ]
         
         ax.imshow(
-            detimg, vmin=vmin, vmax=vmax, 
+            np.nanmean(detimg, axis=0), vmin=vmin, vmax=vmax, 
             origin="lower", aspect="auto",
         )
         ax.set_title("detect image")
