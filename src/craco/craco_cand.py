@@ -137,6 +137,13 @@ def _get_overlap_index(value1, value2):
     
     return range1_, range2_
 
+def _workout_slice_w_center(center, length, radius=5):
+    """
+    work out a slice to index given a radius and the whole length
+    # length is used to make sure no indexerror is raised
+    """
+    return slice(max(center-radius, 0), min(center+radius+1, length))
+
 class Cand:
     """
     craco candidate class
@@ -201,8 +208,7 @@ class Cand:
 
     ########## data manipulation ##########
     def process_data(
-        self, plan=None, dm_pccm3=None, 
-
+        self, plan=None, dm_pccm3=None, zoom_r = 5
     ):
         """
         calibrate, rotate, normalise data
@@ -234,6 +240,13 @@ class Cand:
 
         ### get image data
         self.imgcube = self.datasnippet.image_data(ddata, plan=plan)
+
+        ### get zoom in image
+        _, llen, mlen = self.imgcube.shape
+        self.imgzoomcube = self.imgcube[
+            :, _workout_slice_w_center(self.mpix, mlen, zoom_r),
+            _workout_slice_w_center(self.lpix, llen, zoom_r)
+        ]
 
     ### make plots
     ### plot filterbank
