@@ -369,6 +369,7 @@ def _main():
                 axs[i].set_ylabel(lbl)
 
             flags = mf.antflags
+            flags = flags.astype(int) + (np.arange(nant)[None,:] + 1)
             axs[3].plot(x, flags)
             axs[3].plot(x, mainflag, label='Main array flag')
 
