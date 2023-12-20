@@ -322,15 +322,15 @@ class RunDir:
         )
 
     def beam_candidate(self, beam):
-        return f"{self.beam_folder(beam)}/candidates.b{beam:0>2}.txt"
+        return os.path.join(self.beam_folder(beam), f"candidates.b{beam:0>2}.txt")
 
     def beam_pcb(self, beam):
-        return f"{self.beam_folder(beam)}/pcb{beam:0>2}.fil"
+        return os.path.join(self.beam_folder(beam), f"pcb{beam:0>2}.fil")
 
     def beam_rfimask(self, beam):
-        return f"{self.beam_folder(beam)}/RFI_tfmask.b{beam:0>2}.fil"
+        return os.path.join(self.beam_folder(beam), f"RFI_tfmask.b{beam:0>2}.fil")
 
     def beam_unique_cand(self, beam):
-        return f"{self.beam_folder(beam)}/clustering_output/candidates.b{beam:0>2}.txt.uniq.csv"
+        return os.path.join(self.beam_folder(beam), f"clustering_output/candidates.b{beam:0>2}.txt.uniq.csv")
 
     # note - for any additional files, add it here
