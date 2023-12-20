@@ -18,6 +18,9 @@ from astropy.time import Time
 from astropy.coordinates import SkyCoord
 from astropy import units
 
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
 import logging
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -239,7 +242,7 @@ class Cand:
     ):
         filterbank_plot, trange_ = self.datasnippet.dedisp_filtb(
             filtb=self.filtb, dm=dm, keepnan=keepnan, 
-            tstart=cand.canduvfits.datarange[0],
+            tstart=self.canduvfits.datarange[0],
         )
         filterbank_plot[filterbank_plot == 0.] = np.nan
 
@@ -306,7 +309,7 @@ class Cand:
         for idm, dm in enumerate(dmrange):
             filtb_, trange_ = self.datasnippet.dedisp_filtb(
                 filtb=self.filtb, dm=dm, keepnan=True,
-                tstart=cand.canduvfits.datarange[0],
+                tstart=self.canduvfits.datarange[0],
             )
             tf_ts = np.nanmedian(filtb_, axis=0)
             range1_, range2_ = _get_overlap_index(trange, trange_)
@@ -332,7 +335,8 @@ class Cand:
         )
 
         ax.scatter(
-            self.search_output["obstime_sec"], self.search_output["dm_pccm3"],
+            self.total_sample * self.canduvfits.tsamp, 
+            self.dm_pccm3,
             marker="X", s=200, fc="none", ec="black"
         )
 
