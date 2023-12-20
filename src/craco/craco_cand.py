@@ -209,7 +209,7 @@ class Cand:
         get filterbank, make images
         """
         self.datasnippet = DataSnippet(
-            cracoplan = self.canduvfits.plan,
+            cracoplan = self.canduvfits.dataplan,
             uvsource = self.canduvfits.datauvsource
         )
 
@@ -449,6 +449,7 @@ class CandUvfits:
             skip_blocks = rawskip + dataskip,
             flagant = self.flagant,
         )
+        self.dataplan = self._load_plan(self.datauvsource)
 
         datal = len(self.uvws)
         self.datauvw = self.uvws[datal // 2][0]
