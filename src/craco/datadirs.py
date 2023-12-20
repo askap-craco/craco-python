@@ -96,7 +96,7 @@ class DataDirs:
         return self._re_match_pat("DATA_(\d{2})", path)
 
     def path_to_runname(self, path):
-        return self._re_match_pat("\d{14}/(.*)/", path)
+        return self._re_match_pat("\d{14}/(.*?)/", path)
 
     ### TODO - add deletor here as well?
 
