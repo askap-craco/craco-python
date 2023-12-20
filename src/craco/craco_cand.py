@@ -216,7 +216,7 @@ class Cand:
         ### get flagchan from self.canduvfits
         if self.canduvfits.flagchan is None:
             flagchan = ""
-        flagchan = strrange(flagchan)
+        flagchan = strrange(self.canduvfits.flagchan)
 
         if dm_pccm3 is None: dm_pccm3 = self.dm_pccm3
 
