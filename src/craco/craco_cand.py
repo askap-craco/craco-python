@@ -345,6 +345,53 @@ class Cand:
 
         return fig, ax
 
+    ### plot field images
+    @property
+    def image_end_index(self):
+        dets = self.total_sample
+        viss = self.canduvfits.datarange[0]
+        return dets - viss
+
+    @property
+    def image_start_index(self):
+        return self.image_end_index - self.boxc_width
+
+    def plot_diagnostic_images(self, vmin=None, vmax=None):
+        medimg = np.nanmedian(self.imgcube, axis=0)
+        stdimg = np.nanstd(self.imgcube, axis=0)
+
+        fig = plt.figure(figsize=(12, 4))
+
+        projection=self.canduvfits.dataplan.wcs
+        #detection image
+        ax = fig.add_subplot(1, 3, 1, projection=projection)
+
+        detimg = self.imgcube[
+            self.image_start_index:self.image_end_index+1
+        ]
+        
+        ax.imshow(
+            detimg, vmin=vmin, vmax=vmax, 
+            origin="lower", aspect="auto",
+        )
+        ax.set_title("detect image")
+
+        ax = fig.add_subplot(1, 3, 2, projection=projection)
+        ax.imshow(
+            medimg, vmin=None, vmax=None, 
+            origin="lower", aspect="auto",
+        )
+        ax.set_title("median image")
+
+        ax = fig.add_subplot(1, 3, 3, projection=projection)
+        ax.imshow(
+            np.log10(stdimg), vmin=None, vmax=None, 
+            origin="lower", aspect="auto",
+        )
+        ax.set_title("std image (log10)")
+
+        return fig
+
 class CandUvfits:
     def __init__(
         self, uvfits, metafile=None, 
