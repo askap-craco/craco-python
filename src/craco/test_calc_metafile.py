@@ -78,23 +78,16 @@ def test_scanprep_and_metafile(mfstub):
         shutil.rmtree(dout)
     except FileNotFoundError:
         pass
-    os.makedirs(dout)
-    
-    t0 = mfstub.times[0]
-    targname = mfstub.source_name_at_time(t0)
+
     nbeams = 36
-    sources = [mfstub.source_at_time(b, t0) for b in range(nbeams)]
-    phase_centers = [s['skycoord'] for s in sources]
-    prep = ScanPrep(targname, phase_centers, fcmfile, dout, t0, t0+15*u.minute)
-    prep.save()
-    prep.write_calcfiles()
-    prep.run_calc()
-
     beam = 0
-
-    results = [prep.results_file(b) for b in range(nbeams)]
-    calc_meta = CalcMetafile(mfstub.data, results[beam])
+    prep = ScanPrep.create_from_metafile_and_fcm(mfstub, fcmfile, dout, duration=15*u.minute)
+    prep2 = ScanPrep.load(dout)
+    t0 = mfstub.times[0]
+    calc_meta = prep.calc_meta_file(beam)
+    calc_meta2 = prep2.calc_meta_file(beam)
     check_source_equal(mfstub, calc_meta, t0)
+    check_source_equal(mfstub, calc_meta2, t0)
     uvw1 = mfstub.uvw_at_time(t0, beam)
     uvw2 = calc_meta.uvw_at_time(t0)
 
