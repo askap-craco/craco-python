@@ -20,12 +20,14 @@ rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
 metafile=$rootdir/../../../SB*.json.gz
 
 echo "Got fits $uvfits writing to $outfits with metafile $metafile $rootdir"
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/CRACO/SOFTWARE/craco/wan342/Software/conda3/envs/craco38/lib
-export PATH=$PATH:/CRACO/SOFTWARE/craco/wan342/bin
 
 source /home/craftop/.conda/.remove_conda.sh
-source /home/wan342/.conda/.activate_conda.sh
-conda activate craco38
+source /home/craftop/.conda/.activate_conda.sh
+conda activate calib
+
+# export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/CRACO/SOFTWARE/craco/wan342/Software/conda3/envs/craco38/lib
+# export PATH=$PATH:/CRACO/SOFTWARE/craco/wan342/bin
+echo $LD_LIBRARY_PATH
 
 logfile=${uvfits}.cal.log
 

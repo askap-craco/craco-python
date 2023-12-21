@@ -17,6 +17,10 @@ import shutil
 import subprocess
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+from astropy import units as u
+from craco.metadatafile import MetadataFile
+from craco.calc_metafile import CalcMetafile
+
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +60,47 @@ class ScanPrep:
     @property
     def local_fcm_file_name(self):
         return os.path.join(self.outdir, 'fcm.txt')
+
+    @property
+    def metadata_file(self):
+        if hasattr(self, 'metafilename'):
+            return MetadataFile(os.path.join(self.outdir, self.metafilename))
+        else:
+            raise FileNotFoundError()
+
+    @staticmethod
+    def create_from_metafile_and_fcm(metafile, fcmfile, dout, duration=15*u.minute):
+        if isinstance(metafile, str):
+            metafile = MetadataFile(metafile)
+            
+        t0 = metafile.times[0]
+        nbeams = metafile.nbeam
+        targname = metafile.source_name_at_time(t0)
+        sources = [metafile.source_at_time(b, t0) for b in range(nbeams)]
+        phase_centers = [s['skycoord'] for s in sources]
+        prep = ScanPrep(targname, phase_centers, fcmfile, dout, t0, t0+duration)
+        prep.metafilename = 'metafile.json'
+        metafile.saveto(os.path.join(dout, prep.metafilename))
+        prep.save()
+        return prep
+
+    @staticmethod
+    def load_from_metapath(metapath):
+        '''
+        Assume someone has given me the full path to the metafile.json
+        '''
+        assert os.path.basename(metapath) == 'metafile.json'
+        rootdir = os.path.dirname(metapath)
+        return ScanPrep.load(outdir)
+
+    def calc_meta_file(self, ibeam):
+        '''
+        Returns a calc metadata file for the given beam
+        '''
+        results = self.results_file(ibeam)
+        mfstub = self.metadata_file
+        calc_meta = CalcMetafile(mfstub.data, results)
+        return calc_meta
 
     def beamdir(self, ibeam):
         d = os.path.join(self.outdir, f'beam{ibeam:02d}')

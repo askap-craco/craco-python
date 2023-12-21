@@ -14,6 +14,8 @@ import yaml
 import os
 import sys
 import logging
+import traceback
+
 from . import steps
 from craco.plot_cand import load_cands
 
@@ -63,7 +65,7 @@ class Pipeline:
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
-        self.psf_fname = self.get_file( f'psf.beam{self.beamno}.iblk0.fits')
+        self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
         self.config = config
 
         if not os.path.exists(self.psf_fname):
@@ -83,6 +85,7 @@ class Pipeline:
         #     # steps.time_space_filter.Step(self),
         #     steps.catalog_cross_match.Step(self),
         #     steps.alias_filter.Step(self), 
+        #     steps.injection_filter.Step(self), 
         #     # steps.check_filterbanks.Step(self),
         #     # steps.check_visibilities.Step(self),
         # ]
@@ -189,11 +192,9 @@ def _main():
             p = Pipeline(f, args, config)
             p.run()
         except:
-            log.warning(f"failed to run candpipe on {f}... aborted...")
-        # p = Pipeline(f, args, config)
-        # p.run()
+            log.error(traceback.format_exc())
+            log.error(f"failed to run candpipe on {f}... aborted...")
 
-    
     
 
 if __name__ == '__main__':

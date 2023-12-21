@@ -139,7 +139,7 @@ class Step(ProcessingStep):
         # Get the pixel values for all possible source locations and convert them to RA and Dec
         # make it works for a list of lpix/mpix
         xp, yp = self.wcs_info.array_shape[0], self.wcs_info.array_shape[1]
-        lpix, mpix = np.array(lpix, dtype=np.int), np.array(mpix, dtype=np.int)
+        lpix, mpix = np.array(lpix, dtype=int), np.array(mpix, dtype=int)
 
         lpixlist = list(lpix+xp) + list(lpix) + list(lpix-xp) + list(lpix+xp) + \
                      list(lpix-xp) + list(lpix+xp) + list(lpix) + list(lpix-xp)
