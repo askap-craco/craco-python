@@ -1,0 +1,8 @@
+#!/bin/bash
+
+for i in {0..18} ; do
+    d=$(printf "/CRACO/DATA_%02d/craco" $i)
+    echo -n $d
+    ls $d &
+done
+wait
