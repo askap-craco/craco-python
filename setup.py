@@ -102,7 +102,8 @@ if __name__ == '__main__':
                                 'dedisperse_vis=craco.dedisperse_vis:main',
                                 'attach_uvws_uvfits=craco.attach_uvws_uvfits:main',
                                 'beam_cand_sender=craco.beam_cand_sender:_main',
-                                'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main'
+                                'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main',
+                                'summarise_cands=craco.summarise_cands:_main'
                                 
             ],
         },
