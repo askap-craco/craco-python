@@ -26,3 +26,17 @@ fixuvfits $uvfits
 cmd="search_pipeline --uv $uvfits --device $xrtcardno $@"
 echo `hostname` running $cmd
 $cmd
+
+#VG: Adding the following lines to run candpipe automatically after a search pipeline run has finished
+#
+
+
+# note this assume we are using results folder!
+cd $indir/results
+
+# beamno=$(printf "%02d" $beamno)
+candfile=$(printf "candidates.b%02d.txt" $beamno)
+# echo $candfile, $PWD
+
+cmd="`which candpipe` $candfile --save-rfi -s -o clustering_output -v"
+$cmd
