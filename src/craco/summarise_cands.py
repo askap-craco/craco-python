@@ -45,7 +45,7 @@ def _main():
 
         df = pd.read_csv(f, index_col=0)
         # snr >= 8
-        df = df[ df['SNR'] >= 9.5 ]
+        df = df[ df['SNR'] >= 9 ]
 
         df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
 
