@@ -60,7 +60,7 @@ def _main():
     parser.add_argument('--block', help='Blocks to download', default='5-7')
     parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
     parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)
-    parser.add_argument('--metafile', help='Prep scan with this metadata file')
+    parser.add_argument('--metadata', help='Prep scan with this metadata file')
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
