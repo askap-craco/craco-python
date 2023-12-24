@@ -78,6 +78,7 @@ class Pipeline:
                 steps.cluster.Step(self),
                 steps.catalog_cross_match.Step(self),
                 steps.alias_filter.Step(self), 
+                steps.injection_filter.Step(self), 
             ]
 
         # self.steps = [
@@ -122,6 +123,7 @@ class Pipeline:
         if len(cand_in) == 0:
             return None
 
+        # create a directory to store output files 
         self.create_dir()
 
         for istep, step in enumerate(self.steps):

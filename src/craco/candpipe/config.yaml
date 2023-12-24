@@ -38,4 +38,10 @@ threshold_crossmatch: [60, 60, 60] # in unit of arcsec
 
 # for aliasing 
 catpath_alias: '/CRACO/DATA_00/craco/wan348/catalogues/cat_bright_for_alias.csv'
-threshold_alias: 60
+threshold_alias: 60  # in unit of arcsec
+
+# for injection
+inject_tol:
+  srcsep: 60 # in unit of arcsec
+  tsmaps: 10 # pixel
+  dm: 10 # pixel

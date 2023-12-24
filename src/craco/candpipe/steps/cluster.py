@@ -194,7 +194,7 @@ class Step(ProcessingStep):
         log.debug("Found %d rfi signals", sum(rfi_ind))
 
         # Central ghost 
-        cet_ind = (candidates_new['lpix'] > 127) & (candidates_new['lpix'] <= 128) & (candidates_new['mpix'] > 127) & (candidates_new['mpix'] <= 128)
+        cet_ind = (candidates_new['lpix'] >= 126) & (candidates_new['lpix'] <= 130) & (candidates_new['mpix'] >= 126) & (candidates_new['mpix'] <= 130)
 
         if self.pipeline.args.save_rfi:
             # candidates_rfi = candidates_new[rfi_ind]

@@ -45,7 +45,7 @@ class Step(ProcessingStep):
         '''
         super(Step, self).__init__(*args, **kwargs)
         p = self.pipeline
-        self.wcs_info = self.get_wcs()
+        self.pipeline.wcs_info = self.get_wcs()
         # You might want to use some of these attributes
 
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s psf=%s arguments=%s',
@@ -63,23 +63,20 @@ class Step(ProcessingStep):
         #from IPython import embed
         #embed()
 
+        p = self.pipeline
         config = self.pipeline.config
 
-        # # get the wcs info and start the alias filtering session
-        # # 1. get the wcs info (read the arguments)
-        # # 2. filtering current unknown sources (select all sources without a known pulsar/RACS crossmatch)
-        # # 3. create a combined candidaets catalogue (8 possible alias location for each unknwon candidates)
-        # # 4. run the crossmatch - using a combined racs/pulsar catalogue 
-        # if self.pipeline.args.wcsfits is not None:
-        
-        # print(catalog_cross_match.Step(self.pipeline).angular_offset(20, 180, 20, 189))
-        # radius, threshold = self.pipeline.config['filter_radius'], self.pipeline.config['threshold_alias']
-
+        ## get the wcs info and start the alias filtering session
+        ## 1. get the wcs info (read the arguments)
+        ## 2. filtering current unknown sources (select all sources without a known pulsar/RACS crossmatch)
+        ## 3. create a combined candidaets catalogue (8 possible alias location for each unknwon candidates)
+        ## 4. run the crossmatch - using a combined racs/pulsar catalogue 
+    
         # get mean ra and dec from candidates file for further clustering 
         ra, dec = ind['ra_deg'].mean(), ind['dec_deg'].mean()
 
         # filetering catalogue
-        catdf, catcoord = catalog_cross_match.Step(self.pipeline).filter_cat(ra=ra, 
+        catdf, catcoord = catalog_cross_match.Step(p).filter_cat(ra=ra, 
                                         dec=dec, 
                                         catpath=config['catpath_alias'], 
                                         radius=config['filter_radius'], 
@@ -90,7 +87,7 @@ class Step(ProcessingStep):
         alias_df = self.get_possible_alias_candidates(df=ind, )
 
         # run the crossmatch step!
-        alias_df = catalog_cross_match.Step(self.pipeline).cross_matching(candidates=alias_df, 
+        alias_df = catalog_cross_match.Step(p).cross_matching(candidates=alias_df, 
                                        catalogue=catdf, 
                                        coord=catcoord, 
                                        threshold=config['threshold_alias'], 
@@ -138,7 +135,7 @@ class Step(ProcessingStep):
     def get_source_coords(self, lpix, mpix):
         # Get the pixel values for all possible source locations and convert them to RA and Dec
         # make it works for a list of lpix/mpix
-        xp, yp = self.wcs_info.array_shape[0], self.wcs_info.array_shape[1]
+        xp, yp = self.pipeline.wcs_info.array_shape[0], self.pipeline.wcs_info.array_shape[1]
         lpix, mpix = np.array(lpix, dtype=int), np.array(mpix, dtype=int)
 
         lpixlist = list(lpix+xp) + list(lpix) + list(lpix-xp) + list(lpix+xp) + \
@@ -165,7 +162,7 @@ class Step(ProcessingStep):
         log.debug("obtained %s possible alias position", len(lpixlist))
 
         # get their skycoord
-        coords = self.wcs_info.pixel_to_world(lpixlist, mpixlist)
+        coords = self.pipeline.wcs_info.pixel_to_world(lpixlist, mpixlist)
 
         # create a new alias DataFrame 
         alias_df = pd.DataFrame()
