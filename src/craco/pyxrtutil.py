@@ -84,6 +84,8 @@ class Kernel:
 
         self.name = newname
         self.print_groups()
+        self.device = device
+        self.xbin = xbin
         
     def print_groups(self):
         self.groups = []
@@ -106,7 +108,11 @@ class Kernel:
         return KernelStart(self, raw_start)
 
     def read_register(self, address):
-        return self.krnl.read_register(address)
+        # krnl.read_reigster()  available in later versions of pyxrt
+        # pyxrt.ip isnt in there either
+        # F**K
+        #return self.krnl.read_register(address)
+        raise NotImplementedError('Not available in later versions of xrt')
 
     def read_status_register(self):
         return self.read_register(0x00)
@@ -126,7 +132,7 @@ class KernelStart:
     def wait(self, timeout_ms:int=0):
         result = self.raw_start.wait(timeout_ms)
         if result != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
-            status = self.kernel.read_status_register()
+            status = 0 # self.kernel.read_status_register()
             isdone = status & 0x04 == 0x04
             raise ValueError(f'Wait on istart={istart} start={start} failed with {result} status={status:02x} isok={isdone}')
 
