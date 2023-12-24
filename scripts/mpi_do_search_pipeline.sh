@@ -9,7 +9,10 @@ if [[ -z $INDIR ]] ; then
 fi
 indir=$INDIR
 beamno=$OMPI_COMM_WORLD_RANK
-xrtcardno=$OMPI_COMM_WORLD_LOCAL_RANK
+xrtcardno=$(($START_CARD + $OMPI_COMM_WORLD_LOCAL_RANK))
+
+echo "Running $0 with start_card $START_CARD xrtcard=$xrtcardno"
+
 uvfits=$(printf "$indir/b%02d.uvfits" $beamno)
 if [[ ! -f $uvfits ]] ; then
     echo "UVFITS not found! $uvfits"
