@@ -102,10 +102,35 @@ class Kernel:
         
     def __call__(self,*args):
         newargs = list(map(convert_buffer, args))
-        return self.krnl(*newargs)
+        raw_start = self.krnl(*newargs)
+        return KernelStart(self, raw_start)
+
+    def read_register(self, address):
+        return self.krnl.read_register(address)
+
+    def read_status_register(self):
+        return self.read_register(0x00)
         
     def group_id(self, gid):
         return self.krnl.group_id(gid)
+
+
+class KernelStart:
+    def __init__(self, kernel, raw_start):
+        self.kernel = kernel
+        self.raw_start = raw_start
+
+        assert kernel is not None
+        assert raw_start is not None
+
+    def wait(self, timeout_ms:int=0):
+        result = self.raw_start.wait(timeout_ms)
+        if result != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
+            status = self.kernel.read_status_register()
+            isdone = status & 0x04 == 0x04
+            raise ValueError(f'Wait on istart={istart} start={start} failed with {result} status={status:02x} isok={isdone}')
+
+        return result
 
 def wait_for_starts(starts, call_start, timeout_ms: int=1000):
     '''
@@ -129,6 +154,7 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
         result = start.wait(timeout_ms) # 0 means wait forever
         wait_end = time.perf_counter()
         log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
+        
 
 class KernelStarts:
     def __init__(self):
