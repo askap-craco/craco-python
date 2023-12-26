@@ -35,4 +35,6 @@ grep Beam $rankfile > $beam_only_rankfile
 
 rootdir=$(dirname $0)
 cmd="mpirun -wdir $indir -rankfile $beam_only_rankfile -x INDIR=$indir -x START_CARD $@ "
-echo running $cmd with indir=$INDIR start_card=$START_CARD
+echo running $cmd with indir=$indir start_card=$START_CARD
+$cmd
+
