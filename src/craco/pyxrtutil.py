@@ -130,13 +130,20 @@ class KernelStart:
         assert raw_start is not None
 
     def wait(self, timeout_ms:int=0):
-        result = self.raw_start.wait(timeout_ms)
-        if result != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
+        # We've had a problem where wait() times out.
+        # I'm going to see if it improves if we check the status first and only call
+        # wait() if it hasn't finished
+        state = self.raw_start.state()
+        if state == pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
+            return state
+        
+        state = self.raw_start.wait(timeout_ms)
+        if state != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
             status = 0 # self.kernel.read_status_register()
             isdone = status & 0x04 == 0x04
-            raise ValueError(f'Wait on istart={istart} start={start} failed with {result} status={status:02x} isok={isdone}')
+            raise ValueError(f'Wait on istart={istart} start={start} failed with {state} status={status:02x} isok={isdone}')
 
-        return result
+        return state
 
 def wait_for_starts(starts, call_start, timeout_ms: int=1000):
     '''
@@ -157,9 +164,9 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
         # https://xilinx.github.io/XRT/master/html/xrt_native.main.html?highlight=wait#classxrt_1_1run_1ab1943c6897297263da86ef998c2e419c
         # see Also CRACO-128
         # Ah, but wait2 doesn't exist in PYXRT
-        result = start.wait(timeout_ms) # 0 means wait forever
+        state = start.wait(timeout_ms) # 0 means wait forever
         wait_end = time.perf_counter()
-        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
+        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} state={state}')
         
 
 class KernelStarts:
