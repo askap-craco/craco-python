@@ -36,6 +36,9 @@ def _main():
 
     all_df = []
     links = []
+    num_cands = 0
+    raw_num = 0
+    rfi_num = 0
 
     files = sorted(values.files, key=beam_of)
 
@@ -44,20 +47,34 @@ def _main():
         beamno = beam_of(f)
 
         df = pd.read_csv(f, index_col=0)
-        # snr >= 8
+        num_cands += len(df)
+
+        # snr >= 9
         df = df[ df['SNR'] >= 9 ]
 
         df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
-
-        print(beamno, f)
         df['beamno'] = beamno
         all_df.append(df)
 
         if len(df) != 0:
             links.append(f'*<http://localhost:8024/beam?fname={f}| Beam{beamno:02d}>*\n ')
 
+        rawcat = os.path.join(os.path.dirname(os.path.dirname(f)), os.path.basename(f).split('.uniq.csv')[0])
+        print(beamno, f, rawcat)
+
+        rficat = os.path.join(os.path.dirname(f), os.path.basename(f).replace('uniq', 'rfi'))
+        print(rficat)
+
+        raw_num += sum(1 for _ in open(rawcat))
+        rfi_num += sum(1 for _ in open(rficat))
+        print(rfi_num)
+
 
     df = pd.concat(all_df)
+
+    rawstats = f'raw_cand={raw_num} clustered={num_cands} rfi={rfi_num} cand={len(df)}'
+    print(rawstats)
+
 
     if values.output is not None:
         # unknown = df[ df['Unknown'] ]
@@ -90,7 +107,9 @@ def _main():
         + r['link'] for _, r in summary.iterrows()
         ]
 
-    msgs = [scanname + ' ' + '\n'] + msgs
+    # msgs = [scanname + ' ' + '\n'] + msgs
+
+    msgs = [scanname + ' ' + '\n'] + [rawstats + ' ' + '\n' ] + msgs
 
     blocks1 = [
         {
