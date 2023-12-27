@@ -13,14 +13,16 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+FITS_BLOCK_SIZE = 2880
+
 def fix_length(fname):
     '''
-    Appends zeros to the end of a fits file to make it a multiple of 2880 bytes
+    Appends zeros to the end of a fits file to make it a multiple of FITS_BLOCK_SIZE bytes
     '''
     filesize = os.path.getsize(fname)
     with open(fname, 'ab') as fout:
-        n_extra_bytes = 2880 - filesize % 2880
-        if n_extra_bytes == 2880:
+        n_extra_bytes = FITS_BLOCK_SIZE - filesize % FITS_BLOCK_SIZE
+        if n_extra_bytes == FITS_BLOCK_SIZE:
             n_extra_bytes = 0
 
         print(f'Current position {fout.tell()} writing {n_extra_bytes}')
@@ -29,10 +31,31 @@ def fix_length(fname):
     newsize = os.path.getsize(fname)
     print(f'Wrote {n_extra_bytes} to {fname} to make it from {filesize} {newsize}')
 
+extra_tables = ['fq_table','an_table','su_table']
+
+def extra_table_bytes(fname, lookback_blocks=16):
+    '''
+    Calculates how many addditional bytes at the end of the given filename
+    have BINTABLEs in them
+    returns 0 if there are no blocks
+    '''
+    pattern="XTENSION= 'BINTABLE'".encode('utf-8')
+    sz = os.path.getsize(fname)
+    nbytes = lookback_blocks*FITS_BLOCK_SIZE
+    with open(fname, 'rb') as fin:
+        fin.seek(sz - nbytes)
+        thebytes = fin.read(nbytes)
+        try:
+            idx = thebytes.index(pattern)
+            table_bytes = nbytes - idx
+        except ValueError: # pattern not found
+            table_bytes = 0
+
+    return table_bytes
+        
+                 
     
 def fix(fname, values):
-
-    
     with open(fname+'.groupsize', 'r') as fin:
         groupsize = int(fin.read())
         
@@ -40,9 +63,19 @@ def fix(fname, values):
     hdr = fits.getheader(fname)
     #hdr = fits.header.Header.fromtextfile(fname+'.header')
     gcount = hdr['GCOUNT']
-    expected_gcount = (filesize - len(hdr.tostring())) // groupsize
+    isfixed = hdr.get('FIXED', False)
+    #extra_tab_fnames = [f'{fname}.{tabname}' for tabname in extra_tables]
+    #extra_tab_sizes = map(os.path.getsize, extra_tab_fnames)
+
+    # for some reason the tables on disk have 1 extra block added
+    #extra_tab_bytes = sum(extra_tab_sizes) - len(extra_tables)*FITS_BLOCK_SIZE
+    extra_tab_bytes = extra_table_bytes(fname)
+    datasize = (filesize - len(hdr.tostring()) - extra_tab_bytes)
+    expected_gcount = datasize // groupsize
+    print(f'File {fname}  header={len(hdr.tostring())} extra table bytes={extra_tab_bytes} filesize={filesize} datasize={datasize} GCOUNT={gcount} expected={expected_gcount} isfixed={isfixed} ')
+    
     if gcount == expected_gcount:
-        print(f'File {fname} already fixed with GCOUNT={gcount}. not fixing')
+        print(f'File {fname} already fixed')
         hdu = fits.open(fname)
         hdu.info()
         hdu.close()
@@ -50,16 +83,19 @@ def fix(fname, values):
 
     hdr['GCOUNT'] = expected_gcount
     hdr['FIXED'] = True
-    print(f'File {fname} is size {filesize} - header = {len(hdr.tostring())} gcount={gcount}')
+
     with open(fname, 'r+b') as fout: # can't be 'a' as it only appends, irrepsective of seek position
         fout.seek(0,0)
         fout.write(bytes(hdr.tostring(), 'utf-8'))
-        assert fout.tell() % 2880 == 0
+        assert fout.tell() % FITS_BLOCK_SIZE == 0
         fout.flush()
 
     fix_length(fname)
 
-    if os.path.exists(fname+'.fq_table'):
+    # only add tables if they're missing
+    is_missing_tables = extra_table_bytes == 0
+    
+    if os.path.exists(fname+'.fq_table') and is_missing_tables:
         print('Appending tables')
         hdu = fits.open(fname, 'append')
         fq_table = fits.open(fname+'.fq_table')[1]
@@ -68,9 +104,11 @@ def fix(fname, values):
         hdu.append(fq_table)
         hdu.append(an_table)
         hdu.append(su_table)
+        hdu.close()
         
     newsize = os.path.getsize(fname)
     print(f'File {fname} fixed. new size is {newsize}')
+    hdu = fits.open(fname)
     hdu.info()
     hdu.close()
 
