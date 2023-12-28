@@ -53,11 +53,19 @@ def find_extra_table_bytes(fname, lookback_blocks=16):
 
     return table_bytes
         
-                 
+
+def fix_gcount(fname, groupsize=None):
+    '''
+    Calculate the correct GCOUNT value
+    set the header to fhis value if not already done so
+    The group size is the nuber of bytes per group.
+    It's probably calculatable from the header somehow (pyfits des it) but
+    our uvfitswriter writes a .groupsize file too, so we pick that up if gropusize is None
     
-def fix(fname, values):
-    with open(fname+'.groupsize', 'r') as fin:
-        groupsize = int(fin.read())
+    '''
+    if groupsize is None:
+        with open(fname+'.groupsize', 'r') as fin:
+            groupsize = int(fin.read())
         
     filesize = os.path.getsize(fname)
     hdr = fits.getheader(fname)
@@ -86,10 +94,9 @@ def fix(fname, values):
             assert fout.tell() % FITS_BLOCK_SIZE == 0
             fout.flush()
 
-    # make sure the file length is a multiple of FITS_BLOCK_SIZE
-    fix_length(fname)
-
+def fix_tables(fname):
     # only add tables if they're missing
+    extra_tab_bytes = find_extra_table_bytes(fname)
     is_missing_tables = extra_tab_bytes == 0
     
     if os.path.exists(fname+'.fq_table') and is_missing_tables:
@@ -104,6 +111,21 @@ def fix(fname, values):
         hdu.close()
     else:
         print(f'No new tables required - already has {extra_tab_bytes} bytes of tables')
+
+    
+def fix(fname):
+    '''
+    Fixes the given filename
+    gcount
+    totallength
+    then adds tables
+    '''
+
+    fix_gcount(fname)
+    # make sure the file length is a multiple of FITS_BLOCK_SIZE
+    fix_length(fname)
+
+    fix_tables(fname)
         
     newsize = os.path.getsize(fname)
     print(f'File {fname} fixed. new size is {newsize}')
@@ -128,7 +150,7 @@ def _main():
 
 
     for f in values.files:
-        fix(f, values)
+        fix(f)
         
     
 
