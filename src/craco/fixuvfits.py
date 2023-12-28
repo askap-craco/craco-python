@@ -33,7 +33,7 @@ def fix_length(fname):
 
 extra_tables = ['fq_table','an_table','su_table']
 
-def extra_table_bytes(fname, lookback_blocks=16):
+def find_extra_table_bytes(fname, lookback_blocks=16):
     '''
     Calculates how many addditional bytes at the end of the given filename
     have BINTABLEs in them
@@ -69,31 +69,28 @@ def fix(fname, values):
 
     # for some reason the tables on disk have 1 extra block added
     #extra_tab_bytes = sum(extra_tab_sizes) - len(extra_tables)*FITS_BLOCK_SIZE
-    extra_tab_bytes = extra_table_bytes(fname)
+    extra_tab_bytes = find_extra_table_bytes(fname)
     datasize = (filesize - len(hdr.tostring()) - extra_tab_bytes)
     expected_gcount = datasize // groupsize
     print(f'File {fname}  header={len(hdr.tostring())} extra table bytes={extra_tab_bytes} filesize={filesize} datasize={datasize} GCOUNT={gcount} expected={expected_gcount} isfixed={isfixed} ')
     
     if gcount == expected_gcount:
-        print(f'File {fname} already fixed')
-        hdu = fits.open(fname)
-        hdu.info()
-        hdu.close()
-        return
+        print(f'File {fname} has correct GCOUNT {gcount}')
+    else:
+        hdr['GCOUNT'] = expected_gcount
+        hdr['FIXED'] = True
 
-    hdr['GCOUNT'] = expected_gcount
-    hdr['FIXED'] = True
+        with open(fname, 'r+b') as fout: # can't be 'a' as it only appends, irrepsective of seek position
+            fout.seek(0,0)
+            fout.write(bytes(hdr.tostring(), 'utf-8'))
+            assert fout.tell() % FITS_BLOCK_SIZE == 0
+            fout.flush()
 
-    with open(fname, 'r+b') as fout: # can't be 'a' as it only appends, irrepsective of seek position
-        fout.seek(0,0)
-        fout.write(bytes(hdr.tostring(), 'utf-8'))
-        assert fout.tell() % FITS_BLOCK_SIZE == 0
-        fout.flush()
-
+    # make sure the file length is a multiple of FITS_BLOCK_SIZE
     fix_length(fname)
 
     # only add tables if they're missing
-    is_missing_tables = extra_table_bytes == 0
+    is_missing_tables = extra_tab_bytes == 0
     
     if os.path.exists(fname+'.fq_table') and is_missing_tables:
         print('Appending tables')
@@ -105,6 +102,8 @@ def fix(fname, values):
         hdu.append(an_table)
         hdu.append(su_table)
         hdu.close()
+    else:
+        print(f'No new tables required - already has {extra_tab_bytes} bytes of tables')
         
     newsize = os.path.getsize(fname)
     print(f'File {fname} fixed. new size is {newsize}')
