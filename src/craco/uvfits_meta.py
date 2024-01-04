@@ -43,16 +43,17 @@ class VisViewMeta:
 
     def __getitem__(self, sidx):
         data = self.offset_view[sidx]
-        dates = sorted(np.unique(data['DATE']))
+        all_dates = data['DATE']
+        unique_dates = sorted(np.unique(all_dates))
         uvws = {}
-        for d in dates:
+        flags_vs_date = {}
+        for d in unique_dates:
             dtime = Time(d, scale=self.uvfits_meta.tscale, format='jd')
             uvws[d] = self.uvfits_meta.uvw_array_at_time(dtime)
+            flags_vs_date[d] = self.uvfits_meta.meta_file.flags_at_time(dtime)
 
-        
-        dates = data['DATE']
         blids = data['BASELINE']
-
+        dates = data['DATE']
         try:
             nbl = len(blids)
         except:
@@ -64,6 +65,14 @@ class VisViewMeta:
         for i, (d,blid) in enumerate(zip(dates, blids)):
             uvwarr = uvws[d]
             uvw_out[:, i] = calc_uvw_for_blid(uvwarr, blid)
+            flags = flags_vs_date[d]
+            if self.uvfits_meta.mask:
+                a1,a2 = bl2ant(blid)
+                ia1, ia2 = (a1 - 1), (a2 - 1)
+                f = flags[ia1] or flags[ia2] 
+                weight = 0 if f else 1
+                data['DATA'][i][...,2] = weight
+
 
         data['UU'] = uvw_out[0,:]
         data['VV'] = uvw_out[1,:]
@@ -167,7 +176,7 @@ class UvfitsMeta(uvfits.UvFits):
         coord = src['skycoord']
         return coord
 
-    def _create_masked_data(self, dout_data, start_sampno):
+    def _create_masked_data2(self, dout_data, start_sampno):
         dout_complex_data = dout_data[..., 0, :] + 1j*dout_data[..., 1, :]
         mask = np.zeros(dout_complex_data.shape, dtype=bool)
         nt = mask.shape[-1]
