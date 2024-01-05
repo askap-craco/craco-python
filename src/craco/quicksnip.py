@@ -45,6 +45,12 @@ def snip(infile, outfile, startidx, nblk, metadata_file=None):
     inhdu = fits.open(infile)
     outhdu = fits.open(outfile, 'append')
     for it, table in enumerate(inhdu[1:]):
+        row = table.data[0]
+        if table.name == 'AIPS SN' and row['SOURCE'].strip() == 'UNKNOWN':
+            row['SOURCE'] = inf.target_name
+            row['RAEPO'] = inf.target_skycoord.ra.deg
+            row['DECEPO'] = inf.target_skycoord.dec.deg
+            log.info('Replaced UNKNOWN source with %s %s', inf.target_name, inf.target_skycoord.to_string('hmsdms'))
         outhdu.append(table)
         
     outhdu.flush()
