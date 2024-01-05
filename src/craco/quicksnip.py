@@ -46,7 +46,7 @@ def snip(infile, outfile, startidx, nblk, metadata_file=None):
     outhdu = fits.open(outfile, 'append')
     for it, table in enumerate(inhdu[1:]):
         row = table.data[0]
-        if table.name == 'AIPS SN' and row['SOURCE'].strip() == 'UNKNOWN':
+        if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UNKNOWN':
             row['SOURCE'] = inf.target_name
             row['RAEPO'] = inf.target_skycoord.ra.deg
             row['DECEPO'] = inf.target_skycoord.dec.deg
