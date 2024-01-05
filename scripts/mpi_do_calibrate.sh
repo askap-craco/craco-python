@@ -34,7 +34,8 @@ logfile=${uvfits}.cal.log
 fixuvfits $uvfits 
 
 if [[ ! -f $outfits ]] ; then
-    attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile
+    #attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile
+    quicksnip -O $outfits -N $nsamp $uvfits --metadata $metafile
 fi
 
 
