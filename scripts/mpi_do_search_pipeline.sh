@@ -16,7 +16,8 @@ echo "Running $0 with start_card $START_CARD xrtcard=$xrtcardno"
 uvfits=$(printf "$indir/b%02d.uvfits" $beamno)
 if [[ ! -f $uvfits ]] ; then
     echo "UVFITS not found! $uvfits"
-    exit 1
+    # don't exit with nonzero oetehrwise the whole mpi job goes down
+    exit 0
 fi
 
 ### activate my environment

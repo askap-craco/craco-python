@@ -11,7 +11,8 @@ beamno=$OMPI_COMM_WORLD_RANK
 uvfits=$(printf "$indir/b%02d.uvfits" $beamno)
 if [[ ! -f $uvfits ]] ; then
     echo "UVFITS not found! $uvfits"
-    exit 1
+    # don't exit with nonzero oetehrwise the whole mpi job goes down
+    exit 0
 fi
 
 nsamp=5000
