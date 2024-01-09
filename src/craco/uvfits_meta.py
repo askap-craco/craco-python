@@ -70,8 +70,8 @@ class VisViewMeta:
                 a1,a2 = bl2ant(blid)
                 ia1, ia2 = (a1 - 1), (a2 - 1)
                 f = flags[ia1] or flags[ia2] 
-                weight = 0 if f else 1
-                data['DATA'][i][...,2] = weight
+                if f:
+                    data['DATA'][i][...,2] = -1
 
 
         data['UU'] = uvw_out[0,:]
