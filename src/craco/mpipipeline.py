@@ -980,10 +980,12 @@ def proc_beam(pipe_info):
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
 
+            if t.total.perf > 0.110 and iblk > 0:
+                log.warning('Beam loop proctime exceeded 110ms: %s', t)
+
             iblk += 1
 
-            if t.total.perf > 0.110:
-                log.warning('Beam loop proctime exceeded 110ms: %s', t)
+
 
     finally:
         print(f'Closing beam files for {beamid}')
