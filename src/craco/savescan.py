@@ -170,8 +170,10 @@ def _main():
         logfile = None
     else:
         logfile = open(os.path.join(scandir, 'run.log'), 'w')
-    
-    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT)
+
+    env = os.environ.copy()
+    env['SCANDIR'] = scandir
+    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT, env=env)
     finish = False
 
     def signal_handler(sig, frame):
