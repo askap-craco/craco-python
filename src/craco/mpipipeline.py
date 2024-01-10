@@ -725,7 +725,7 @@ def proc_rx(pipe_info):
 
         t_start = MPI.Wtime()
         if timer.total.perf > 0.120:
-            log.warning('RX loop proctime exceeded 110ms: %s',timer)
+            log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
             
         timer = Timer()
         if ibuf == values.num_msgs -1:
@@ -912,7 +912,7 @@ class UvFitsFileSink:
         self.uvout.fout.flush()
         t.tick('flush')
         if self.beamno == 0:
-            log.info(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
+            log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
         self.blockno += 1
 
 
@@ -981,7 +981,7 @@ def proc_beam(pipe_info):
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
 
             if t.total.perf > 0.120 and iblk > 0:
-                log.warning('Beam loop proctime exceeded 110ms: %s', t)
+                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
 
             iblk += 1
 
