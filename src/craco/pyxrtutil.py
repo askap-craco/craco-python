@@ -141,7 +141,7 @@ class KernelStart:
         if state != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
             status = 0 # self.kernel.read_status_register()
             isdone = status & 0x04 == 0x04
-            raise ValueError(f'Wait on start={self.start} failed with {state} status={status:02x} isok={isdone}')
+            raise ValueError(f'Wait on start={self.raw_start} on kernel {self.kernel}  failed with {state} timeout={timeout_ms}')
 
         return state
 
