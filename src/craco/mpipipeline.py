@@ -977,7 +977,7 @@ def proc_beam(pipe_info):
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
 
-            if beamid == 0 and False::
+            if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
 
             iblk += 1
