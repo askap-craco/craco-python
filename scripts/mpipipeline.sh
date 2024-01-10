@@ -72,7 +72,7 @@ commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST 
 echo "UCX_NET_DEVICES=$UCX_NET_DEVICES UCX_TLS=$UCX_TLS"
 
 echo "Making directories"
-mpirun -hostfile $hostfile -map-by ppr:1:node mkdir $SCANDIR
+mpirun -hostfile $hostfile -map-by ppr:1:node mkdir -p $SCANDIR
 
 # TODO: MPI can abort explosively if you like by doing `which python` -m mpi4py before `which pipeline`
 # but I hve trouble with pyton versions 
