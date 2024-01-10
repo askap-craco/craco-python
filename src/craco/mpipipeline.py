@@ -724,7 +724,7 @@ def proc_rx(pipe_info):
                      timer)
 
         t_start = MPI.Wtime()
-        if timer.total.perf > 0.110:
+        if timer.total.perf > 0.120:
             log.warning('RX loop proctime exceeded 110ms: %s',timer)
             
         timer = Timer()
@@ -980,7 +980,7 @@ def proc_beam(pipe_info):
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
 
-            if t.total.perf > 0.110 and iblk > 0:
+            if t.total.perf > 0.120 and iblk > 0:
                 log.warning('Beam loop proctime exceeded 110ms: %s', t)
 
             iblk += 1
