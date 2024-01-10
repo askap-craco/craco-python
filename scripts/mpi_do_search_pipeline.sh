@@ -4,9 +4,15 @@
 # All other argumetns passed through to search pipeline
 
 if [[ -z $INDIR ]] ; then
-    echo "No input directory"
+    echo "$0: No input directory"
     exit 1
 fi
+
+if [[ -z $RUNNAME ]] ; then
+    RUNNAME="results"
+    echo "$0: No run name using $RUNNAME"
+fi
+
 indir=$INDIR
 beamno=$OMPI_COMM_WORLD_RANK
 xrtcardno=$(($START_CARD + $OMPI_COMM_WORLD_LOCAL_RANK))
@@ -29,8 +35,8 @@ fixuvfits $uvfits
 
 cmd="search_pipeline --uv $uvfits --device $xrtcardno $@"
 echo `hostname` running $cmd
-mkdir $indir/results
-logfile=$(printf "$indir/results/search_pipeline_b%02d.log" $beamno)
+mkdir $indir/$RUNNAME
+logfile=$(printf "$indir/$RUNNAME/search_pipeline_b%02d.log" $beamno)
 
 $cmd 2>&1 | tee $logfile
 
@@ -38,8 +44,8 @@ $cmd 2>&1 | tee $logfile
 #
 
 
-# note this assume we are using results folder!
-cd $indir/results
+# Write data to wrunname
+cd $indir/$RUNNAME
 
 # beamno=$(printf "%02d" $beamno)
 candfile=$(printf "candidates.b%02d.txt" $beamno)
