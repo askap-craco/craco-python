@@ -703,7 +703,7 @@ def proc_rx(pipe_info):
         transpose_end = MPI.Wtime()
         transpose_time = transpose_end - avg_end
         
-        if cardidx == 0:
+        if cardidx == 0 and False:
             read_size_bytes = dummy_packet.nbytes*NFPGA
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
@@ -724,6 +724,9 @@ def proc_rx(pipe_info):
                      timer)
 
         t_start = MPI.Wtime()
+        if timer.total.perf > 0.110:
+            log.warning('RX loop proctime exceeded 110ms: %s',timer)
+            
         timer = Timer()
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
@@ -974,10 +977,13 @@ def proc_beam(pipe_info):
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
 
-            if beamid == 0:
+            if beamid == 0 and False::
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
-            
+
             iblk += 1
+
+            if t.total.perf > 0.110:
+                log.warning('Beam loop proctime exceeded 110ms: %s', t)
 
     finally:
         print(f'Closing beam files for {beamid}')

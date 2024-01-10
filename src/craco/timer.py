@@ -21,13 +21,23 @@ class Timestamp:
     def now():
         return Timestamp(time.perf_counter(), time.process_time())
 
-
     @property
     def sleep(self):
         '''
         Returns the amount of time spent sleeping'''
         s = self.perf - self.process
         return s
+
+    @property
+    def walltime(self):
+        return self.perf
+
+    def __float__(self):
+        '''
+        Returns time spentincluding sleep
+        '''
+        
+        return self.perf
 
     def __sub__(self, ts):
         return Timestamp(self.perf - ts.perf, self.process - ts.process)
