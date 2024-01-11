@@ -34,6 +34,31 @@ conda activate craco
 fixuvfits $uvfits
 
 cmd="search_pipeline --uv $uvfits --device $xrtcardno $@"
+
+#####################################
+#Extracting the injection file name
+#####################################
+injection_file=""
+iarg=0
+# Loop through all arguments
+for arg in "$@"; do
+  # Check if the current argument is "--injection-file"
+  ((iarg++))
+  if [ "$arg" == "--injection-file" ]; then
+    # Get the next argument (assuming it exists)
+    if [ $# -gt $iarg ]; then
+            injection_file_arg_number="$((iarg + 1))"
+            injection_file="${!injection_file_arg_number}"
+            echo "Injection file is -----------> " $injection_file
+    else
+      echo "Error: --injection-file requires a value."
+      exit 1
+    fi
+    break  # Break the loop after finding "--injection-file"
+  fi
+done
+######################################
+
 echo `hostname` running $cmd
 mkdir $indir/$RUNNAME
 logfile=$(printf "$indir/$RUNNAME/search_pipeline_b%02d.log" $beamno)
@@ -50,6 +75,10 @@ cd $indir/$RUNNAME
 # beamno=$(printf "%02d" $beamno)
 candfile=$(printf "candidates.b%02d.txt" $beamno)
 # echo $candfile, $PWD
+if [ -n "$injection_file" ]; then
+  cmd="`which candpipe` $candfile --save-rfi -s --injection $injection_file -o clustering_output -v"
+else
+  cmd="`which candpipe` $candfile --save-rfi -s -o clustering_output -v"
+fi
 
-cmd="`which candpipe` $candfile --save-rfi -s -o clustering_output -v"
 $cmd 
