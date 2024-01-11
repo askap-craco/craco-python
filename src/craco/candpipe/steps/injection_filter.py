@@ -84,6 +84,7 @@ class Step(ProcessingStep):
         # save converted injected file
         if p.args.injection is not None:
             fout = p.cand_fname+'.inject.orig.csv'
+            fout = os.path.join(self.pipeline.args.outdir, fout)
             log.debug('Saving injected csv format file to %s', fout)
             injpar.to_csv(fout, index=False, float_format='%.8g')
 
@@ -100,6 +101,7 @@ class Step(ProcessingStep):
 
         if p.args.injection is not None:
             fout = p.cand_fname+'.inject.cand.csv'
+            fout = os.path.join(self.pipeline.args.outdir, fout)
             log.debug('Saving injected csv format file to %s', fout)
             injdic.to_csv(fout, index=False, float_format='%.8g')
                
