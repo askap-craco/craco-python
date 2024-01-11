@@ -202,7 +202,9 @@ class ScanDir:
 
     @property
     def scan_rank_file(self):
-        return f"{self.scan_head_dir}/beam_only.rank"
+        rank_file = f"{self.scan_head_dir}/beam_only.rank"
+        if check_path(rank_file): return rank_file
+        return f"{self.scan_head_dir}/mpipipeline.rank"
 
     @property
     def runs(self):
