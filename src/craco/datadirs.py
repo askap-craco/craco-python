@@ -164,7 +164,8 @@ class SchedDir:
         with open(self.flagfile) as fp:
             metaf = json.load(fp)
 
-        self.start_mjd = eval(metaf["trange"])[0]
+        try: self.start_mjd = eval(metaf["trange"])[0]
+        except: self.start_mjd = metaf["startmjd"]
         self.flagant = eval(metaf["flagants"])
 
     def get_size(self):
