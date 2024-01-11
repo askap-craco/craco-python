@@ -78,7 +78,7 @@ candfile=$(printf "candidates.b%02d.txt" $beamno)
 if [ -n "$injection_file" ]; then
   cmd="`which candpipe` $candfile --save-rfi -s --injection $injection_file -o clustering_output -v"
 else
-  cmd="`which candpipe` $candfile --save-rfi -s-o clustering_output -v"
+  cmd="`which candpipe` $candfile --save-rfi -s -o clustering_output -v"
 fi
 
 $cmd 
