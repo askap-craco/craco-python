@@ -28,7 +28,7 @@ def format_msg(r):
         'ALIAS=' + str(r['ALIAS_name']) + ' ' \
         + r['link']
     
-    if r["Unknown"] >= 0: return f"*{msg}* \n"
+    if r["Unknown"] > 0: return f"*{msg}* \n"
     return f"{msg} \n"
 
 def beam_of(f):
