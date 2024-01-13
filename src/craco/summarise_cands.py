@@ -20,6 +20,21 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+def format_msg(r):
+    msg = 'UNKNOWN=' + str(r['Unknown']) + ' ' \
+        'PSR=' + str(r['PSR_name']) + ' ' \
+        'RACS=' + str(r['RACS_name']) + ' ' \
+        'CRACO=' + str(r['NEW_name']) + ' ' \
+        'ALIAS=' + str(r['ALIAS_name']) + ' ' \
+        + r['link']
+    
+    if r["Unknown"] >= 0: return f"*{msg}* \n"
+    return f"{msg} \n"
+
+def beam_of(f):
+    beamno = int(os.path.basename(f).split('.')[1][1:])
+    return beamno
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -57,7 +72,7 @@ def _main():
         all_df.append(df)
 
         if len(df) != 0:
-            links.append(f'*<http://localhost:8024/beam?fname={f}| Beam{beamno:02d}>*\n ')
+            links.append(f'<http://localhost:8024/beam?fname={f}| Beam{beamno:02d}>')
 
         rawcat = os.path.join(os.path.dirname(os.path.dirname(f)), os.path.basename(f).split('.uniq.csv')[0])
         print(beamno, f, rawcat)
@@ -98,53 +113,30 @@ def _main():
     scanname = '/'.join(f.split('/')[4:8])
 
 
-    msgs = [
-        'UNKNOWN=' + str(r['Unknown']) + ' ' \
-        'PSR=' + str(r['PSR_name']) + ' ' \
-        'RACS=' + str(r['RACS_name']) + ' ' \
-        'CRACO=' + str(r['NEW_name']) + ' ' \
-        'ALIAS=' + str(r['ALIAS_name']) + ' ' \
-        + r['link'] for _, r in summary.iterrows()
-        ]
+    msgs = [format_msg(r) for _, r in summary.iterrows()]
 
     # msgs = [scanname + ' ' + '\n'] + msgs
 
     msgs = [scanname + ' ' + '\n'] + [rawstats + ' ' + '\n' ] + msgs
 
-    blocks1 = [
+    blocks1 = [{"type": "divider"}]
+
+    blocks1 += [
         {
             'type':'section',
             'text':{
                 'type':'mrkdwn',
                 'text':t
-                }
-                } for t in msgs
-        ]
+            }
+        } for t in msgs
+    ]
 
-
-    # blocks = [
-    #     {
-    #         'type':'section',
-    #         'text':f'Result of processing scan {scanname}'
-    #     },
-    #     {
-    #         'type':'section',
-    #         'fields':fields
-    #     }
-    # ]
-
-    print(blocks1)
-
+    blocks1 += [{"type": "divider"}]
 
     token = os.environ["SLACK_CRACO_TOKEN"]
     client = WebClient(token=token)
     channel = 'C05Q11P9GRH'
     client.chat_postMessage(channel=channel, blocks=blocks1)
-    
-def beam_of(f):
-    beamno = int(os.path.basename(f).split('.')[1][1:])
-    return beamno
-    
 
 if __name__ == '__main__':
     _main()
