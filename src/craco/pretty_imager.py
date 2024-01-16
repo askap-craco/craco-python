@@ -355,13 +355,8 @@ def main():
         if args.ofits:
             img_handler.close()
         if args.stats_image:
-            
-            if args.injection_params_file:
-                mean_image_fname = args.injection_params_file + ".mean_image.fits"
-                rms_image_fname = args.injection_params_file + ".rms_image.fits"
-            else:
-                mean_image_fname = args.ofits + ".mean_image.fits"
-                rms_image_fname = args.ofits + ".rms_image.fits"
+            mean_image_fname = args.ofits + ".mean_image.fits"
+            rms_image_fname = args.ofits + ".rms_image.fits"
             print("Saving the stats images in: {0} and {1}".format(mean_image_fname, rms_image_fname))
             useful_info['NSUMMED'] = N
             postprocess.create_header_for_image_data(mean_image_fname, wcs = py_plan.wcs, im_shape = (py_plan.npix, py_plan.npix), dtype=np.dtype('>f4'), kwargs = useful_info, image_data = mean_image)
