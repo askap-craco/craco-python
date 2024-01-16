@@ -119,7 +119,9 @@ class SchedDir:
         use head node to list all available scans
         """
         allscanpaths = glob.glob(os.path.join(self.sched_head_dir, "scans/??/??????????????/"))
-        return sorted([self.datadirs.path_to_scan(path) for path in allscanpaths])
+        ### we need to exclude the scan with -1
+        allscans = [self.datadirs.path_to_scan(path) for path in allscanpaths]
+        return sorted([scan for scan in allscans if scan is not None])
 
     @property
     def metafile(self):
