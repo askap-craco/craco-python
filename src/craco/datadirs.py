@@ -243,6 +243,11 @@ class ScanDir:
         return [self.beam_uvfits_path(beam) for beam in range(0, 36)]
 
     @property
+    def uvfits_paths_exists(self):
+        """return uvfits that exsits only"""
+        return [path for path in self.uvfits_paths if check_path(path)]
+
+    @property
     def uvfits_count(self):
         count = 0
         for path in self.uvfits_paths:
