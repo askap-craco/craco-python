@@ -70,6 +70,7 @@ def get_parser():
     parser = craco_plan.get_parser()
     parser.add_argument("--metadata", type=str, help="Path to the metadata file", default=None)
     parser.add_argument("--injection_params_file", type=str, help="Path to an injection params file", default=None)
+    parser.add_argument("--simulate_data", action='store_true', help="Simulate data from the injection class", default=False)
     parser.add_argument("--seek_s", type=float, help="Seek (in seconds) into the file (def:0)", default=None)
     parser.add_argument("--seek_samps", type=float, help="Seek (in samps) into the file (def:0)", default=None)
     parser.add_argument("--tx", type=int, help="Average in time by a factor of tx", default=1)
@@ -117,8 +118,15 @@ def main():
     py_plan = craco_plan.PipelinePlan(uvsource, values)
 
     if args.injection_params_file:
+
         from Visibility_injector import inject_in_fake_data as VI
-        block_type=np.ndarray
+        if args.simulate_data:
+            block_type=np.ndarray
+            vis_source = 'fake'
+        else:
+            block_type=np.ma.core.MaskedArray
+            vis_source = None
+
     else:
         block_type = np.ma.core.MaskedArray
     #block_type = np.ndarray
@@ -176,9 +184,11 @@ def main():
         img_t_index = 0
 
     if args.injection_params_file:
-        FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, outblock_type=dict)
-        uvdata_source = FV.get_fake_data_block()
-    else:
+        FV = VI.FakeVisibility(plan=py_plan, injection_params_file=args.injection_params_file, vis_source=vis_source)
+        if args.simulate_data:
+            uvdata_source = FV.gen_fake_blocks()
+
+    if not args.simulate_data:
         if args.proper:
             uvdata_source = uvsource.fast_time_blocks(py_plan.nt, fetch_uvws = True)
         else:
@@ -240,8 +250,12 @@ def main():
             block = preprocess.average_pols(block, keepdims=False)
             if args.plot_blocks:
                 plot_block(block, title="The pol-averaged block")
+            timer.tick("Post pol averaging")
 
-            timer.tick("pre dedisp")
+            if args.injection_params_file:
+                block = FV.inject_frb_in_data_block(block, iblock, py_plan)
+            timer.tick("Post injection")
+
             if dm_samps > 0:
                 block = brute_force_dedipserser.dedisperse(iblock, block)
                 if args.plot_blocks:
