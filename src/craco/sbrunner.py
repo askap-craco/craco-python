@@ -52,7 +52,14 @@ class SBRunner(iceint.schedblock.ISBStateMonitor):
             
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
+    h = """
+    "Runs the command from the commandline at the end of the schedblock.
+    Currenly only runs if the old_state was 'EXECUTING'.
+    Adds SB_ID, SB_STATE, SB_UPDATED and SB_OLD_STATE to the evnrionment, and also interprets the command line if it contained {SB_ID} keys etc.
+
+    example: sbrunner ./prepare_skadi.py -cal $cal -obs {SB_ID}
+    """
+    parser = ArgumentParser(description=h, formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument(dest='cmd', nargs='+')
     parser.set_defaults(verbose=False)
