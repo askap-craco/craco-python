@@ -104,7 +104,8 @@ if __name__ == '__main__':
                                 'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main',
                                 'summarise_cands=craco.summarise_cands:_main',
                                 'metadatasaver=craco.askap.craft.obsman.metadatasaver:_main',
-                                'quicksnip=craco.quicksnip:_main'
+                                'quicksnip=craco.quicksnip:_main',
+                                'sbrunner=craco.sbrunner:_main',
                                 
             ],
         },
