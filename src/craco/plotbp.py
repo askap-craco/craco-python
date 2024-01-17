@@ -72,7 +72,7 @@ class Bandpass:
         self.bandpass = self.bandpass.reshape((self.nsol, self.nant, self.nchan, self.npol))
         self.bandpass = np.sqrt(2.0) / self.bandpass
         fp.close()
-        print("Read bandpass: %d solutions, %d antennas, %d channels, %d polarisations" %(self.nsol, self.nant, self.nchan, self.npol))
+        # print("Read bandpass: %d solutions, %d antennas, %d channels, %d polarisations" %(self.nsol, self.nant, self.nchan, self.npol))
         return self
 
     def plotGains(self, sol, ref_ant = 0, out_file = None):
