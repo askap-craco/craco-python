@@ -110,11 +110,7 @@ class Pipeline:
     def create_dir(self):
         outdir = self.args.outdir
         if not os.path.exists(outdir):
-            try:
-                os.mkdir(outdir)
-                log.debug('Create new directory %s', outdir)
-            except OSError:
-                log.debug('Directory %s exists.', outdir)
+            os.makedirs(outdir, exist_ok=True)
         else:
             log.debug('Directory %s exists.', outdir)
 
