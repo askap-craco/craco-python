@@ -1,4 +1,5 @@
 from craft import craco, craco_plan
+from craft.cmdline import strrange
 from craco import preprocess, uvfits_snippet
 import argparse
 import numpy as np
@@ -20,11 +21,15 @@ def main(args):
     
     if args.calib:
         print(f"Starting calibration using {args.calib}")
-        plan = craco_plan.PipelinePlan(f.uvsource, " ")
+        plan_args = " "
+        if args.flag_ants:
+            plan_args += f"--flag-ants {args.flag_ants}"
+
+        plan = craco_plan.PipelinePlan(f.uvsource, plan_args)
         calibrator = preprocess.Calibrate(plan = plan,
                                 block_dtype=np.ndarray,
                                 miriad_gains_file=args.calib,
-                                baseline_order=plan.baseline_order)
+                                baseline_order=f.uvsource.raw_baseline_order)
 
         data = calibrator.apply_calibration(data)
         outname += ".calib"
@@ -67,6 +72,7 @@ def get_parser():
     a.add_argument("-calib", type=str, help="Path to the calibration soln", default=None)
     a.add_argument("-sky_subtract", action='store_true', help="Run sky subtraction on the data (def:False)", default=False)
     a.add_argument("-dedisp", type=float, help="DM value (pc/cc) to dedisperse the visibilities by", default=None)
+    a.add_argument("--flag-ants", type=str, help="Flag these ants", default=None)
     
     args = a.parse_args()
     return args
