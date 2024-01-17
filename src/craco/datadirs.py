@@ -344,4 +344,12 @@ class RunDir:
     def beam_unique_cand(self, beam):
         return os.path.join(self.beam_folder(beam), f"clustering_output/candidates.b{beam:0>2}.txt.uniq.csv")
 
+    def raw_candidate_paths(self):
+        all_candidates = [self.beam_candidate(beam) for beam in range(0, 36)]
+        return [path for path in all_candidates if check_path(path)]
+
+    def clust_candidate_paths(self):
+        all_candidates = [self.beam_unique_cand(beam) for beam in range(0, 36)]
+        return [path for path in all_candidates if check_path(path)]
+
     # note - for any additional files, add it here
