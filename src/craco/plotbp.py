@@ -63,7 +63,10 @@ class Bandpass:
         self.nant = headerValues[3]
         self.nchan = headerValues[4]
         self.npol = headerValues[5]
-        self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=np.complex)
+        try:
+            self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=np.complex)
+        except:
+            self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=complex)
         dtc = np.dtype('<c16')
         self.bandpass = np.array(np.fromfile(fp, dtype=dtc, count=self.nsol * self.nant * self.nchan * self.npol))
         self.bandpass = self.bandpass.reshape((self.nsol, self.nant, self.nchan, self.npol))

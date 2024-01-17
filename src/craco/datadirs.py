@@ -353,3 +353,24 @@ class RunDir:
         return [path for path in all_candidates if check_path(path)]
 
     # note - for any additional files, add it here
+
+class CalDir:
+    """module to manage calibrations"""
+    def __init__(self, sbid):
+        self.sbid = sbid
+
+    @property
+    def cal_head_dir(self):
+        return f"/CRACO/DATA_00/craco/calibration/{format_sbid(self.sbid)}"
+
+    def beam_cal_dir(self, beam):
+        return f"{self.cal_head_dir}/{beam:0>2}"
+    
+    def beam_cal_binfile(self, beam):
+        return f"{self.beam_cal_dir(beam)}/b{beam:0>2}.aver.4pol.bin"
+    
+    def beam_cal_freqfile(self, beam):
+        return f"{self.beam_cal_dir(beam)}/b{beam:0>2}.aver.4pol.freq.npy"
+
+    def beam_cal_smoothfile(self, beam):
+        return f"{self.beam_cal_dir(beam)}/b{beam:0>2}.aver.4pol.smooth.npy"
