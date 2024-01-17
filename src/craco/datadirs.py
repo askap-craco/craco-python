@@ -119,7 +119,9 @@ class SchedDir:
         use head node to list all available scans
         """
         allscanpaths = glob.glob(os.path.join(self.sched_head_dir, "scans/??/??????????????/"))
-        return sorted([self.datadirs.path_to_scan(path) for path in allscanpaths])
+        ### we need to exclude the scan with -1
+        allscans = [self.datadirs.path_to_scan(path) for path in allscanpaths]
+        return sorted([scan for scan in allscans if scan is not None])
 
     @property
     def metafile(self):
@@ -164,7 +166,8 @@ class SchedDir:
         with open(self.flagfile) as fp:
             metaf = json.load(fp)
 
-        self.start_mjd = eval(metaf["trange"])[0]
+        try: self.start_mjd = eval(metaf["trange"])[0]
+        except: self.start_mjd = metaf["startmjd"]
         self.flagant = eval(metaf["flagants"])
 
     def get_size(self):
@@ -202,7 +205,9 @@ class ScanDir:
 
     @property
     def scan_rank_file(self):
-        return f"{self.scan_head_dir}/beam_only.rank"
+        rank_file = f"{self.scan_head_dir}/beam_only.rank"
+        if check_path(rank_file): return rank_file
+        return f"{self.scan_head_dir}/mpipipeline.rank"
 
     @property
     def runs(self):
@@ -238,6 +243,11 @@ class ScanDir:
     @property
     def uvfits_paths(self):
         return [self.beam_uvfits_path(beam) for beam in range(0, 36)]
+
+    @property
+    def uvfits_paths_exists(self):
+        """return uvfits that exsits only"""
+        return [path for path in self.uvfits_paths if check_path(path)]
 
     @property
     def uvfits_count(self):

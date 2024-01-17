@@ -91,9 +91,11 @@ def filterbank_roll(tf, dm, freqs, tint, tstart=0, keepnan=True):
     
     ### perform clipping... remove nan values...
     if keepnan:
-        nonnan_t = (~np.isnan(newtf)).sum(axis=0) != 0
-        newtf = newtf[:, nonnan_t]
-        trange = trange[nonnan_t]
+        # packet drop will break this function...
+        pass
+        # nonnan_t = (~np.isnan(newtf)).sum(axis=0) != 0
+        # newtf = newtf[:, nonnan_t]
+        # trange = trange[nonnan_t]
     else:
         nonnan_t = (np.isnan(newtf)).sum(axis=0) == 0
         _index = np.arange(newtf.shape[-1])
