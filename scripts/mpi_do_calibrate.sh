@@ -40,7 +40,7 @@ if [[ ! -f $outfits ]] ; then
 fi
 
 
-cmd="/CRACO/SOFTWARE/craco/wan342/Software/craco_calib/calib_skadi.py -uv $outfits"
+cmd="/CRACO/SOFTWARE/craco/craftop/softwares/craco_calib/calib_skadi.py -uv $outfits"
 echo running $cmd
 $cmd 
 
