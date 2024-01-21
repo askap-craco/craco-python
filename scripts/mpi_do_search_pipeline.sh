@@ -59,6 +59,12 @@ for arg in "$@"; do
 done
 ######################################
 
+devices=("0000:17:00.1" "0000:65:00.1" "0000:b1:00.1" "0000:ca:00.1")
+devid=${devices[$xrtcardno]}
+echo `hostname` resetting device $xrtcardno=$devid
+xbutil reset --device $devid --force
+echo `hostname` finished resetting device $xrtcardno=$devid
+
 echo `hostname` running $cmd
 mkdir $indir/$RUNNAME
 logfile=$(printf "$indir/$RUNNAME/search_pipeline_b%02d.log" $beamno)
