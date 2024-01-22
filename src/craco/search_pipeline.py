@@ -32,7 +32,7 @@ from craco import write_psf as PSF
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
 from collections import OrderedDict
-
+from trace_event_handler import TraceEventHandler
 from astropy import units
 
 import logging
@@ -40,7 +40,10 @@ import warnings
 
 DM_CONSTANT = 4.15 # milliseconds and GHz- Shri Kulkarni will kill me
 
+handler = TraceEventHandler()
+logging.basicConfig(handlers=[logging.StreamHandler(None), handler], level=logging.INFO)
 log = logging.getLogger(__name__)
+
 
 #from craco_pybind11 import boxcar, krnl, fdmt_tunable
 
@@ -679,7 +682,7 @@ class Pipeline:
         Apply calibration solutions -  Multiply by solution aray
          Need to make a copy, as masked arrays loose the mask if you *= with an unmasked array
         '''
-
+        log.info("Starting calibration")
         if self.solarray is not None:
             # If data is already polsummed, then average the solutions before multiplying
             if self.solarray.ndim == 4 and input_flat_raw.ndim == 3:
@@ -690,6 +693,8 @@ class Pipeline:
         else:
             input_flat = input_flat_raw.copy()
 
+        log.info("Starting normalisation")
+
         # subtract average over time
         if self.plan.values.subtract >= 0:
             if self.subtractor is None: # TODO: allocate vissubtractor in constructor. It's just tricky to know what the shape will be in advance
@@ -697,6 +702,7 @@ class Pipeline:
                 
             input_flat = self.subtractor(input_flat)
 
+        log.info("Starting pol averaging")
         # average polarisations, if necessary
         if input_flat.ndim == 4:
             npol = input_flat.shape[2]
@@ -706,6 +712,7 @@ class Pipeline:
             else:
                 input_flat = input_flat.mean(axis=2)
 
+        log.info("Starting rms computation")
         # scale to give target RMS
         targrms = self.plan.values.target_input_rms
         if  targrms > 0:
@@ -716,6 +723,7 @@ class Pipeline:
             # noise over everything
             stdgain = targrms / input_std
             log.info('Input RMS (real/imag) = (%s/%s) quadsum=%s stdgain=%s targetrms=%s', real_std, imag_std, input_std, stdgain, targrms)
+            log.info("Applying the rms now")
             input_flat *= stdgain
 
         return input_flat
@@ -1264,39 +1272,43 @@ def _main():
         input('Press any key to continue...')
 
     t = Timer()
-    for iblk, input_flat in enumerate(vis_source):
-        t.tick('read')
-        if values.nblocks is not None and iblk >= values.nblocks:
-            log.info('Finished due to values.nblocks=%d', values.nblocks)
-            break
+    try:
+        for iblk, input_flat in enumerate(vis_source):
+            t.tick('read')
+            if values.nblocks is not None and iblk >= values.nblocks:
+                log.info('Finished due to values.nblocks=%d', values.nblocks)
+                break
 
-        if iblk == 0 and values.save_psf:
-            psf_name = os.path.join(values.outdir, f"psf.beam{plan.beamid:02g}.iblk{iblk}.fits")
-            log.info("Saving the psf to disk with name=%s", psf_name)
-            PSF.write_psf(outname=psf_name, plan=plan, iblk=iblk)
-
-        update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
-        
-        if update_now:
-            isamp_update += update_uv_blocks*nt
-            adapter = f.vis_metadata(isamp_update)
-            t.tick('get_adapter')
-            log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
-            latest_plan = pipeline_wrapper.update_plan(adapter)
-            if values.save_psf:
-                psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
+            if iblk == 0 and values.save_psf:
+                psf_name = os.path.join(values.outdir, f"psf.beam{plan.beamid:02g}.iblk{iblk}.fits")
                 log.info("Saving the psf to disk with name=%s", psf_name)
-                PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
+                PSF.write_psf(outname=psf_name, plan=plan, iblk=iblk)
 
-            t.tick('update_plan')
+            update_now = update_uv_blocks > 0 and iblk % update_uv_blocks == 0 and iblk != 0
+            
+            if update_now:
+                isamp_update += update_uv_blocks*nt
+                adapter = f.vis_metadata(isamp_update)
+                t.tick('get_adapter')
+                log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
+                latest_plan = pipeline_wrapper.update_plan(adapter)
+                if values.save_psf:
+                    psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
+                    log.info("Saving the psf to disk with name=%s", psf_name)
+                    PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
 
-        pipeline_wrapper.write(input_flat)
-        t.tick('write_data')
-        log.info("Read for loop %s", t)
-        t = Timer()
+                t.tick('update_plan')
 
-    f.close()
-    pipeline_wrapper.close()
+            pipeline_wrapper.write(input_flat)
+            t.tick('write_data')
+            log.info("Read for loop %s", t)
+            t = Timer()
+    except Exception as E:
+        raise E
+    finally:
+        f.close()
+        pipeline_wrapper.close()
+        handler.dump()
                      
 if __name__ == '__main__':
     _main()
