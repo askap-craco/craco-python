@@ -93,11 +93,13 @@ class Step(ProcessingStep):
 
         for idx in range(len(injpar)):
             injcat = injpar.iloc[[idx]]
+            injcoord = coords[[idx]]
+            print(injcoord)
 
             # crossmatch (spatially)
             outd = catalog_cross_match.Step(p).cross_matching(candidates=outd, 
                                         catalogue=injcat, 
-                                        coord=coords, 
+                                        coord=injcoord, 
                                         threshold=p.config['inject_tol']['srcsep'], 
                                         col_prefix='INJ', 
                                         key='name')
