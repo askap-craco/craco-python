@@ -703,7 +703,7 @@ def proc_rx(pipe_info):
         transpose_end = MPI.Wtime()
         transpose_time = transpose_end - avg_end
         
-        if cardidx == 0:
+        if cardidx == 0 and False:
             read_size_bytes = dummy_packet.nbytes*NFPGA
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
@@ -724,6 +724,9 @@ def proc_rx(pipe_info):
                      timer)
 
         t_start = MPI.Wtime()
+        if timer.total.perf > 0.120:
+            log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
+            
         timer = Timer()
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
@@ -909,7 +912,7 @@ class UvFitsFileSink:
         self.uvout.fout.flush()
         t.tick('flush')
         if self.beamno == 0:
-            log.info(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
+            log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
         self.blockno += 1
 
 
@@ -974,10 +977,15 @@ def proc_beam(pipe_info):
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
 
-            if beamid == 0:
+            if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
-            
+
+            if t.total.perf > 0.120 and iblk > 0:
+                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
+
             iblk += 1
+
+
 
     finally:
         print(f'Closing beam files for {beamid}')

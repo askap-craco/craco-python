@@ -84,6 +84,8 @@ class Kernel:
 
         self.name = newname
         self.print_groups()
+        self.device = device
+        self.xbin = xbin
         
     def print_groups(self):
         self.groups = []
@@ -102,10 +104,46 @@ class Kernel:
         
     def __call__(self,*args):
         newargs = list(map(convert_buffer, args))
-        return self.krnl(*newargs)
+        raw_start = self.krnl(*newargs)
+        return KernelStart(self, raw_start)
+
+    def read_register(self, address):
+        # krnl.read_reigster()  available in later versions of pyxrt
+        # pyxrt.ip isnt in there either
+        # F**K
+        #return self.krnl.read_register(address)
+        raise NotImplementedError('Not available in later versions of xrt')
+
+    def read_status_register(self):
+        return self.read_register(0x00)
         
     def group_id(self, gid):
         return self.krnl.group_id(gid)
+
+
+class KernelStart:
+    def __init__(self, kernel, raw_start):
+        self.kernel = kernel
+        self.raw_start = raw_start
+
+        assert kernel is not None
+        assert raw_start is not None
+
+    def wait(self, timeout_ms:int=0):
+        # We've had a problem where wait() times out.
+        # I'm going to see if it improves if we check the status first and only call
+        # wait() if it hasn't finished
+        state = self.raw_start.state()
+        if state == pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
+            return state
+        
+        state = self.raw_start.wait(timeout_ms)
+        if state != pyxrt.ert_cmd_state.ERT_CMD_STATE_COMPLETED:
+            status = 0 # self.kernel.read_status_register()
+            isdone = status & 0x04 == 0x04
+            raise ValueError(f'Wait on start={self.raw_start} on kernel {self.kernel}  failed with {state} timeout={timeout_ms}')
+
+        return state
 
 def wait_for_starts(starts, call_start, timeout_ms: int=1000):
     '''
@@ -126,9 +164,10 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
         # https://xilinx.github.io/XRT/master/html/xrt_native.main.html?highlight=wait#classxrt_1_1run_1ab1943c6897297263da86ef998c2e419c
         # see Also CRACO-128
         # Ah, but wait2 doesn't exist in PYXRT
-        result = start.wait(timeout_ms) # 0 means wait forever
+        state = start.wait(timeout_ms) # 0 means wait forever
         wait_end = time.perf_counter()
-        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} result={result}')
+        log.debug(f'Call: {wait_start - call_start} Wait:{wait_end - wait_start}: Total:{wait_end - call_start} state={state}')
+        
 
 class KernelStarts:
     def __init__(self):

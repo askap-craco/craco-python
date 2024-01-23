@@ -193,13 +193,18 @@ class Step(ProcessingStep):
         rfi_ind = ((candidates_new['num_samps'] <= config['threshold']['num_samps']) | (candidates_new['num_spatial'] > config['threshold']['num_spatial'])) & (candidates_new['SNR'] < config['threshold']['max_snr'])
         log.debug("Found %d rfi signals", sum(rfi_ind))
 
+        # Central ghost 
+        cet_ind = (candidates_new['lpix'] >= 126) & (candidates_new['lpix'] <= 130) & (candidates_new['mpix'] >= 126) & (candidates_new['mpix'] <= 130)
+
         if self.pipeline.args.save_rfi:
-            candidates_rfi = candidates_new[rfi_ind]
+            # candidates_rfi = candidates_new[rfi_ind]
+            candidates_rfi = candidates_new[rfi_ind | cet_ind]
             log.info('Saving selected rfi to file %s.rfi.csv', cand_fname)
             candidates_rfi.to_csv(cand_fname + ".rfi.csv")
 
         # others | which is suppose to be candidates! 
-        candidates_fin = candidates_new[(~rfi_ind)]
+        # candidates_fin = candidates_new[(~rfi_ind)]
+        candidates_fin = candidates_new[(~rfi_ind) & (~cet_ind)]
 
         return candidates_fin 
 

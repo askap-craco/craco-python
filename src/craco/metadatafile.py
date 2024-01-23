@@ -17,7 +17,7 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 import pylab
 from scipy import constants
-from craft.craco import ant2bl, baseline_iter, to_uvw, uvw_to_array
+from craft.craco import ant2bl, baseline_iter, to_uvw, uvw_to_array,uvw_dtype
 
 log = logging.getLogger(__name__)
 
@@ -136,20 +136,36 @@ class MetadataDummy:
         return np.zeros(self.nant, dtype=bool)
     
 
+def load_file(fname):
+    with open_gz_or_plain(fname, 'rt') as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError: # known problem where I forgot to put it in a list with commas
+            f.seek(0)
+            s = f.read()
+            s = '[' + s.replace('}{', '},{') + ']'
+            data = json.loads(s)
+        except UnicodeDecodeError:
+            print('Trying robust load')
+            data = list(load_robust(f))
+
+    return data
+    
+
 class MetadataFile:
     def __init__(self, fname):
-        self.fname = fname
-        with open_gz_or_plain(fname, 'rt') as f:
-            try:
-                self.data = json.load(f)
-            except json.JSONDecodeError: # known problem where I forgot to put it in a list with commas
-                f.seek(0)
-                s = f.read()
-                s = '[' + s.replace('}{', '},{') + ']'
-                self.data = json.loads(s)
-            except UnicodeDecodeError:
-                print('Trying robust load')
-                self.data = list(load_robust(f))
+        '''
+        Loads metadata from file
+        if Fname is a string it loads a file
+        otherwise it assumes the first argument is a list
+        of metadta packets
+        '''
+        if isinstance(fname, str):
+            self.fname = fname
+            self.data = load_file(fname)
+        else:
+            self.fname = '<data>'
+            self.data = fname
 
         # the final packet contains a timestamp of zero, which we want to get rid of
         if self.data[-1]['timestamp'] == 0:
@@ -171,19 +187,30 @@ class MetadataFile:
 
         # need to OR the flags together to get a correct total flag. See CRACO-132
         self.anyflag = self.mainflag[:,np.newaxis] | self.antflags | ~self.ant_onsrc
-        
         self.times = Time(self.time_floats, format='mjd', scale='tai')
-        
-        self.uvw_interp = interp1d(self.times.value, self.all_uvw,  kind='linear', axis=0, bounds_error=True, copy=False)
-        self.flag_interp = interp1d(self.times.value, self.anyflag, kind='previous', axis=0, bounds_error=True, copy=False)
-        self.index_interp = interp1d(self.times.value, np.arange(len(self.data)), kind='previous', bounds_error=True, copy=False)
 
+        # only create interpolators if we have >=2 values
+        do_interp = len(self.times) >= 2
+
+        if do_interp:
+            self.uvw_interp = interp1d(self.times.value, self.all_uvw,  kind='linear', axis=0, bounds_error=True, copy=False)
+            self.flag_interp = interp1d(self.times.value, self.anyflag, kind='previous', axis=0, bounds_error=True, copy=False)
+            self.index_interp = interp1d(self.times.value, np.arange(len(self.data)), kind='previous', bounds_error=True, copy=False)
+        else:
+            self.uvw_interp = None
+            self.flag_interp = None
+            self.index_interp = None
         
         self.antnames = antnames
         self._sources_b0 = self.sources(0) # just used for sourcenames
+        self.nbeam = 36 # hmm
 
         # Keys for eeach etnry are:
         #dict_keys(['antenna_targets', 'antennas', 'beams_direction', 'beams_offsets', 'cycle_period', 'flagged', 'phase_direction', 'polangle', 'polmode', 'sbid', 'scan_id', 'schedulingblock_id', 'sky_frequency', 'target_direction', 'target_name', 'timestamp'])
+
+    def saveto(self, fout):
+        with open(fout, 'w', encoding='utf-8') as f:
+            json.dump(self.data, f)
 
     def source_name_at_time(self, time : Time):
         srcname = self.data_at_time(time)['target_name']
@@ -223,14 +250,16 @@ class MetadataFile:
         flags = self.flag_interp(time.tai.mjd) == 1.0
         return flags
 
-    def uvw_at_time(self, time : Time):
+    def uvw_at_time(self, time : Time, beam=None):
         '''
         Returns UVW for each antenna in meters. Interpolated to the given time 
-
         :time: MJD time 
-        :returns: np.array shape [NANT, NBEAM, 3] type float
+        :returns: np.array shape [NANT, NBEAM, 3] type float, if beam is specified itg'll be [NANT, 3]
         '''
-        return self.uvw_interp(time.tai.mjd)
+        uvw = self.uvw_interp(time.tai.mjd)
+        if beam is not None:
+            uvw = uvw[:,beam,:]
+        return uvw
 
 
     def baselines_at_time(self, time : Time, valid_ants_0based, beamid):
@@ -243,13 +272,13 @@ class MetadataFile:
         Units are
         '''
 
-        uvw = self.uvw_at_time(time)[valid_ants_0based, beamid, :] / constants.c
+        uvw = self.uvw_at_time(time, beamid)[valid_ants_0based, :] / constants.c
         bluvws = {}
  
         for blinfo in baseline_iter(valid_ants_0based):
             bluvw = uvw[blinfo.ia1, :] - uvw[blinfo.ia2, :]
             assert np.all(bluvw != 0), f'UVWs were zero for {blinfo}={bluvw}'
-            d = np.array(bluvw, dtype=uvw_dtype)[0]
+            d = to_uvw(bluvw)
             bluvws[float(blinfo.blid)] = d
 
         return bluvws
@@ -310,6 +339,14 @@ class MetadataFile:
         '''
         return self.d0['sbid']
 
+    def __getitem__(self, key):
+        '''
+        Returns a new metadata file sliced as given
+        '''
+        new_data = self.data[key]
+        return MetadataFile(new_data)
+        
+
     def __str__(self):
         s = f'''Metadata for {self.fname} is SB{self.sbid} contains {len(self.data)} packets from {self.times[0].iso} to {self.times[-1].iso} = {self.times[0].mjd}-{self.times[-1].mjd} duration={(self.times[-1] - self.times[0]).datetime} d:m:s for {len(self.antnames)} antennas {self.antnames} and has sources {self.sources(0)}'''
         return s
@@ -369,6 +406,7 @@ def _main():
                 axs[i].set_ylabel(lbl)
 
             flags = mf.antflags
+            flags = flags.astype(int) + (np.arange(nant)[None,:] + 1)
             axs[3].plot(x, flags)
             axs[3].plot(x, mainflag, label='Main array flag')
 

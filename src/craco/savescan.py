@@ -10,6 +10,7 @@ import logging
 from epics import PV,caget,caput
 import subprocess
 from subprocess import Popen, TimeoutExpired
+from astropy import units as u
 import datetime
 import shutil
 import time
@@ -59,6 +60,7 @@ def _main():
     parser.add_argument('--block', help='Blocks to download', default='5-7')
     parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
     parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)
+    parser.add_argument('--metadata', help='Prep scan with this metadata file')
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -77,7 +79,9 @@ def _main():
     scanid = mycaget('ak:md2:scanId_O')
     sbid = mycaget('ak:md2:schedulingblockId_O')
     target = mycaget('ak:md2:targetName_O')
+    fcmpath = os.environ['FCM']
     bigdir = os.environ['CRACO_DATA']
+    
     now = datetime.datetime.utcnow()
     nowstr = now.strftime('%Y%m%d%H%M%S')
     scandir = os.path.join(bigdir, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
@@ -89,7 +93,13 @@ def _main():
     os.makedirs(targetdir, exist_ok=True)
     
     os.symlink(scandir, targetlink)
+    
+    if values.metadata is not None:     # prep scan - run difxcalc and stuff
+        duration = values.scan_minutes*u.minute
+        prep = ScanPrep.create_from_metafile_and_fcm(values.metadata, fcmpath, scandir, duration=duration)
+        
     target_file = os.path.join(scandir, 'ccap.fits')
+    
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
 
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
@@ -138,10 +148,14 @@ def _main():
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     fcm = '--fcm /home/ban115/20220714.fcm'
+    if values.metadata:
+        metafile = '--metadata {values.metadata}'
+    else:
+        metafile = ''
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2'
 
@@ -156,8 +170,10 @@ def _main():
         logfile = None
     else:
         logfile = open(os.path.join(scandir, 'run.log'), 'w')
-    
-    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT)
+
+    env = os.environ.copy()
+    env['SCANDIR'] = scandir
+    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT, env=env)
     finish = False
 
     def signal_handler(sig, frame):

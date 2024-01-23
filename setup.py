@@ -88,7 +88,6 @@ if __name__ == '__main__':
                                 'prepsb=craco.prepsb:_main',
                                 'prthd=craco.prthd:_main',
                                 'plotpcap=craco.plotpcap:_main',
-                                'metadatasaver=craco.obsman.metadatasaver:_main',
                                 'fixuvfits=craco.fixuvfits:_main',
                                 'pltrescale=craco.pltrescale:_main',
                                 'pltccap=craco.pltccap:_main',
@@ -102,7 +101,11 @@ if __name__ == '__main__':
                                 'dedisperse_vis=craco.dedisperse_vis:main',
                                 'attach_uvws_uvfits=craco.attach_uvws_uvfits:main',
                                 'beam_cand_sender=craco.beam_cand_sender:_main',
-                                'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main'
+                                'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main',
+                                'summarise_cands=craco.summarise_cands:_main',
+                                'metadatasaver=craco.askap.craft.obsman.metadatasaver:_main',
+                                'quicksnip=craco.quicksnip:_main',
+                                'sbrunner=craco.sbrunner:_main',
                                 
             ],
         },
