@@ -6,12 +6,12 @@ import argparse
 def main(args):
     assert args.tend >= args.tstart
     nsamps_to_read = args.tend - args.tstart + 1
-    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metada_masks)
+    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
 
     if args.outname:
         outname = args.outname
     else:
-        outname = args.uvpath.strip(".uvfits") + f"ex_{args.tstart}_{args.tend}.uvfits"
+        outname = args.uvpath.split("/")[-1].strip(".uvfits") + f"_ex_{args.tstart}_{args.tend}.uvfits"
     of = UvfitsWriter(outname, infile=args.uvpath)
     of.copy_header()
 
@@ -21,7 +21,7 @@ def main(args):
     of.update_header()
     of.write_header()
     of.close_file(fix_length = True)
-    of.append_supplementary_tables()
+    of.append_supplementary_tables(uvsource = f)
     f.close()
 
 

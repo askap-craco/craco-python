@@ -76,7 +76,7 @@ class UvfitsWriter:
         self.uvr = None
         self.header = None
         if infile:
-            self.uvr = uvfits_meta.open(self.infile)
+            self.uvr = uvfits_meta.open(infile)
         else:
             raise NotImplementedError("-- :( --")
         self.open_outfile()
@@ -97,7 +97,7 @@ class UvfitsWriter:
         self.fout.flush()
         self.fout.close()
         if fix_length:
-            self.fix_length(self.outname)
+            fixuvfits.fix_length(self.outname)
         self.fout = None
         
     def write_header(self, header=None):
@@ -108,7 +108,7 @@ class UvfitsWriter:
         
         self.fout.seek(0, 0)
         hdrb = bytes(header.tostring(), 'utf-8')
-        assert len(hdrb) % 2800 == 0
+        assert len(hdrb) % 2880 == 0, f"{len(hdrb)}. self.header = \n{self.header}"
         self.fout.write(hdrb)
     
     def copy_header(self):
@@ -117,21 +117,26 @@ class UvfitsWriter:
         self.header = self.uvr.hdulist[0].header.copy()
         self.write_header()
 
-    def append_supplementary_tables(self):
+    def append_supplementary_tables(self, uvsource:uvfits_meta.UvfitsMeta = None):
+        log.info("Appending supplementary tables")
         if self.fout:
             self.close_file()
 
-        if not self.uvr:
-            raise ValueError("I need an infile to be able to copy tables from")
+        if not uvsource:
+            uvsource = self.uvr
+            if not self.uvr:
+                raise ValueError("I need a uvsource or an infile to be able to copy tables from")
+        assert isinstance(uvsource, uvfits_meta.UvfitsMeta)
 
         fout = fits.open(self.outname, 'append')
-        for it, table in enumerate(self.uvr.hdulist[1:]):
+
+        for it, table in enumerate(uvsource.hdulist[1:]):
             row = table.data[0]
-            if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UKNOWN':
-                row['SOURCE'] = self.uvr.target_name
-                row['RAEPO'] = self.uvr.target_skycoord.ra.deg
-                row['DECEPO'] = self.uvr.target_skycoord.dec.deg
-                log.info('Replaced UNKNOWN source with %s %s', self.uvr.target_name, self.uvr.target_skycoord.to_string('hmsdms'))
+            if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UNKNOWN':
+                row['SOURCE'] = uvsource.target_name
+                row['RAEPO'] = uvsource.target_skycoord.ra.deg
+                row['DECEPO'] = uvsource.target_skycoord.dec.deg
+                print('Replaced UNKNOWN source with %s %s', uvsource.target_name, uvsource.target_skycoord.to_string('hmsdms'))
             fout.append(table)
 
         fout.flush()
@@ -149,7 +154,7 @@ class UvfitsWriter:
             self.header['GCOUNT'] = self.gcount
 
     def write_visrows_to_disk(self, visrows):
-        assert visrows.dtype == self.dtype
+        assert visrows.dtype == self.dtype, f"{visrows.dype}, {self.dtype}"
         nrows = len(visrows)
         log.debug(f"Dumping {nrows} visrows to disk")
         visrows.tofile(self.fout)
