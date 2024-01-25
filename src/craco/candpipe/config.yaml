@@ -44,4 +44,4 @@ threshold_alias: 60  # in unit of arcsec
 inject_tol:
   srcsep: 60 # in unit of arcsec
   tsmaps: 10 # pixel
-  dm: 10 # pixel
+  dm_pccm3: 10 # in physical units 

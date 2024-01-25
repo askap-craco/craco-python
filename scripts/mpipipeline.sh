@@ -52,6 +52,10 @@ if [ $retval -ne 0 ]; then
     exit $?
 fi
 
+if [[ -z $SCANDIR ]] ; then
+    SCANDIR='.'
+fi
+echo "Using SCANDIR $SCANDIR"
 
 
 ifaces=enp175s0
@@ -61,16 +65,19 @@ tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mc
 # USE UCX
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno8303 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
 
-commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT"
+commonargs="--report-bindings  -x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCANDIR"
 
 # runwith the rankfile
 
 echo "UCX_NET_DEVICES=$UCX_NET_DEVICES UCX_TLS=$UCX_TLS"
 
+echo "Making directories"
+mpirun -hostfile $hostfile -map-by ppr:1:node mkdir -p $SCANDIR
+
 # TODO: MPI can abort explosively if you like by doing `which python` -m mpi4py before `which pipeline`
 # but I hve trouble with pyton versions 
 cmd="mpirun $commonargs $ucxargs -rf $rankfile `which python` -m mpi4py `which mpipipeline` --mpi $extra_args $@"
-echo $cmd
+echo on `date` running $cmd
 $cmd
 
 

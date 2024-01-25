@@ -36,11 +36,11 @@ fixuvfits $uvfits
 
 if [[ ! -f $outfits ]] ; then
     #attach_uvws_uvfits -outname $outfits -end_samp $nsamp $uvfits $metafile
-    quicksnip -O $outfits -N $nsamp $uvfits --metadata $metafile
+    quicksnip -O $outfits -N $nsamp $uvfits --metadata $metafile $@
 fi
 
 
-cmd="/CRACO/SOFTWARE/craco/wan342/Software/craco_calib/calib_skadi.py -uv $outfits"
+cmd="/CRACO/SOFTWARE/craco/craftop/softwares/craco_calib/calib_skadi.py -uv $outfits"
 echo running $cmd
 $cmd 
 

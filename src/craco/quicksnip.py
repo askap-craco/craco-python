@@ -18,9 +18,9 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-def snip(infile, outfile, startidx, nblk, metadata_file=None):
+def snip(infile, outfile, startidx, nblk, metadata_file=None, start_mjd = None):
     hdr = fits.getheader(infile)
-    inf = uvfits_meta.open(infile, metadata_file=metadata_file)
+    inf = uvfits_meta.open(infile, metadata_file=metadata_file, start_mjd = start_mjd)
     with open(outfile, 'wb') as fout:
         fout.seek(0,0)
         hdrb = bytes(hdr.tostring(), 'utf-8')
@@ -67,6 +67,7 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument(dest='files', nargs=1)
     parser.add_argument('--metadata', help='Metadata file')
+    parser.add_argument('--start-mjd', type=float, help="Start mjd", default=None)
     parser.add_argument('--start-samp', type=int, help='Start sample', default=0)
     parser.add_argument('-N','--nsamp', type=int, help='Number of samples', default=1)
     parser.add_argument('-O','--outfile', help='Output file', required=True)
@@ -81,7 +82,8 @@ def _main():
          values.outfile,
          values.start_samp,
          values.nsamp,
-         values.metadata)
+         values.metadata,
+         values.start_mjd)
     
 
 if __name__ == '__main__':

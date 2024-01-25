@@ -84,22 +84,32 @@ class Step(ProcessingStep):
         # save converted injected file
         if p.args.injection is not None:
             fout = p.cand_fname+'.inject.orig.csv'
+            fout = os.path.join(self.pipeline.args.outdir, fout)
             log.debug('Saving injected csv format file to %s', fout)
             injpar.to_csv(fout, index=False, float_format='%.8g')
 
-        # crossmatch (spatially)
-        outd = catalog_cross_match.Step(p).cross_matching(candidates=ind, 
-                                       catalogue=injpar, 
-                                       coord=coords, 
-                                       threshold=p.config['inject_tol']['srcsep'], 
-                                       col_prefix='INJ', 
-                                       key='name')
+        outd = ind
+        injdic = pd.DataFrame()
 
-        # crossmatch (time/dm)
-        outd, injdic = self.check_time_dm(outd, injpar)
+        for idx in range(len(injpar)):
+            injcat = injpar.iloc[[idx]]
+            injcoord = coords[[idx]]
+            print(injcoord)
+
+            # crossmatch (spatially)
+            outd = catalog_cross_match.Step(p).cross_matching(candidates=outd, 
+                                        catalogue=injcat, 
+                                        coord=injcoord, 
+                                        threshold=p.config['inject_tol']['srcsep'], 
+                                        col_prefix='INJ', 
+                                        key='name')
+
+            # crossmatch (time/dm)
+            outd, injdic = self.check_time_dm(outd, injcat, injdic)
 
         if p.args.injection is not None:
             fout = p.cand_fname+'.inject.cand.csv'
+            fout = os.path.join(self.pipeline.args.outdir, fout)
             log.debug('Saving injected csv format file to %s', fout)
             injdic.to_csv(fout, index=False, float_format='%.8g')
                
@@ -123,24 +133,24 @@ class Step(ProcessingStep):
         injpar_dic['mpix'] = mpixlist
         injpar_dic['ra_deg'] = coords.ra.deg
         injpar_dic['dec_deg'] = coords.dec.deg
-        injpar_dic['tsamps'] = injpar['injection_tsamps']
-        injpar_dic['dm'] = [injpar['furby_props'][n]['dm'] for n in range(len(lpixlist))]
+        injpar_dic['total_sample'] = injpar['injection_tsamps']
+        injpar_dic['dm_pccm3'] = [injpar['furby_props'][n]['dm'] for n in range(len(lpixlist))]
         injpar_dic['snr'] = [injpar['furby_props'][n]['snr'] for n in range(len(lpixlist))]
 
         return injpar_dic, coords
 
 
-    def check_time_dm(self, ind, injpar):
+    def check_time_dm(self, ind, injpar, injdic):
         # for each crossmatched INJ signal, check if their time/dm are in tolerant range
         # if not, remove this row and save to injection file 
                 
-        outd = pd.merge(ind, injpar[['name', 'tsamps', 'dm', 'snr']], left_on='INJ_name', right_on='name', 
+        outd = pd.merge(ind, injpar[['name', 'total_sample', 'dm_pccm3', 'snr']], left_on='INJ_name', right_on='name', 
                         sort=False, how='outer', suffixes=("", '_inj'))
 
         outd['INJ_name'] = outd['name']
 
-        ind_time = (outd['tsamps'] - outd['total_sample']).abs() > self.pipeline.config['inject_tol']['tsmaps']
-        ind_dm = (outd['dm'] - outd['dm_inj']).abs() > self.pipeline.config['inject_tol']['dm']
+        ind_time = (outd['total_sample_inj'] - outd['total_sample']).abs() > self.pipeline.config['inject_tol']['tsmaps']
+        ind_dm = (outd['dm_pccm3_inj'] - outd['dm_pccm3']).abs() > self.pipeline.config['inject_tol']['dm_pccm3']
 
         idx = ind_time | ind_dm
 
@@ -148,11 +158,11 @@ class Step(ProcessingStep):
         outd.loc[idx, 'INJ_sep'] = None
 
         # put those rows with INJ_name into another file
-        injdic = outd[ ~outd['INJ_name'].isna() ]
+        injdic = pd.concat([injdic, outd[ ~outd['INJ_name'].isna() ] ], ignore_index=True)
         outd = outd[ outd['INJ_name'].isna() ]
 
         # remove injpar dic
-        outd = outd.drop(columns=['name', 'tsamps', 'dm_inj', 'snr', 'INJ_name', 'INJ_sep'])
+        outd = outd.drop(columns=['name', 'total_sample_inj', 'dm_pccm3_inj', 'snr', 'INJ_name', 'INJ_sep'])
         injdic = injdic.drop(columns=['name'])
 
         return outd, injdic
