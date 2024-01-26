@@ -1,5 +1,5 @@
 from craco import uvfits_meta
-from craco.uvfits_writer import UvfitsWriter
+from craco.uvfits_writer import UvfitsWriter, copy_visparams_to_visrow
 import numpy as np
 import argparse
 
@@ -16,8 +16,23 @@ def main(args):
     of.copy_header()
 
     for iblk, visout in enumerate(f.fast_raw_blocks(nsamp = nsamps_to_read, nt = 1, raw_date=True)):
+        data_block = f.convert_visrows_into_block(visout)
+        modified_data = data_block.copy()
+        modified_visdata = f.convert_block_into_visrows(modified_data)
+        print(modified_data.shape,modified_visdata.shape,  modified_visdata["DATA"].squeeze().flatten().shape)
+        print(data_block.shape, data_block.squeeze().flatten().shape)
+        assert np.all(modified_visdata["DATA"].squeeze().flatten() == data_block.squeeze().flatten())
+        UU = visout['UU'].flatten()
+        VV = visout['VV'].flatten()
+        WW = visout['WW'].flatten()
+        DATE = visout['DATE'].flatten()
+        BASELINE = visout['BASELINE'].flatten()
+        FREQSEL = visout['FREQSEL'].flatten()
+        SOURCE = visout['SOURCE'].flatten()
+        INTTIM = visout['INTTIM'].flatten()
+        visout = copy_visparams_to_visrow(modified_visdata, UU, VV, WW, DATE, BASELINE, FREQSEL, SOURCE, INTTIM)
         of.write_visrows_to_disk(visout)
-    
+
     of.update_header()
     of.write_header()
     of.close_file(fix_length = True)

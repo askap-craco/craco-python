@@ -59,6 +59,18 @@ def convert_blockbl_to_visdata(blockbl):
 
     return visdata
 
+def copy_visparams_to_visrow(visrows, UU, VV, WW, DATE, BASELINE, FREQSEL, SOURCE, INTTIM):
+    assert visrows.size(axis=0) == UU.size
+    visrows['UU'] = UU
+    visrows['VV'] = VV
+    visrows['WW'] = WW
+    visrows['DATE'] = DATE
+    visrows['BASELINE'] = BASELINE
+    visrows['FREQSEL'] = FREQSEL
+    visrows['SOURCE'] = SOURCE
+    visrows['INTTIM'] = INTTIM
+    return visrows
+
 
 '''
 class UvfitsReader:
