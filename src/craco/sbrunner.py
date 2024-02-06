@@ -15,6 +15,7 @@ import subprocess
 from askap.iceutils import get_service_object
 from askap.slice import SchedulingBlockService
 from craco.askap.craft.obsman.sbstatemonitor import SBStateSubscriber
+import Ice
 
 # pylint: disable-msg=E0611
 import askap.interfaces as iceint
@@ -69,9 +70,27 @@ def _main():
     else:
         logging.basicConfig(level=logging.INFO)
 
+    # mannaully get a communicator here
+    host = 'icehost-mro.atnf.csiro.au'
+    port = 4061
+    timeout_ms = 5000
+    default_loc = "IceGrid/Locator:tcp -h " + host + " -p " + str(port) + " -t " + str(timeout_ms)
+
+    init = Ice.InitializationData()
+    init.properties = Ice.createProperties()
+    if "ICE_CONFIG" not in os.environ:
+        loc = default_loc
+    else:
+        ice_cfg_file = os.environ['ICE_CONFIG']
+        ice_parset = ParameterSet(ice_cfg_file)
+        loc = ice_parset.get_value('Ice.Default.Locator', default_loc)
+
+    init.properties.setProperty('Ice.Default.Locator', loc)
+    _communicator = Ice.initialize(init)
+    
     cmd = values.cmd
     runner = SBRunner(None, cmd)
-    state = SBStateSubscriber(None, runner)
+    state = SBStateSubscriber(_communicator, runner)
     try:        
         state.ice.waitForShutdown()
     except KeyboardInterrupt:
