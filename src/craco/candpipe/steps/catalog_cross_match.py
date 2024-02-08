@@ -63,8 +63,9 @@ class Step(ProcessingStep):
         log.debug('Got %d candidates type=%s, columns=%s', len(ind), type(ind), ind.columns)
         config = self.pipeline.config 
 
-        # get mean ra and dec from candidates file for further clustering 
-        ra, dec = ind['ra_deg'].mean(), ind['dec_deg'].mean()
+        # get median ra and dec from candidates file for further clustering 
+        ra, dec = ind['ra_deg'].median(), ind['dec_deg'].median()
+        log.debug('Find median coordinates for this field is %s %s', ra, dec)
         
         # select catalogue objects located within the observation field of view 
         for i, catpath in enumerate(config['catpath']):
@@ -76,6 +77,7 @@ class Step(ProcessingStep):
                                               racol=config['catcols']['ra'][i], 
                                               deccol=config['catcols']['dec'][i])
 
+            log.debug('Found %s sources within %s degree radius in %s', len(catdf), config['filter_radius'], catpath)
             log.debug('Starting in-field sources crossmatch %s', catpath)
 
             outd = self.cross_matching(candidates=ind, 
