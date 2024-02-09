@@ -1,6 +1,7 @@
 from astropy.io import fits
 import numpy as np
 from craco import fixuvfits, uvfits_meta
+from craft import uvfits
 import logging
 
 log = logging.getLogger(__name__)
@@ -138,7 +139,7 @@ class UvfitsWriter:
             uvsource = self.uvr
             if not self.uvr:
                 raise ValueError("I need a uvsource or an infile to be able to copy tables from")
-        assert isinstance(uvsource, uvfits_meta.UvfitsMeta)
+        assert isinstance(uvsource, uvfits_meta.UvfitsMeta) or isinstance(uvsource, uvfits.UvFits), f"Uvsource is of type {type(uvsource)}"
 
         fout = fits.open(self.outname, 'append')
 
