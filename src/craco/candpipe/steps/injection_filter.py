@@ -158,7 +158,7 @@ class Step(ProcessingStep):
         outd.loc[idx, 'INJ_sep'] = None
 
         # put those rows with INJ_name into another file
-        injdic = injdic.append(outd[ ~outd['INJ_name'].isna() ], ignore_index=True)
+        injdic = pd.concat([injdic, outd[ ~outd['INJ_name'].isna() ] ], ignore_index=True)
         outd = outd[ outd['INJ_name'].isna() ]
 
         # remove injpar dic

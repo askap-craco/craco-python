@@ -61,7 +61,7 @@ def convert_blockbl_to_visdata(blockbl):
     return visdata
 
 def copy_visparams_to_visrow(visrows, UU, VV, WW, DATE, BASELINE, FREQSEL, SOURCE, INTTIM):
-    assert visrows.size == UU.size
+    assert visrows.size == UU.size, f"{visrows.size}, {UU.size}"
     visrows['UU'] = UU
     visrows['VV'] = VV
     visrows['WW'] = WW

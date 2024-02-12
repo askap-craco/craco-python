@@ -36,7 +36,7 @@ def main(args):
     
     for iblk, visout in enumerate(f.fast_raw_blocks(nsamp = nsamps_to_read, nt = 1, raw_date=True)):
         data_block = f.convert_visrows_into_block(visout)
-        print(f"Shape of data_block is {data_block.shape}")
+        #print(f"Shape of data_block is {data_block.shape}")
         #modified_data = data_block.copy()
         if args.calib:
             data_block = calibrator.apply_calibration(data_block[:, 0, 0, 0, :, 0, :])
@@ -46,8 +46,7 @@ def main(args):
             data_block = preprocess.fill_masked_values(data_block, fill_value = 0)
             data_block = ddp.dedisperse(iblk, inblock=data_block)
 
-        #print(f"Shape of data_block after processing is {data_block.shape}, type is {type(data_block)}, mask is {data_block.mask}")
-
+        #print(f"Shape of data_block after processing is {data_block.shape}, type is {type(data_block)}")#, mask is {data_block.mask}")
         modified_visdata = f.convert_block_into_visrows(data_block)
         UU = visout['UU'].flatten()
         VV = visout['VV'].flatten()
