@@ -149,7 +149,7 @@ class CandidateWriter:
         candidates['iblk'] = iblk
         tsamp_s = plan.tsamp_s.value
         candidates['obstime_sec'] = candidates['total_sample'] * tsamp_s
-        candidates['mjd'] = first_tstart.utc.mjd + candidates['obstime_sec'] / 3600 / 24
+        candidates['mjd'] = first_tstart.utc.mjd + candidates['obstime_sec'].astype(self.out_dtype['mjd']) / 3600 / 24
         dmdelay_ms = rawcands['dm'] * tsamp_s * 1e3
         candidates['dm_pccm3'] = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
         coords = plan.wcs.pixel_to_world(candidates['lpix'], candidates['mpix'])
