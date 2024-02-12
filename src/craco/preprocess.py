@@ -472,7 +472,7 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
+        if type(inblock) in [np.ndarray]:       #I removed the support for numpy.maksed_array on 12 Feb 2024, but I should add it back"
             block = inblock
         else:
             raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
@@ -483,6 +483,9 @@ class Dedisp:
             history_shape = tuple(history_shape)
 
             self.dm_history = np.zeros(history_shape, dtype=block.dtype)
+       
+        if self.dm == 0:
+            return inblock
 
         attached_block = np.concatenate([self.dm_history, block], axis=-1)
         rolled_block = np.zeros_like(attached_block)
