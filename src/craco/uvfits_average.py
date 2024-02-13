@@ -1,6 +1,7 @@
 from craco import uvfits_meta
 from craco.uvfits_writer import UvfitsWriter, copy_visparams_to_visrow
 import argparse
+import numpy as np
 
 def main(args):
     assert args.tend >= args.tstart
@@ -71,7 +72,7 @@ def main(args):
                 avg_block /= nsum
             
             #Convert the block back into visrows
-            avg_visout = f.convert_block_to_visrows(avg_block)
+            avg_visout = f.convert_block_into_visrows(avg_block)
             #Add the visparams to the converted visrows
             avg_visout = copy_visparams_to_visrow(avg_visout, avg_vis['UU'], avg_vis['VV'], avg_vis['WW'], avg_vis['DATE'], avg_vis['BASELINE'], avg_vis['FREQSEL'], avg_vis['SOURCE'], avg_vis['INTTIM'])
 
