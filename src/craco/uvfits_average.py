@@ -26,22 +26,31 @@ def main(args):
         if avg_vis is None:
             #Load the current vis and block as Averaged vis and blocks
             avg_vis = visout
-            avg_block = this_block.filled(fill_value = 0)
-
-            #Setup the coutner for the number of valid elements averaged in data
-            nsum = np.zeros(avg_block.shape, dtype='uint32') + ~this_block.mask
             navg = 1
+
+            if args.mask_conservatively:
+                #mask_conservatively implies that we want the sum to be masked if any of the elements are masked. 
+                #Therefore, we keep the avg_block as a masked array, and when we add a masked element, the whole output gets masked
+                avg_block = this_block
+            else:
+                #Otherwise, we convert to a regular array, but we have to keep track of how many unmasked elements have we added
+                avg_block = this_block.filled(fill_value = 0)
+                #Setup the coutner for the number of valid elements averaged in data
+                nsum = np.zeros(avg_block.shape, dtype='uint32') + ~this_block.mask
         else:
             #Add all the elements that need to be modified
             for element in elements_to_modify:
                 avg_vis[element] += visout[element]
             
-            #Add up the data elements
-            avg_block += this_block.filled(fill_value = 0)
-
-            #Add up the valid element counter
-            nsum += ~this_block.mask
             navg += 1
+
+            #Add up the data elements
+            if args.mask_conservatively:
+                avg_block += this_block
+            else:
+                avg_block += this_block.filled(fill_value = 0)
+                nsum += ~this_block.mask
+
 
         #If we have added up args.tx samples - 
         if navg == args.tx:
@@ -53,7 +62,13 @@ def main(args):
             avg_vis['INTTIM'] = navg * visout['INTTIM']
 
             #Divide the data by the number of valid elements added
-            avg_block /= nsum
+            if args.mask_conservatively:
+                #For sections of data averaged which had even a single element masked, the output would be masked too,
+                #So it doesn't really matter what you divide by here. This only matters for sections which had all 
+                #good elements in it, so you would want to divide by the full length of the section, which is given by navg.
+                avg_block /= navg
+            else:
+                avg_block /= nsum
             
             #Convert the block back into visrows
             avg_visout = f.convert_block_to_visrows(avg_block)
@@ -84,6 +99,7 @@ if __name__ == '__main__':
     a.add_argument("uvpath", type=str, help="Path to the uvfits file to extract from")
     a.add_argument("-metadata", type=str, help="Path to the metadata file")
     a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
+    a.add_argument("-mask_conservatively", action='store_true', help="Mask the output if any of the inputs are masked? (def=False)", default=False)
     a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
     a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:1)", default = 1)
     a.add_argument("-tx", type=int, help="Averaging factor (int)", default= None, required = True)
