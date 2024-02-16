@@ -69,7 +69,9 @@ def main(args):
                 #good elements in it, so you would want to divide by the full length of the section, which is given by navg.
                 avg_block /= navg
             else:
-                avg_block /= nsum
+                valid = nsum > 0
+                avg_block[~valid] = 0
+                avg_block[valid] /= nsum[valid]
             
             #Convert the block back into visrows
             avg_visout = f.convert_block_into_visrows(avg_block)
