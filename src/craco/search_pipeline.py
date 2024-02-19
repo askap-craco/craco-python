@@ -32,7 +32,7 @@ from craco import write_psf as PSF
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
 from collections import OrderedDict
-from trace_event_handler import TraceEventHandler
+#from trace_event_handler import TraceEventHandler
 from astropy import units
 
 import logging
@@ -40,8 +40,8 @@ import warnings
 
 DM_CONSTANT = 4.15 # milliseconds and GHz- Shri Kulkarni will kill me
 
-handler = TraceEventHandler()
-logging.basicConfig(handlers=[logging.StreamHandler(None), handler], level=logging.INFO)
+#handler = TraceEventHandler()
+#logging.basicConfig(handlers=[logging.StreamHandler(None), handler], level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
