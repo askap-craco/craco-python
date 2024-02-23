@@ -14,9 +14,10 @@ if [[ ! -f $uvfits ]] ; then
 fi
 
 rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
+metafile=$rootdir/../../../SB*.json.gz
 
 source /home/craftop/.conda/.remove_conda.sh
 source /home/craftop/.conda/.activate_conda.sh
 conda activate craco
 
-uvfits_average $uvfits $@
+uvfits_average $uvfits -metadata $metafile $@
