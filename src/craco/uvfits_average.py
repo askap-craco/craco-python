@@ -11,7 +11,7 @@ def get_parser():
     a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
     a.add_argument("-mask_conservatively", action='store_true', help="Mask the output if any of the inputs are masked? (def=False)", default=False)
     a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
-    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:1)", default = 1)
+    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:-1)", default = -1)
     a.add_argument("-tx", type=int, help="Averaging factor (int)", default= None, required = True)
     a.add_argument("-outname", type=str, help="Name of the output file", default=None)
 
