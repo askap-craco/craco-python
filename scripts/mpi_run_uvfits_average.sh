@@ -17,6 +17,6 @@ rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
 
 source /home/craftop/.conda/.remove_conda.sh
 source /home/craftop/.conda/.activate_conda.sh
-conda activate calib
+conda activate craco
 
 uvfits_average $uvfits $@
