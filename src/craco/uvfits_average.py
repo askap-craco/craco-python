@@ -3,7 +3,23 @@ from craco.uvfits_writer import UvfitsWriter, copy_visparams_to_visrow
 import argparse
 import numpy as np
 
-def main(args):
+
+def get_parser():
+    a = argparse.ArgumentParser()
+    a.add_argument("uvpath", type=str, help="Path to the uvfits file to extract from")
+    a.add_argument("-metadata", type=str, help="Path to the metadata file")
+    a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
+    a.add_argument("-mask_conservatively", action='store_true', help="Mask the output if any of the inputs are masked? (def=False)", default=False)
+    a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
+    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:1)", default = 1)
+    a.add_argument("-tx", type=int, help="Averaging factor (int)", default= None, required = True)
+    a.add_argument("-outname", type=str, help="Name of the output file", default=None)
+
+    args = a.parse_args()
+    return args
+
+def main():
+    args = get_parser()
     assert args.tend >= args.tstart
     nsamps_to_read = args.tend - args.tstart + 1
     f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
@@ -98,15 +114,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-    a = argparse.ArgumentParser()
-    a.add_argument("uvpath", type=str, help="Path to the uvfits file to extract from")
-    a.add_argument("-metadata", type=str, help="Path to the metadata file")
-    a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
-    a.add_argument("-mask_conservatively", action='store_true', help="Mask the output if any of the inputs are masked? (def=False)", default=False)
-    a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
-    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:1)", default = 1)
-    a.add_argument("-tx", type=int, help="Averaging factor (int)", default= None, required = True)
-    a.add_argument("-outname", type=str, help="Name of the output file", default=None)
+    main()
 
-    args = a.parse_args()
-    main(args)
+
