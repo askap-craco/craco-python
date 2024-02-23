@@ -11,7 +11,7 @@ def get_parser():
     a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
     a.add_argument("-mask_conservatively", action='store_true', help="Mask the output if any of the inputs are masked? (def=False)", default=False)
     a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
-    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:1)", default = 1)
+    a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:-1)", default = -1)
     a.add_argument("-tx", type=int, help="Averaging factor (int)", default= None, required = True)
     a.add_argument("-outname", type=str, help="Name of the output file", default=None)
 
@@ -20,9 +20,18 @@ def get_parser():
 
 def main():
     args = get_parser()
-    assert args.tend >= args.tstart
-    nsamps_to_read = args.tend - args.tstart + 1
+    if args.tend > 0:
+        assert args.tend >= args.tstart, f"tend {args.tend} needs to be >= tstart {args.tstart}"
     f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
+
+    if args.tend == -1:
+        tend = f.nsamps-1
+    elif args.tend > 0:
+        tend = args.tend
+    else:
+        raise ValueError(f"Invalid tend - {args.tend}")
+
+    nsamps_to_read = tend - args.tstart + 1
 
     if args.outname:
         outname = args.outname
@@ -101,7 +110,7 @@ def main():
             avg_vis = None
             avg_block = None
         
-        if iblk >= args.tend - args.tstart:
+        if iblk >= tend - args.tstart:
             break
             #This break means that the last set of samples which did not add up tx times will be left out from the output file
 
