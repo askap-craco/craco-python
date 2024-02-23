@@ -25,7 +25,7 @@ def main():
     f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
 
     if args.tend == -1:
-        tend = f.nsamps-1
+        tend = f.nsamps-5
     elif args.tend > 0:
         tend = args.tend
     else:
