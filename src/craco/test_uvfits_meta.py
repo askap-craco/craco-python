@@ -417,6 +417,19 @@ def test_fast_time_blocks_masks_ok(f1):
     print('Number of flags', np.sum(d2.mask))
     assert np.all(d2.mask == False)
 
+def test_before_and_after_flags_vis_equal():
+    skip = 1
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile, skip_blocks=skip)
+    raw_nbl = f2.raw_nbl
+    nbl = f2.nbl
+    v1 = f2.vis[0:raw_nbl]
+    
+    f2.set_flagants(flag_ants_1based)
+
+    v2 = f2.vis[0:raw_nbl]
+    assert raw_nbl == f2.raw_nbl
+    assert np.all(v1==v2)
+
     
 
 

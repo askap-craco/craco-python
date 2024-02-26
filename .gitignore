@@ -1,3 +1,31 @@
+# Rubbish that CRACO pipelines leave around
+perf.data*
+*.npy
+*.pickle
+*.fits
+*.fil
+*.bin
+lut.txt
+header.txt
+*.calc
+*.im
+header*.txt
+*.cand
+*.rank
+
+# Validation dadta - I really which I knew waht to do with this.
+notebooks/data
+
+# Miriad files
+*.def
+*.mir
+
+# Virtual environments
+venv*/
+
+
+
+
 # Emacs and other backups
 *~
 *.bak
