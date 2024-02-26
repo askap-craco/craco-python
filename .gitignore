@@ -1,8 +1,10 @@
 # Rubbish that CRACO pipelines leave around
 perf.data*
 *.npy
+*.npz
 *.pickle
 *.fits
+*.uvfits
 *.fil
 *.bin
 lut.txt
@@ -12,6 +14,11 @@ header.txt
 header*.txt
 *.cand
 *.rank
+
+# visual stdio stuff
+.vscode
+
+# 
 
 # Validation dadta - I really which I knew waht to do with this.
 notebooks/data
