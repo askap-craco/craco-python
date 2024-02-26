@@ -2,7 +2,7 @@ from . import calibration
 from iqrm import iqrm_mask
 import numpy as np
 from craft.craco import bl2ant, bl2array
-
+from numba import njit
 
 def get_isMasked_nPol(block):
 
@@ -113,7 +113,6 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
-
 def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N, calsoln, target_input_rms, sky_sub = False, reset_scales = False, input_mask = None):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
@@ -200,6 +199,7 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
 
                     if target_input_rms is None and not sky_sub:
                         #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
+                        #print(f"shapes of output_buf = {output_buf.shape}, cal_data = {cal_data.shape}")
                         output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp * cal_data[i_bl, i_f]
 
             if target_input_rms or sky_sub:
