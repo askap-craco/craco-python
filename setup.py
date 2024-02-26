@@ -105,6 +105,7 @@ if __name__ == '__main__':
                                 'summarise_cands=craco.summarise_cands:_main',
                                 'metadatasaver=craco.askap.craft.obsman.metadatasaver:_main',
                                 'quicksnip=craco.quicksnip:_main',
+                                'uvfits_average=craco.uvfits_average:main',
                                 'sbrunner=craco.sbrunner:_main',
                                 
             ],
