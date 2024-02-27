@@ -96,8 +96,6 @@ class Step(ProcessingStep):
 
         # save the candidates file
         outd = self.save_back_candfile(ind, alias_df)
-
-        # outd = self.alias_filtering(ind, wcs_info, radius, threshold)
         
         # apply command line argument for minimum S/N and only return those values
         #if self.pipeline.args.cluster_min_sn is not None:
@@ -117,33 +115,23 @@ class Step(ProcessingStep):
         return wcs_info
 
 
-    # def get_source_coords(self, alias_lpix, alias_mpix, wcs_info):
-    #     # Get the pixel values for all possible source locations and convert them to RA and Dec
-    #     pixels = [((int(alias_lpix + wcs_info.array_shape[0])), int(alias_mpix)), 
-    #             (int(alias_lpix - wcs_info.array_shape[0]), int(alias_mpix)),
-    #             (int(alias_lpix), int(alias_mpix + wcs_info.array_shape[1])),
-    #             (int(alias_lpix), int(alias_mpix - wcs_info.array_shape[1])),
-    #             (int(alias_lpix + wcs_info.array_shape[0]), int(alias_mpix + wcs_info.array_shape[1])),
-    #             (int(alias_lpix - wcs_info.array_shape[0]), int(alias_mpix - wcs_info.array_shape[1])),
-    #             (int(alias_lpix + wcs_info.array_shape[0]), int(alias_mpix - wcs_info.array_shape[1])),
-    #             (int(alias_lpix - wcs_info.array_shape[0]), int(alias_mpix + wcs_info.array_shape[1]))]
+    def get_source_coords(self, ra, dec):
+        # Get FoV (in degree)
+        # make it works for a list of ra and dec 
+        ra_fov = np.abs(self.pipeline.psf_header['NAXIS1'] * self.pipeline.psf_header['CDELT1'])
+        dec_fov = np.abs(self.pipeline.psf_header['NAXIS2'] * self.pipeline.psf_header['CDELT2'])
 
-    #     coords = [wcs_info.pixel_to_world(*pixels[i]) for i in range(len(pixels))]
+        ra, dec = np.array(ra, dtype=float), np.array(dec, dtype=float)
+
+        xrr = ra_fov / np.cos(dec/180*np.pi)
+        yrr = dec_fov
+
+        ra_alias = list(ra+xrr) + list(ra) + list(ra-xrr) + list(ra+xrr) + \
+                     list(ra-xrr) + list(ra+xrr) + list(ra) + list(ra-xrr)
+        dec_alias = list(dec+yrr) + list(dec+yrr) + list(dec+yrr) + list(dec) + \
+                    list(dec) + list(dec-yrr) + list(dec-yrr) + list(dec-yrr)
         
-    #     return coords
-
-    def get_source_coords(self, lpix, mpix):
-        # Get the pixel values for all possible source locations and convert them to RA and Dec
-        # make it works for a list of lpix/mpix
-        xp, yp = self.pipeline.wcs_info.array_shape[0], self.pipeline.wcs_info.array_shape[1]
-        lpix, mpix = np.array(lpix, dtype=int), np.array(mpix, dtype=int)
-
-        lpixlist = list(lpix+xp) + list(lpix) + list(lpix-xp) + list(lpix+xp) + \
-                     list(lpix-xp) + list(lpix+xp) + list(lpix) + list(lpix-xp)
-        mpixlist = list(mpix+yp) + list(mpix+yp) + list(mpix+yp) + list(mpix) + \
-                    list(mpix) + list(mpix-yp) + list(mpix-yp) + list(mpix-yp)
-        
-        return lpixlist, mpixlist
+        return ra_alias, dec_alias
 
 
     def get_possible_alias_candidates(self, df):
@@ -158,17 +146,13 @@ class Step(ProcessingStep):
         log.debug("%s candidates do not have cross-matched sources - continue to alias filtering...", sum(unknown_idx))
         
         # calculate their alias location 
-        lpixlist, mpixlist = self.get_source_coords(unknown_df['lpix'], unknown_df['mpix'])
-        log.debug("obtained %s possible alias position", len(lpixlist))
-
-        # get their skycoord
-        coords = self.pipeline.wcs_info.pixel_to_world(lpixlist, mpixlist)
+        ra_alias, dec_alias = self.get_source_coords(unknown_df['ra_deg'], unknown_df['dec_deg'])
+        log.debug("obtained %s possible alias position", len(ra_alias))
 
         # create a new alias DataFrame 
         alias_df = pd.DataFrame()
-        alias_df['ra_deg'] = coords.ra.deg
-        alias_df['dec_deg'] = coords.dec.deg
-        # alias_df['idx'] = list(unknown_df['idx']) * 8
+        alias_df['ra_deg'] = ra_alias
+        alias_df['dec_deg'] = dec_alias
         alias_df['idx'] = list(unknown_df.index) * 8
 
         return alias_df
@@ -204,86 +188,6 @@ class Step(ProcessingStep):
         return df
 
 
-
-
-
-    # def filter_cat(self, alias_coord, radius):
-    #     # Calculate the coordinates at a separation of radius degrees
-    #     coord1 = alias_coord.directional_offset_by(0*u.degree, radius*u.degree)
-    #     coord2 = alias_coord.directional_offset_by(90*u.degree, radius*u.degree)
-    #     coord3 = alias_coord.directional_offset_by(180*u.degree, radius*u.degree)
-    #     coord4 = alias_coord.directional_offset_by(270*u.degree, radius*u.degree)
-        
-    #     # Define the maximum and minimum RA and Dec values from coordinates
-    #     max_ra = coord2.ra.deg
-    #     min_ra = coord4.ra.deg
-    #     max_dec = coord1.dec.deg
-    #     min_dec = coord3.dec.deg
-        
-    #     # Load the source catalogue dataframe
-    #     df_source = pd.read_csv(self.pipeline.config["catpath_alias"])
-
-    #     # Perform boolean indexing
-    #     if (max_ra > min_ra) and (abs(max_dec - min_dec) > 2):
-    #         filtered_df_source = df_source[((df_source['RA'] <= max_ra) & (df_source['RA'] >= min_ra)) 
-    #                                 & (df_source['Dec'] <= max_dec) & (df_source['Dec'] >= min_dec)]
-    #     elif (max_ra < min_ra) and (abs(max_dec - min_dec) > 2):
-    #         filtered_df_source = df_source[((df_source['RA'] <= max_ra) | (df_source['RA'] >= min_ra)) 
-    #                                     & (df_source['Dec'] <= max_dec) & (df_source['Dec'] >= min_dec)]
-    #     elif (max_ra > min_ra) and (abs(max_dec - min_dec) < 2):
-    #         filtered_df_source = df_source[((df_source['RA'] <= max_ra) & (df_source['RA'] >= min_ra))]
-    #     else:
-    #         filtered_df_source = df_source[((df_source['RA'] <= max_ra) | (df_source['RA'] >= min_ra))]
-        
-    #     # Get the SkyCoords of the filtered source catalogue
-    #     ref_coord = SkyCoord(ra=filtered_df_source['RA'].values, dec=filtered_df_source['Dec'].values, unit=u.degree)
-        
-    #     return filtered_df_source, ref_coord
-
-
-    # def alias_filtering(self, df, wcs_info, radius, threshold):
-    #     # Read the candidate file and get the candidates and their lpix and mpix values, 
-    #     # and filter out all candidates that are not possible aliases
-    #     df["Full Index"] = range(1, len(df)+1)
-    #     df['Alias'] = None
-    #     df['Alias_source'] = None
-    #     df['Alias_sep'] = None
-        
-    #     alias_df = df[(df['SNR'] > 8) & (df['PSR_name'].isna()) & (df['RACS_name'].isna()) & (df['NEW_name'].isna())]
-
-    #     # Loop through each possible alias in the candidate file
-    #     for i in range(len(alias_df)):
-            
-    #         # Get the SkyCoord of the alias
-    #         alias_lpix, alias_mpix = alias_df.iloc[i]['lpix'], alias_df.iloc[i]['mpix']
-    #         alias_coord = wcs_info.pixel_to_world(alias_lpix, alias_mpix)
-
-    #         # Get the SkyCoords of all possible source locations
-    #         coords = self.get_source_coords(alias_lpix, alias_mpix, wcs_info)
-
-    #         # Get the SkyCoords of all sources from the filtered source catalogue
-    #         filtered_df_source, ref_coord = self.filter_cat(alias_coord, radius)
-
-    #         # Perform crossmatching
-    #         idx, sep, _ = zip(*[coords[i].match_to_catalog_sky(ref_coord) for i in range(len(coords))])
-            
-    #         # Get the minimum separation and the index of the source with the minimum separation
-    #         min_sep = min(sep)
-    #         min_idx = idx[np.argmin(sep)]
-
-    #         # Print the results of the crossmatching and the possible source of the alias
-    #         if min_sep.arcsec <= threshold:
-    #             log.info(f"Alias at {(alias_lpix, alias_mpix)}. Possible source of aliasing: {filtered_df_source.iloc[min_idx]['Name']} at RA: {filtered_df_source.iloc[min_idx]['RA']}, Dec: {filtered_df_source.iloc[min_idx]['Dec']} and a separation of {float(min_sep.arcsec):.5f} arcsec")
-    #             df.loc[df['Full Index'] == alias_df.iloc[i]['Full Index'], 'Alias'] = True
-    #             df.loc[df['Full Index'] == alias_df.iloc[i]['Full Index'], 'Alias_source'] = filtered_df_source.iloc[min_idx]['Name']
-    #             df.loc[df['Full Index'] == alias_df.iloc[i]['Full Index'], 'Alias_sep'] = min_sep.arcsec
-    #         else:
-    #             print(f"No source found within {threshold} arcsec of alias")
-    #             df.loc[df['Full Index'] == alias_df.iloc[i]['Full Index'], 'Alias'] = False
-
-    #     return df
-
-    
 
     def close(self):
         pass
