@@ -206,7 +206,7 @@ class UvfitsMeta(uvfits.UvFits):
         return coord
     
 def open(*args, **kwargs):
-    logging.info('Opening file %s', args[0])
+    logging.info('Opening uvfits_meta %s %s', args, kwargs)
     mfile = kwargs.get('metadata_file', None)
     if mfile is None:
         if 'metadata_file' in kwargs.keys():
@@ -216,7 +216,7 @@ def open(*args, **kwargs):
         # it won't work for as it relies on all the machinery to overwrite UVWs which is only in metadata 
         # file at the moment.
         if 'calc11' in kwargs.keys():
-            del kwargs['calc11']
+            raise ValueError('Sorry we dont yet know how to do calc11 without a metadata file. long story')
 
         x = uvfits.open(*args, **kwargs)
     else:
