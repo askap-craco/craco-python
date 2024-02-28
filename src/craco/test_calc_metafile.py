@@ -79,6 +79,8 @@ def test_scanprep_and_metafile(mfstub):
     except FileNotFoundError:
         pass
 
+    os.makedirs(dout, exist_ok=True)
+
     nbeams = 36
     beam = 0
     prep = ScanPrep.create_from_metafile_and_fcm(mfstub, fcmfile, dout, duration=15*u.minute)
