@@ -5,7 +5,7 @@ import numpy as np
 import argparse
 
 def main(args):
-    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
+    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks, calc11=args.calc11)
 
     if args.tend == -1:
         tend = f.nsamps -1
@@ -82,6 +82,7 @@ if __name__ == '__main__':
     a = argparse.ArgumentParser()
     a.add_argument("uvpath", type=str, help="Path to the uvfits file to extract from")
     a.add_argument("-metadata", type=str, help="Path to the metadata file")
+    a.add_argument("--calc11", action='store_true', help="Use calc11 to compute UVWs (instead of reading it from metedata) (def:False)", default=False)
     a.add_argument("-apply-metadata-masks", type=bool, help="Apply metadata masks? (def=True)", default=True)
     a.add_argument("-tstart", type=int, help="Tstart in samples (def:0)", default=0)
     a.add_argument("-tend", type=int, help="Tend in samples (inclusive) (def:-1)", default = -1)
