@@ -24,7 +24,7 @@
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 # pylint: disable-msg=W0611
-from .metadatasubscriber import MetadataSubscriber
+from .metadatasubscriber import MetadataSubscriber, metadata_to_dict
 from .sbstatemonitor import SBStateSubscriber
 from askap.parset import parset_to_dict
 from askap import logging
@@ -41,42 +41,10 @@ import gzip
 
 logger = logging.getLogger(__name__)
 
-def coerceice(v):
-    if isinstance(v.value, Direction):
-        vout = (v.value.coord1, v.value.coord2, str(v.value.sys))
-    elif v.type == TypedValueType.TypeDirectionSeq:
-        vout = [(c.coord1, c.coord2, str(c.sys)) for c in v.value]
-    else:
-        vout = v.value
-
-    return vout
-
-class MetadataSaver(iceint.schedblock.ISBStateMonitor,
-                   iceint.datapublisher.ITimeTaggedTypedValueMapPublisher):
-    """The Craft Manager application class.
-
-    """
-    def __init__(self, comm, savedir="."):
-        self._sb = get_service_object(comm,
-                    "SchedulingBlockService@DataServiceAdapter",
-                    iceint.schedblock.ISchedulingBlockServicePrx)
-
-        sbmgr = self._sb
-        executing_block_ids = sbmgr.getByState([ObsState.EXECUTING], None)
-        print(('Got', len(executing_block_ids), 'Executing blocks', executing_block_ids))
+class FileWriterMetadataListener:
+    def __init__(self, savedir="."):
         self.fout = None
         self.savedir = savedir
-        if len(executing_block_ids) == 1:
-            self.changed(executing_block_ids[0], ObsState.EXECUTING, None,None)
-        else:
-            self.sbid = None
-            self.state = None
-
-
-        self.sb_sub = SBStateSubscriber(comm, self)
-        self.metadata_sub = MetadataSubscriber(comm, self)
-        self.ant_state_pvs = {}
-
 
     def open_file(self, sbid):
         if self.fout is not None:
@@ -93,9 +61,6 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
             print('Closed file', self.fout)
             self.fout = None
 
-    def __del__(self):
-        self.close_file()
-
     def changed(self, sbid, state, updated, old_state, current=None):
         '''Implements ISBStateMonitor
         Called when schedblock state changes
@@ -111,6 +76,63 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
             self.sbid = None
             self.close_file()
 
+    def publish(self, pub_data):
+        '''
+        Recieve metdadta.
+        d is a dictionary version of the metadata which is easier to digest in json
+        it also has the timestamp and sbid in it
+        '''            
+
+        if self.fout is not None:
+            try:
+                d = metadata_to_dict(pub_data, self.sbid)
+
+                jsons = json.dumps(d, sort_keys=True, indent=4)
+                json.dump(d, self.fout, sort_keys=True, indent=4)
+                self.fout.flush()
+            except Exception as e:
+                logger.error('Error writing data')
+                print('Error writing data', e)
+                self.close_file()
+            
+
+
+    def __del__(self):
+        self.close_file()
+
+
+class MetadataSaver(iceint.schedblock.ISBStateMonitor,
+                   iceint.datapublisher.ITimeTaggedTypedValueMapPublisher):
+    """The Craft Manager application class.
+
+    """
+    def __init__(self, comm, listener=None):
+        self._sb = get_service_object(comm,
+                    "SchedulingBlockService@DataServiceAdapter",
+                    iceint.schedblock.ISchedulingBlockServicePrx)
+
+        sbmgr = self._sb
+        executing_block_ids = sbmgr.getByState([ObsState.EXECUTING], None)
+        print(('Got', len(executing_block_ids), 'Executing blocks', executing_block_ids))
+        self.listener = listener
+
+        if len(executing_block_ids) == 1:
+            self.changed(executing_block_ids[0], ObsState.EXECUTING, None,None)
+        else:
+            self.sbid = None
+            self.state = None
+
+        self.sb_sub = SBStateSubscriber(comm, self)
+        self.metadata_sub = MetadataSubscriber(comm, self)
+
+    def changed(self, sbid, state, updated, old_state, current=None):
+        '''Implements ISBStateMonitor
+        Called when schedblock state changes
+        '''
+        print(('SB STATE CHANGED', sbid, state, updated, old_state, current))
+        if self.listener is not None:
+            self.listener.changed(sbid, state, updated, old_state, current)
+
 
     def publish(self, pub_data, current=None):
         '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher
@@ -121,45 +143,10 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
         if self.sbid is None:
             return
         
-        ts = pub_data.timestamp
-        data = pub_data.data
-        d = {}
-        d['timestamp'] = ts
-        d['sbid'] = self.sbid
-        ant_data = {}
-        d['antennas'] = ant_data
-        # Make new dictionary of vanilla python types and make it a hierarchy so it'll play nicer with JSON
-        for k,v in list(data.items()):
-            if k == 'antennas':
-                antennas = coerceice(v)
-            elif k.startswith('ak') or k.startswith('co'):
-                ksplit = k.split('.')
-                if len(ksplit) != 2:
-                    continue
-                    
-                antname, data_key = k.split('.')
-                if antname not in list(ant_data.keys()):
-                    ant_data[antname] = {}
-
-                ant_data[antname][data_key] = coerceice(v)
-            else:
-                d[k] = coerceice(v)
-
-        jsons = json.dumps(d, sort_keys=True, indent=4)
-        if self.fout is not None:
-            try:
-                json.dump(d, self.fout, sort_keys=True, indent=4)
-                self.fout.flush()
-            except Exception as e:
-                logger.error('Error writing data')
-                print('Error writing data', e)
-                self.close_file()
-            
-        #jout = json.dumps(d)
-
+        if self.listener is not None:
+            self.listener.publish(pub_data, current)
                 
                 
-
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -179,7 +166,8 @@ def _main():
     saver = None
 
     try:
-        saver = MetadataSaver(communicator,savedir)
+        listener = FileWriterMetadataListener(savedir)
+        saver = MetadataSaver(communicator,listener=listener)
         communicator.waitForShutdown()
     except Exception as ex:
         logger.exception('Error saving data')

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Template for making scripts to run from the command line
+Monitors scan metadata and tells you whether we should start or stop a scan
 
 Copyright (C) CSIRO 2022
 """
@@ -55,7 +55,7 @@ class ScanManager:
     def push_data(self, d):
         '''
         Push data into this ScanManager and update internal variables.
-    
+
 
         :returns: running - whether a scan can run or not.
 
@@ -70,6 +70,8 @@ class ScanManager:
         scan_unchanged  = all([s['scan_id'] == d['scan_id'] for s in mlist])
         mfile = MetadataFile(list(mlist))
         flags_unchanged = np.all(mfile.anyflag[np.newaxis,:] == mfile.anyflag[-1,])
+        scan_id =  mlist[-1]['scan_id']
+        scan_ok = scan_id >= 0
 
         antflags = mfile.anyflag[-1] # len=36, True if it's flagged
         antok = ~antflags
@@ -78,7 +80,7 @@ class ScanManager:
         frac_ok_ants = num_ok_ants / sum(self._ant_mask)
         flags_ok = frac_ok_ants  >= self._frac_onsource
         all_unchanged =  isfull and sbid_unchanged and scan_unchanged and flags_unchanged 
-        ok_to_run = flags_ok and all_unchanged
+        ok_to_run = flags_ok and all_unchanged and scan_ok
 
         #print(sum(antok), sum(ok_ants), frac_ok_ants, flags_ok, all_unchanged, ok_to_run)
         log.debug('Got %d/%d good ants. Frac OK=%d flags ok? %s all_unchanged=%s ok to run? %s running?', \
@@ -130,6 +132,10 @@ class ScanManager:
         else none
         '''
         return self._get_meta('scan_id')
+    
+    @property
+    def target_name(self):
+        return self._get_meta('target_name')
     
 
         

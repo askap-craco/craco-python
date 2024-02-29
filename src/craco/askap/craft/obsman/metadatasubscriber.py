@@ -33,11 +33,54 @@ from askap.slice import TypedValues
 # ice doesn't agree with pylint
 # pylint: disable-msg=E0611
 import askap.interfaces as iceint
+from askap.interfaces.schedblock import ObsState
+from askap.interfaces import Direction, TypedValueType
+from askap.iceutils import get_service_object
 from askap.interfaces.datapublisher import (ITimeTaggedTypedValueMapPublisher,
                                             ITimeTaggedTypedValueMapPublisherPrx)
 from askap.interfaces.datapublisher import (ITypedValueMapPublisher,
                                             ITypedValueMapPublisherPrx)
 
+def coerceice(v):
+    if isinstance(v.value, Direction):
+        vout = (v.value.coord1, v.value.coord2, str(v.value.sys))
+    elif v.type == TypedValueType.TypeDirectionSeq:
+        vout = [(c.coord1, c.coord2, str(c.sys)) for c in v.value]
+    else:
+        vout = v.value
+
+    return vout
+
+
+def metadata_to_dict(pub_data, sbid):
+    '''
+    Convert metadata into a dictionary suitable for JSON serialisation
+    '''
+    ts = pub_data.timestamp
+    data = pub_data.data
+    d = {}
+    d['timestamp'] = ts
+    d['sbid'] = sbid
+    ant_data = {}
+    d['antennas'] = ant_data
+    # Make new dictionary of vanilla python types and make it a hierarchy so it'll play nicer with JSON
+    for k,v in list(data.items()):
+        if k == 'antennas':
+            antennas = coerceice(v)
+        elif k.startswith('ak') or k.startswith('co'):
+            ksplit = k.split('.')
+            if len(ksplit) != 2:
+                continue
+                
+            antname, data_key = k.split('.')
+            if antname not in list(ant_data.keys()):
+                ant_data[antname] = {}
+
+            ant_data[antname][data_key] = coerceice(v)
+        else:
+            d[k] = coerceice(v)
+
+    return d
 
 # noinspection PyUnusedLocal,PyMethodMayBeStatic
 class MetadataImpl(ITimeTaggedTypedValueMapPublisher):

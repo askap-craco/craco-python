@@ -20,11 +20,46 @@ from astropy.time import Time
 from astropy import units as u
 from craco.metadatafile import MetadataFile
 from craco.calc_metafile import CalcMetafile
+import datetime
 
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
+def touchfile(f, directory=None, check_exists=True):
+    date = datetime.datetime.utcnow()
+    if directory is None:
+        fout = f
+    else:
+        fout = os.path.join(directory, f)
+
+    if check_exists and os.path.exists(fout):
+        raise ValueError(f'touchfile {fout} exists. Somehting bad has happend')
+    
+    with open(fout, 'w') as outfile:
+        outfile.write(date.isoformat() + '\n')
+
+    return fout
+
+
+def make_scan_directories(sbid, scanid, target, craco_data_dir=None):
+    if craco_data_dir is None:
+        craco_data_dir = os.environ['CRACO_DATA']
+
+    bigdir = craco_data_dir
+    now = datetime.datetime.utcnow()
+    nowstr = now.strftime('%Y%m%d%H%M%S')
+    scandir = os.path.join(bigdir, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
+    targetdir = os.path.join(bigdir, f'SB{sbid:06}', 'targets', target.replace(' ','_'))
+    targetlink = os.path.join(targetdir, nowstr)
+    os.makedirs(scandir)
+    os.makedirs(targetdir, exist_ok=True)
+    os.symlink(scandir, targetlink)
+    return scandir
+
+def first(x):
+    return next(iter(x))
 
 class ScanPrep:
     def __init__(self, targname:str, beam_phase_centers:SkyCoord, fcmfile:str, outdir:str, start:Time, stop:Time):
@@ -35,7 +70,7 @@ class ScanPrep:
         self.beam_phase_centers = beam_phase_centers
         self.fcmfile = fcmfile
         self.start = start
-        self.stop = stop
+        self.stop = stop    
 
     def save(self):
         os.makedirs(self.outdir, exist_ok=True)
@@ -69,13 +104,22 @@ class ScanPrep:
             raise FileNotFoundError()
 
     @staticmethod
-    def create_from_metafile_and_fcm(metafile, fcmfile, dout, duration=15*u.minute):
+    def create_from_metafile_and_fcm(metafile, fcmfile=None, dtop=None, duration=1*u.hour):
         if isinstance(metafile, str):
             metafile = MetadataFile(metafile)
+
+        if fcmfile is None:
+            fcmfile = os.environ['FCM']
+
+        sbid = metafile.sbid
+        scan_id = metafile.d0['scan_id']
             
         t0 = metafile.times[0]
         nbeams = metafile.nbeam
         targname = metafile.source_name_at_time(t0)
+
+        dout = make_scan_directories(sbid, scan_id, targname, dtop)
+
         sources = [metafile.source_at_time(b, t0) for b in range(nbeams)]
         phase_centers = [s['skycoord'] for s in sources]
         prep = ScanPrep(targname, phase_centers, fcmfile, dout, t0, t0+duration)
@@ -91,7 +135,7 @@ class ScanPrep:
         '''
         assert os.path.basename(metapath) == 'metafile.json'
         rootdir = os.path.dirname(metapath)
-        return ScanPrep.load(outdir)
+        return ScanPrep.load(rootdir)
 
     def calc_meta_file(self, ibeam):
         '''

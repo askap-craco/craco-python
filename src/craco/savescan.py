@@ -16,6 +16,7 @@ import shutil
 import time
 import signal
 import atexit
+from craco.prep_scan import touchfile
 
 log = logging.getLogger(__name__)
 
@@ -27,22 +28,6 @@ def mycaget(s):
         raise ValueError(f'PV {s} returned None')
     
     return r
-
-def touchfile(f, directory=None, check_exists=True):
-    date = datetime.datetime.utcnow()
-    if directory is None:
-        fout = f
-    else:
-        fout = os.path.join(directory, f)
-
-    if check_exists and os.path.exists(fout):
-        raise ValueError(f'touchfile {fout} exists. Somehting bad has happend')
-    
-    with open(fout, 'w') as outfile:
-        outfile.write(date.isoformat() + '\n')
-
-    return fout
-
 
 scandir = None # Yuck. 
 
@@ -76,24 +61,14 @@ def _main():
             format=lformat,
             datefmt='%Y-%m-%d %H:%M:%S')
 
-    scanid = mycaget('ak:md2:scanId_O')
-    sbid = mycaget('ak:md2:schedulingblockId_O')
-    target = mycaget('ak:md2:targetName_O')
-    fcmpath = os.environ['FCM']
-    bigdir = os.environ['CRACO_DATA']
-    
-    now = datetime.datetime.utcnow()
-    nowstr = now.strftime('%Y%m%d%H%M%S')
-    scandir = os.path.join(bigdir, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
-    targetdir = os.path.join(bigdir, f'SB{sbid:06}', 'targets', target.replace(' ','_'))
-    targetlink = os.path.join(targetdir, nowstr)
-    os.makedirs(scandir)
-    touchfile('SCAN_START', directory=scandir)
+    #scanid = mycaget('ak:md2:scanId_O')
+    #sbid = mycaget('ak:md2:schedulingblockId_O')
+    #target = mycaget('ak:md2:targetName_O')
+    scandir = values.scandir
     os.chdir(scandir)
-    os.makedirs(targetdir, exist_ok=True)
-    
-    os.symlink(scandir, targetlink)
-    
+
+    touchfile('SCAN_START', directory=scandir)
+
     if values.metadata is not None:     # prep scan - run difxcalc and stuff
         duration = values.scan_minutes*u.minute
         prep = ScanPrep.create_from_metafile_and_fcm(values.metadata, fcmpath, scandir, duration=duration)

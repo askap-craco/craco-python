@@ -14,6 +14,12 @@ import signal
 import atexit
 import re
 import datetime
+from craco.prep_scan import ScanPrep, make_scan_directories
+from craco.scan_manager import ScanManager
+from craco.askap.craft.obsman.metadatasaver import MetadataSaver
+from craco.askap.craft.obsman.metadatasubscriber import metadata_to_dict
+from askap.interfaces.schedblock import ObsState
+
 
 log = logging.getLogger(__name__)
 
@@ -21,15 +27,12 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class Obsman:
     def __init__(self, values):
-        self.scan_pv = PV('ak:md2:scanId_O')
-        self.sbid_pv = PV('ak:md2:schedulingblockId_O')
-        self.target_pv = PV('ak:md2:targetName_O')
-        self.curr_scanid = None
-        self.process = None
-        
+        self.process = None        
         self.cmd = values.cmd
         self.values = values
         self.doquit = False
+        self.curr_scanid = None
+
 
         # Bit of a race condition here, but we'll do it
         # add_callback might have beaten us to it,
@@ -66,11 +69,7 @@ class Obsman:
         if scanid is not None:
             self.start_process(scanid)
         
-    def scan_changed(self, pvname=None, value=None, char_value=None, **kw):
-        time.sleep(1) # wait a bit to see if PVs update. #sigh
-        new_scanid = self.scan_pv.get()
-        sbid = self.sbid_pv.get()
-        target = self.target_pv.get() # this doesnt refresh for some reason
+    def scan_changed(self, sbid, new_scanid, target, metadata=None):
         match = None
         if self.values.target_regex is not None:
             match = re.search(self.values.target_regex, target)
@@ -79,11 +78,10 @@ class Obsman:
             target_ok = True
 
         craco_enabled = caget('ak:enableCraco') == 1
-
         zoomval = caget('ak:S_zoom:val')
         standard_zoom = zoomval == 0
 
-        log.info(f'Scan_changed pv={pvname} newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled} zoomval = {zoomval} zoom OK? = {standard_zoom}')
+        log.info(f'Scan_changed newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled} zoomval = {zoomval} zoom OK? = {standard_zoom}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
@@ -96,7 +94,7 @@ class Obsman:
         else:
             log.info('Passing on %s as doesnt match regex %s or craco enabled=%s', target, self.values.target_regex, craco_enabled)
 
-    def start_process(self, new_scanid:int):
+    def start_process(self, sbid, new_scanid, target, metadata=None):
         assert new_scanid is not None
         # terminate process to start with
         self.terminate_process()
@@ -104,11 +102,29 @@ class Obsman:
         assert self.curr_scanid is None
         assert self.process is None
         self.curr_scanid = new_scanid
+
         
+        outdir = make_scan_directories(sbid, new_scanid, target)
+        if metadata is not None:
+            # creates directories, copies in metafile, adds some extra goodies.
+            # runs calc for the hell of it.            
+            prep = ScanPrep.create_from_metafile_and_fcm(metadata)
+            
+        # upate environment
+        env = {'SB_ID': sbid,
+               'SCAN_ID': new_scanid,
+               'TARGET': target,
+               'SCAN_DIR': outdir
+        }
+        cmd = self.cmd.format(**env)
+        myenv = os.envrion.copy()
+        myenv.extend(env)
+
         # start new process group and use it to kill all subprocesses. on exit
         # I love you so much Alexandra
         # https://alexandra-zaharia.github.io/posts/kill-subprocess-and-its-children-on-timeout-python/
-        self.process = Popen(self.cmd, shell=False, start_new_session=True)
+
+        self.process = Popen(cmd, shell=False, start_new_session=True, env=myenv)
         pgid = os.getpgid(self.process.pid)
         self.start_time = datetime.datetime.now()
         log.info(f'Started process {self.cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode}')
@@ -179,18 +195,28 @@ class Obsman:
         #self.scan_pv.remove_callback(self.callback_id)
         self.terminate_process()
         sys.exit()
+
+
+class EpicsObsmanDriver:
+    def __init__(self, obsman):
+        self.scan_pv = PV('ak:md2:scanId_O')
+        self.sbid_pv = PV('ak:md2:schedulingblockId_O')
+        self.target_pv = PV('ak:md2:targetName_O')
+        self.obsman = obsman
         
     def wait(self):
         try:
             scanid = self.scan_pv.get()
+            sbid = self.sbid_pv.get()
+            target = self.target_pv.get() # this doesnt refresh for some reason
             # initial setup
-            self.scan_changed(self.scan_pv.pvname, scanid)
+            self.scan_changed(sbid, scanid, target, metadata=None)
             while True:
                 time.sleep(1)
                 self.poll_process()
                 new_scanid = self.scan_pv.get()
                 if new_scanid != scanid:
-                    self.scan_changed(self.scan_pv.pvname, new_scanid)
+                    self.obsman.scan_changed(sbid, scanid, target, metadata=None)
                     scanid = new_scanid
         except KeyboardInterrupt:
             log.info('Ctrl-C detected')
@@ -198,6 +224,60 @@ class Obsman:
             log.exception('Failiure polling process')
         finally:
             self.shutdown()
+
+
+class MetadataObsmanDriver(MetadataSaver):
+    def __init__(self, obsman):
+        import Ice
+        comm = Ice.initialize(sys.argv)
+        super().__init__(comm)
+        self.obsman = obsman
+        self.sbid = None
+        self.scan_running = False
+
+    def changed(self, sbid, state, updated, old_state, current=None):
+        '''Implements ISBStateMonitor
+        Called when schedblock state changes
+        '''
+        print(('SB STATE CHANGED', sbid, state, updated, old_state, current))
+
+        if state == ObsState.EXECUTING:
+            self.sbid = sbid
+            # TODO: pick up antenn  list from pyparset and make antenna mask
+            self.scan_manager = ScanManager()
+        elif sbid == self.sbid:
+            assert state != ObsState.EXECUTING
+            # It must have gone out of executing
+            self.sbid = None
+
+    def publish(self, pub_data, current=None):
+        '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher
+        Called when new metadata received
+        :data: is a directionary whose contents is defined here: https://jira.csiro.au/browse/ASKAPTOS-3320
+
+        '''
+        if self.sbid is None:
+            return
+
+        d = metadata_to_dict(pub_data, self.sbid)
+        mgr = self.scan_manager
+        next_scan_running = mgr.push_data(d)
+        if self.scan_running:
+            if next_scan_running: # continue running scan
+                pass                
+            else: # stop running scan
+                self.obsman.terminate_process()
+        else:
+            if next_scan_running: # start new scan
+                self.obsman.scan_changed(self, mgr.sbid, mgr.scan_id, mgr.target_name, self.scan_manager)
+            else:
+                pass # continue not running a scan
+        
+        self.scan_running = next_scan_running
+
+    def wait(self):
+        self.comm.waitForShutdown()
+
 
 
 def _main():
@@ -209,6 +289,7 @@ def _main():
     parser.add_argument('-R','--target-regex', help='Regex to apply to target name. If match then we start a scan')
     parser.add_argument(dest='cmd', nargs='+')
     parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')
+    parser.add_argument('--driver', choices=('meta','epics'), default='meta', help='DRive with epics or metadata')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -223,7 +304,11 @@ def _main():
             datefmt='%Y-%m-%d %H:%M:%S')
 
     obs = Obsman(values)
-    obs.wait()
+    if values.driver == 'meta':
+        d = MetadataObsmanDriver(obs)
+    else:
+        d = EpicsObsmanDriver(obs)        
+    d.wait()
     
 
 if __name__ == '__main__':
