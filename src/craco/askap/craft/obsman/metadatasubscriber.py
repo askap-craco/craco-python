@@ -26,6 +26,7 @@ import sys
 import os
 import Ice
 import IceStorm
+import askap.iceutils # needs to be before importing askap.interfaces
 
 # pylint: disable-msg=W0611
 from askap.slice import TypedValues
@@ -40,6 +41,8 @@ from askap.interfaces.datapublisher import (ITimeTaggedTypedValueMapPublisher,
                                             ITimeTaggedTypedValueMapPublisherPrx)
 from askap.interfaces.datapublisher import (ITypedValueMapPublisher,
                                             ITypedValueMapPublisherPrx)
+
+import datetime
 
 def coerceice(v):
     if isinstance(v.value, Direction):
@@ -63,6 +66,7 @@ def metadata_to_dict(pub_data, sbid):
     d['sbid'] = sbid
     ant_data = {}
     d['antennas'] = ant_data
+    d['rxtime'] = datetime.datetime.utcnow().isoformat()
     # Make new dictionary of vanilla python types and make it a hierarchy so it'll play nicer with JSON
     for k,v in list(data.items()):
         if k == 'antennas':

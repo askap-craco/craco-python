@@ -22,21 +22,26 @@
 #
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
-
 # pylint: disable-msg=W0611
 from .metadatasubscriber import MetadataSubscriber, metadata_to_dict
 from .sbstatemonitor import SBStateSubscriber
 from askap.parset import parset_to_dict
 from askap import logging
+import askap.slice
+import askap.iceutils # needs to be imported before interfaces
 
 import askap.interfaces as iceint
 from askap.interfaces.schedblock import ObsState
 from askap.interfaces import Direction, TypedValueType
 from askap.iceutils import get_service_object
+
+
 import json
 from epics import PV
 import os
 import gzip
+import datetime
+from astropy.time import Time
 
 
 logger = logging.getLogger(__name__)
@@ -52,20 +57,19 @@ class FileWriterMetadataListener:
 
         fname = os.path.join(self.savedir, f'SB{sbid:d}.json.gz')
         self.fout = gzip.open(fname, 'at')
-        print('Opened file', self.fout)
+        logger.info('Opened file %s', self.fout)
         return self.fout
 
     def close_file(self):
         if self.fout is not None:
             self.fout.close()
-            print('Closed file', self.fout)
+            logger.info('Closed file %s', self.fout)
             self.fout = None
 
     def changed(self, sbid, state, updated, old_state, current=None):
         '''Implements ISBStateMonitor
         Called when schedblock state changes
         '''
-        print(('SB STATE CHANGED', sbid, state, updated, old_state, current))
 
         if state == ObsState.EXECUTING:
             self.sbid = sbid
@@ -76,7 +80,7 @@ class FileWriterMetadataListener:
             self.sbid = None
             self.close_file()
 
-    def publish(self, pub_data):
+    def publish(self, pub_data, current=None):
         '''
         Recieve metdadta.
         d is a dictionary version of the metadata which is easier to digest in json
@@ -96,6 +100,7 @@ class FileWriterMetadataListener:
                 self.close_file()
             
 
+    close = close_file
 
     def __del__(self):
         self.close_file()
@@ -113,7 +118,7 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
 
         sbmgr = self._sb
         executing_block_ids = sbmgr.getByState([ObsState.EXECUTING], None)
-        print(('Got', len(executing_block_ids), 'Executing blocks', executing_block_ids))
+        logger.debug('Got %d executing blocks: %s', len(executing_block_ids), executing_block_ids)
         self.listener = listener
 
         if len(executing_block_ids) == 1:
@@ -124,15 +129,26 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
 
         self.sb_sub = SBStateSubscriber(comm, self)
         self.metadata_sub = MetadataSubscriber(comm, self)
+        self.sbid = None
+        if listener is not None:
+            listener.sb_service = self._sb
 
     def changed(self, sbid, state, updated, old_state, current=None):
         '''Implements ISBStateMonitor
         Called when schedblock state changes
         '''
-        print(('SB STATE CHANGED', sbid, state, updated, old_state, current))
+        logger.debug('SB STATE CHANGED sbid=%s state=%s updated=%s old_state=%s', sbid, state, updated, old_state)
+
+        # keep track of SBID
+        if state == ObsState.EXECUTING:
+            self.sbid = sbid
+        elif sbid == self.sbid:
+            assert state != ObsState.EXECUTING
+            # It must have gone out of executing
+            self.sbid = None
+
         if self.listener is not None:
             self.listener.changed(sbid, state, updated, old_state, current)
-
 
     def publish(self, pub_data, current=None):
         '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher
@@ -140,11 +156,18 @@ class MetadataSaver(iceint.schedblock.ISBStateMonitor,
         :data: is a directionary whose contents is defined here: https://jira.csiro.au/browse/ASKAPTOS-3320
 
         '''
-        if self.sbid is None:
-            return
+
+        ts = Time(pub_data.timestamp/1e6/3600/24, format='mjd', scale='tai')
+        now = Time.now()
         
+        logger.debug('Got metadata now=%s ts=%s difference %0.1f seconds',now.iso, ts.iso, (now - ts).to('second').value )
+
         if self.listener is not None:
             self.listener.publish(pub_data, current)
+
+    def close(self):
+        if self.listener is not None:
+            self.listener.close()
                 
                 
 def _main():
@@ -154,10 +177,11 @@ def _main():
     parser.add_argument('-D','--destdir', required=True, help='Destination directory')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
+    FORMAT = '%(levelname)s %(asctime)s %(module)s %(message)s'
     if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format=FORMAT)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format=FORMAT)
 
     import Ice
     import sys
@@ -173,7 +197,7 @@ def _main():
         logger.exception('Error saving data')
     finally:
         if saver is not None:
-            saver.close_file()
+            saver.close()
 
 
         
