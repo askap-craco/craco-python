@@ -58,14 +58,14 @@ class Step(ProcessingStep):
         # do first clustering - time/dm/boxcar
         candidates, clustered = self.dbscan(ind)
 
+        # do second clustering - spatial/mpix/lpix 
+        candidates, clustered = self.spatial_clustering(candidates, clustered)
+
         # save the clustered file - intermediate products
         if self.pipeline.args.save_intermediate:
             cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
             log.info('Saving raw candfile with cluster id to file %s.rawcat.csv', cand_fname)
             clustered.to_csv(cand_fname + ".rawcat.csv")
-
-        # do second clustering - spatial/mpix/lpix 
-        candidates = self.spatial_clustering(candidates, clustered)
         
         # do classification - rule out RFI
         outd = self.classify(candidates)
@@ -105,9 +105,39 @@ class Step(ProcessingStep):
         ### reset the index just in case...
         data = data.reset_index(drop=True)
 
+        if os.path.exists(self.pipeline.psf_fname):
+
+            #>>>>>>
+            # test for time-dependent cluster
+            # Convert time to the band center.
+            freq_bot = self.pipeline.psf_header['FCH1_HZ']
+            chan_bw = self.pipeline.psf_header['CH_BW_HZ']
+            n_chan = self.pipeline.psf_header['NCHAN']
+            tsamp = self.pipeline.psf_header['TSAMP']
+
+            freq_mid = freq_bot + n_chan/2 * chan_bw
+            delay = 4.15 * data['dm_pccm3'] * ((1e9/freq_bot)**2 - (1e9/freq_mid)**2)  # freqs must be Hz, result is in ms.
+            save_ts = data['total_sample'].copy()
+
+            log.debug('Low frequency %sMHz, bandwidth %s MHz with %s channels, time resolution %s ms, central frequency %s MHz', 
+                        np.round(freq_bot/1e6, 1), 
+                        np.round(chan_bw/1e6, 0), n_chan, 
+                        np.round(tsamp*1e3, 1), np.round(freq_mid/1e6, 1))
+
+            data['total_sample'] -= delay/1000/tsamp
+
+            #<<<<<
+
         # rescale data
         # => rescaled_data is numpy.ndarray; 
         rescaled_data, reference_eps_param = self.rescale_data(data, self.pipeline.config['eps'])
+
+
+        if os.path.exists(self.pipeline.psf_fname):
+            #>>>>>>>
+            data['total_sample_middle'] = data['total_sample'].copy()
+            data['total_sample'] = save_ts
+            #<<<<<<<
 
         cls = DBSCAN(eps=reference_eps_param, 
                      min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
@@ -145,11 +175,15 @@ class Step(ProcessingStep):
                 cls = DBSCAN(eps=reference_eps_param, min_samples=config['min_samples']).fit(rescaled_data)  
                 num_spatial.append(max(cls.labels_))
                 labels.append(cls.labels_)
+                clustered.loc[data.index, 'spatial_id'] = cls.labels_
             else:
+                data = clustered[clustered['cluster_id'] == i]
                 num_spatial.append(-1)
                 labels.append([0])
+                clustered.loc[data.index, 'spatial_id'] = -1
 
         candidates['num_spatial'] = num_spatial
+        candidates['spatial_id'] = -1
 
         # ======
 
@@ -180,7 +214,7 @@ class Step(ProcessingStep):
                 
                 j += 1
 
-        return candidates_new
+        return candidates_new, clustered
 
 
 
