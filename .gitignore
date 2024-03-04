@@ -34,6 +34,9 @@ venv*/
 # mpitests is just rubbish
 mpitests/
 
+# test data - probably should check this in.
+testdata/
+
 
 # Emacs and other backups
 *~
