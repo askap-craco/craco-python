@@ -12,10 +12,13 @@ import os
 import sys
 import logging
 import subprocess
+
+import Ice
 from askap.iceutils import get_service_object
 from askap.slice import SchedulingBlockService
 from craco.askap.craft.obsman.sbstatemonitor import SBStateSubscriber
-import Ice
+from askap.parset import ParameterSet
+
 
 # pylint: disable-msg=E0611
 import askap.interfaces as iceint

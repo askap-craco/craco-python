@@ -16,7 +16,7 @@ import shutil
 import time
 import signal
 import atexit
-from craco.prep_scan import touchfile
+from craco.prep_scan import touchfile,ScanPrep
 
 log = logging.getLogger(__name__)
 
@@ -61,17 +61,20 @@ def _main():
             format=lformat,
             datefmt='%Y-%m-%d %H:%M:%S')
 
-    #scanid = mycaget('ak:md2:scanId_O')
-    #sbid = mycaget('ak:md2:schedulingblockId_O')
-    #target = mycaget('ak:md2:targetName_O')
-    scandir = values.scandir
+    epics_scanid = mycaget('ak:md2:scanId_O')
+    epics_sbid = mycaget('ak:md2:schedulingblockId_O')
+    epics_target = mycaget('ak:md2:targetName_O')
+
+    
+    scandir = os.environ['SCAN_DIR']
+    prep = ScanPrep.load(scandir)
+    scanid = prep.scan_id
+    sbid = prep.sbid
+    target = prep.targname
+
     os.chdir(scandir)
 
     touchfile('SCAN_START', directory=scandir)
-
-    if values.metadata is not None:     # prep scan - run difxcalc and stuff
-        duration = values.scan_minutes*u.minute
-        prep = ScanPrep.create_from_metafile_and_fcm(values.metadata, fcmpath, scandir, duration=duration)
         
     target_file = os.path.join(scandir, 'ccap.fits')
     

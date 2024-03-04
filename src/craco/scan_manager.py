@@ -31,14 +31,25 @@ class ScanManager:
     - All flag
 
     '''
-    def __init__(self, ant_mask=None, frac_onsource=1.0, nback:int=2):
+    def __init__(self, obs_variables, frac_onsource=1.0, nback:int=2):
         '''
-        :ant_mask: is a len(antmask) npy boolean array that is True if the antenna needs to be in the array
-        If None we expect all antennas to be unflagged to a scan
-
+        :obs_variables: observation variiables (parameterset)
         :frac_onsource: Fraction of unmasked antennas to be onsource before we start anyway.
 
         '''
+        # sb_ants is a list like ['ant1','ant2',...,'ant36']
+        sb_ants = obs_variables['schedblock.antennas']
+
+        # convert to boolean mask
+        ant_numbers = np.array(list(map(lambda x: int(x.replace('ant','')), sb_ants)))
+
+        ant_numbers=None
+        ant_mask = np.zeros(NANT, dtype=bool)
+        ant_mask[ant_numbers-1] = True
+        
+        self.obs_variables = obs_variables
+        self.ant_numbers = ant_numbers
+        self.ant_mask = ant_mask
         self.last_meta = collections.deque(maxlen=nback)
         self.running = False
         self._start_scan_metadata = None
@@ -50,8 +61,6 @@ class ScanManager:
         
         self._frac_onsource = float(frac_onsource)
         assert 0 < self._frac_onsource <= 1,' Frac_onsource has to be in (0, 1.0]'
-
-
     def push_data(self, d):
         '''
         Push data into this ScanManager and update internal variables.
@@ -83,21 +92,22 @@ class ScanManager:
         ok_to_run = flags_ok and all_unchanged and scan_ok
 
         #print(sum(antok), sum(ok_ants), frac_ok_ants, flags_ok, all_unchanged, ok_to_run)
-        log.debug('Got %d/%d good ants. Frac OK=%d flags ok? %s all_unchanged=%s ok to run? %s running?', \
-                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run)
-        
 
         if self.running:
             if ok_to_run:
                 pass # continue - everything is fine
             else:
                 self._stop_scan(d)
+
         else: # not yet running
             if ok_to_run:
                 self._start_scan(d, mfile)
             else:
                 pass # Waiting for things to stabilise
 
+        log.debug('Got %d/%d good ants. Frac OK=%d flags ok? %s all_unchanged=%s ok to run? %s running? %s', \
+                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run, self.running)
+        
         return self.running
 
     def _start_scan(self, d, mfile):
@@ -108,6 +118,8 @@ class ScanManager:
         self.running = True
         self._start_scan_metadata = d
         self._start_scan_mfile = mfile
+        
+
     
     def _stop_scan(self, d):
         self.running = False
@@ -136,6 +148,10 @@ class ScanManager:
     @property
     def target_name(self):
         return self._get_meta('target_name')
+
+    @property
+    def scan_metadata(self):
+        return self._start_scan_mfile
     
 
         

@@ -15,6 +15,7 @@ header*.txt
 *.cand
 *.rank
 
+
 # visual stdio stuff
 .vscode
 
@@ -30,12 +31,14 @@ notebooks/data
 # Virtual environments
 venv*/
 
-
+# mpitests is just rubbish
+mpitests/
 
 
 # Emacs and other backups
 *~
 *.bak
+\#*\#
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -14,12 +14,22 @@ import signal
 import atexit
 import re
 import datetime
+import numpy as np
+
 from craco.prep_scan import ScanPrep, make_scan_directories
-from craco.scan_manager import ScanManager
-from craco.askap.craft.obsman.metadatasaver import MetadataSaver
-from craco.askap.craft.obsman.metadatasubscriber import metadata_to_dict
+from craco.scan_manager import ScanManager,NANT
+
+from craco.askap.craft.obsman.sbstatemonitor import SBStateSubscriber
+
+# pylint: disable-msg=E0611
+# need to import iceutils before interfaces
+from askap.iceutils import get_service_object
+import askap.interfaces as iceint
 from askap.interfaces.schedblock import ObsState
 
+from craco.askap.craft.obsman.metadatasaver import MetadataSaver
+from craco.askap.craft.obsman.metadatasubscriber import metadata_to_dict
+from askap.parset import ParameterSet
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +38,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 class Obsman:
     def __init__(self, values):
         self.process = None        
-        self.cmd = values.cmd
+        self.cmd = ' '.join(values.cmd)
         self.values = values
         self.doquit = False
         self.curr_scanid = None
@@ -63,13 +73,18 @@ class Obsman:
         self.shutdown()
 
     def restart_process(self):
-        scanid = self.curr_scanid
+        running = self.process is not None
         self.terminate_process()
         # restart
-        if scanid is not None:
-            self.start_process(scanid)
         
-    def scan_changed(self, sbid, new_scanid, target, metadata=None):
+        if running:
+            self.start_process(self.sb_id, self.scan_id, self.target, self.metadata)
+        
+    def scan_changed(self, scan_info):
+        sbid = scan_info.sbid
+        new_scanid = scan_info.scan_id
+        target = scan_info.targname
+        
         match = None
         if self.values.target_regex is not None:
             match = re.search(self.values.target_regex, target)
@@ -90,44 +105,49 @@ class Obsman:
             pass
         elif target_ok and craco_enabled and standard_zoom: # new valid scan number with new scan ID and valid zoom
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
-            self.start_process(new_scanid)
+            self.start_process(scan_info)
         else:
             log.info('Passing on %s as doesnt match regex %s or craco enabled=%s', target, self.values.target_regex, craco_enabled)
 
-    def start_process(self, sbid, new_scanid, target, metadata=None):
-        assert new_scanid is not None
+    def start_process(self):
         # terminate process to start with
         self.terminate_process()
 
         assert self.curr_scanid is None
         assert self.process is None
-        self.curr_scanid = new_scanid
 
-        
-        outdir = make_scan_directories(sbid, new_scanid, target)
-        if metadata is not None:
-            # creates directories, copies in metafile, adds some extra goodies.
-            # runs calc for the hell of it.            
-            prep = ScanPrep.create_from_metafile_and_fcm(metadata)
+        sbid = scan_info.sbid
+        new_scanid = scan_info.scan_id
+        target = scan_info.targname
+        outdir = scan_info.outdir
+     
+        self.curr_scanid = new_scanid
             
         # upate environment
-        env = {'SB_ID': sbid,
-               'SCAN_ID': new_scanid,
+        env = {'SB_ID': str(sbid),
+               'SCAN_ID': str(new_scanid),
                'TARGET': target,
                'SCAN_DIR': outdir
         }
         cmd = self.cmd.format(**env)
-        myenv = os.envrion.copy()
-        myenv.extend(env)
+        myenv = os.environ.copy()
+        myenv.update(env)
 
         # start new process group and use it to kill all subprocesses. on exit
         # I love you so much Alexandra
         # https://alexandra-zaharia.github.io/posts/kill-subprocess-and-its-children-on-timeout-python/
-
-        self.process = Popen(cmd, shell=False, start_new_session=True, env=myenv)
+        log.debug('Running command  "%s" with extra environ %s', cmd, env)
+        self.process = Popen(cmd.split(), shell=False, start_new_session=True, env=myenv)
         pgid = os.getpgid(self.process.pid)
+        self.scan_info = scan_info
+        
         self.start_time = datetime.datetime.now()
-        log.info(f'Started process {self.cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode}')
+        self.sb_id = sbid
+        self.scan_id = new_scanid
+        self.target = target
+        self.metadata = metadata
+        self.outdir = outdir
+        log.info(f'Started process {cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode} SBID=%s SCAN_ID=%s TARGET=%s SCAN_DIR=%s', sbid, new_scanid, target, outdir)
         
     def terminate_process(self):
         proc = self.process
@@ -182,13 +202,10 @@ class Obsman:
             retcode = self.process.poll()
             now = datetime.datetime.now()
             minutes = (now - self.start_time).total_seconds()/60
-            log.debug('Process pid=%s running with return code %s for %{0.1f} minutes', self.process.pid, retcode, minutes)
+            log.debug('Process pid=%s running with return code %s for %0.1f minutes', self.process.pid, retcode, minutes)
             if retcode is not None or minutes > self.values.timeout:
                 log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting', retcode, minutes, self.values.timeout)
-                scanid = self.curr_scanid
-                self.terminate_process()
-                log.info('Process terminated. Restarting scanid %s', scanid)
-                self.start_process(scanid)
+                self.restart_process()
 
     def shutdown(self):
         log.info('Shutting down process')
@@ -210,10 +227,10 @@ class EpicsObsmanDriver:
             sbid = self.sbid_pv.get()
             target = self.target_pv.get() # this doesnt refresh for some reason
             # initial setup
-            self.scan_changed(sbid, scanid, target, metadata=None)
+            self.obsman.scan_changed(sbid, scanid, target, metadata=None)
             while True:
                 time.sleep(1)
-                self.poll_process()
+                self.obsman.poll_process()
                 new_scanid = self.scan_pv.get()
                 if new_scanid != scanid:
                     self.obsman.scan_changed(sbid, scanid, target, metadata=None)
@@ -223,28 +240,35 @@ class EpicsObsmanDriver:
         except:
             log.exception('Failiure polling process')
         finally:
-            self.shutdown()
+            self.obsman.shutdown()
 
 
-class MetadataObsmanDriver(MetadataSaver):
-    def __init__(self, obsman):
-        import Ice
-        comm = Ice.initialize(sys.argv)
-        super().__init__(comm)
+# Wow  Subclassing MetadataSaver never received any metdata
+# so weird. Addit and a listener and it works fine.
+#class MetadataObsmanDriver(MetadataSaver):
+class MetadataObsmanDriver:
+    def __init__(self, comm, obsman):
         self.obsman = obsman
         self.sbid = None
         self.scan_running = False
+        self.sb_service = get_service_object(comm,
+                    "SchedulingBlockService@DataServiceAdapter",
+                    iceint.schedblock.ISchedulingBlockServicePrx)
+
 
     def changed(self, sbid, state, updated, old_state, current=None):
         '''Implements ISBStateMonitor
         Called when schedblock state changes
         '''
-        print(('SB STATE CHANGED', sbid, state, updated, old_state, current))
+        log.info('SB STATE CHANGED sbid=%s state=%s updated=%s old_state=%s', sbid, state, updated, old_state)
+
 
         if state == ObsState.EXECUTING:
             self.sbid = sbid
-            # TODO: pick up antenn  list from pyparset and make antenna mask
-            self.scan_manager = ScanManager()
+            # pick up antenna list from observation variables
+            self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
+            self.scan_manager = ScanManager(self.obs_variables)
+            log.info('%d/%d active antennas %s', len(ant_numbers), NANT, ','.join(ant_numbers.astype('str')))
         elif sbid == self.sbid:
             assert state != ObsState.EXECUTING
             # It must have gone out of executing
@@ -269,14 +293,16 @@ class MetadataObsmanDriver(MetadataSaver):
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
-                self.obsman.scan_changed(self, mgr.sbid, mgr.scan_id, mgr.target_name, self.scan_manager)
+                info = ScanPrep.create_from_metafile_and_fcm(metadata, outdir, ant_numbers=ant_numbers)
+                self.obsman.scan_changed(info)
             else:
                 pass # continue not running a scan
-        
+            
+        self.obsman.poll_process()
         self.scan_running = next_scan_running
 
-    def wait(self):
-        self.comm.waitForShutdown()
+    def close(self):
+        self.obsman.terminate_process()
 
 
 
@@ -305,10 +331,19 @@ def _main():
 
     obs = Obsman(values)
     if values.driver == 'meta':
-        d = MetadataObsmanDriver(obs)
+        import Ice
+        # TODO: Wrap this nicely.
+        comm = Ice.initialize(sys.argv)
+        d = MetadataObsmanDriver(comm, obs)
+        saver = MetadataSaver(comm, d)
+        try:
+            comm.waitForShutdown()
+        finally:
+            log.info('Desctroying comm')
+            comm.destroy()
     else:
-        d = EpicsObsmanDriver(obs)        
-    d.wait()
+        d = EpicsObsmanDriver(obs)
+        d.wait()
     
 
 if __name__ == '__main__':

@@ -61,16 +61,34 @@ def make_scan_directories(sbid, scanid, target, craco_data_dir=None):
 def first(x):
     return next(iter(x))
 
+NANT = 36
+
 class ScanPrep:
-    def __init__(self, targname:str, beam_phase_centers:SkyCoord, fcmfile:str, outdir:str, start:Time, stop:Time):
+    def __init__(self, targname:str, sbid, scan_id, beam_phase_centers:SkyCoord, fcmfile:str, outdir:str, start:Time, stop:Time, ant_numbers):
+        '''
+        ant_numbers is a 1 based np array of antennas which should be
+        included in the array
+        '''
         assert len(beam_phase_centers) == 36
             
         self.outdir = outdir
         self.targname = targname
         self.beam_phase_centers = beam_phase_centers
+
+        if fcmfile is None:
+            fcmfile = os.environ['FCM']
+
         self.fcmfile = fcmfile
         self.start = start
-        self.stop = stop    
+        self.stop = stop
+        self.scan_id = scan_id
+        self.sbid = sbid
+        self.__mfile = None
+
+        if ant_numbers is None:
+            ant_numbers = np.arange(NANT) + 1
+
+        self.ant_numbers = ant_numbers
 
     def save(self):
         os.makedirs(self.outdir, exist_ok=True)
@@ -80,6 +98,7 @@ class ScanPrep:
         self.run_calc()
         with open(self.index_file_name(self.outdir), 'wb') as fout:
             pickle.dump(self, fout)
+
 
     @staticmethod
     def load(outdir):
@@ -97,19 +116,16 @@ class ScanPrep:
         return os.path.join(self.outdir, 'fcm.txt')
 
     @property
-    def metadata_file(self):
+    def metadata_file_name(self):
         if hasattr(self, 'metafilename'):
             return MetadataFile(os.path.join(self.outdir, self.metafilename))
         else:
             raise FileNotFoundError()
 
     @staticmethod
-    def create_from_metafile_and_fcm(metafile, fcmfile=None, dtop=None, duration=1*u.hour):
+    def create_from_metafile_and_fcm(metafile, dout, obs_params, fcmfile=None, duration=1*u.hour):
         if isinstance(metafile, str):
             metafile = MetadataFile(metafile)
-
-        if fcmfile is None:
-            fcmfile = os.environ['FCM']
 
         sbid = metafile.sbid
         scan_id = metafile.d0['scan_id']
@@ -118,15 +134,22 @@ class ScanPrep:
         nbeams = metafile.nbeam
         targname = metafile.source_name_at_time(t0)
 
-        dout = make_scan_directories(sbid, scan_id, targname, dtop)
-
         sources = [metafile.source_at_time(b, t0) for b in range(nbeams)]
         phase_centers = [s['skycoord'] for s in sources]
-        prep = ScanPrep(targname, phase_centers, fcmfile, dout, t0, t0+duration)
+        sbid = metafile.sbid
+        scan_id = metafile.d0['scan_id']
+        prep = ScanPrep(targname, sbid, scan_id, phase_centers, fcmfile, dout, t0, t0+duration, ant_numbers=ant_numbers)
         prep.metafilename = 'metafile.json'
         metafile.saveto(os.path.join(dout, prep.metafilename))
         prep.save()
         return prep
+
+    @property
+    def metafile(self):
+        if self.__mfile is None:
+            self.__mfile = MetadataFile(self.metadata_file_name)
+            
+        return self.__mfile
 
     @staticmethod
     def load_from_metapath(metapath):
