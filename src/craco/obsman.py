@@ -78,7 +78,7 @@ class Obsman:
         # restart
         
         if running:
-            self.start_process(self.sb_id, self.scan_id, self.target, self.metadata)
+            self.start_process(self.curr_scan_info)
         
     def scan_changed(self, scan_info):
         sbid = scan_info.sbid
@@ -109,7 +109,7 @@ class Obsman:
         else:
             log.info('Passing on %s as doesnt match regex %s or craco enabled=%s', target, self.values.target_regex, craco_enabled)
 
-    def start_process(self):
+    def start_process(self, scan_info):
         # terminate process to start with
         self.terminate_process()
 
@@ -145,8 +145,8 @@ class Obsman:
         self.sb_id = sbid
         self.scan_id = new_scanid
         self.target = target
-        self.metadata = metadata
         self.outdir = outdir
+        self.curr_scan_info = scan_info
         log.info(f'Started process {cmd} with PID={self.process.pid} PGID={pgid} retcode={self.process.returncode} SBID=%s SCAN_ID=%s TARGET=%s SCAN_DIR=%s', sbid, new_scanid, target, outdir)
         
     def terminate_process(self):
@@ -227,13 +227,17 @@ class EpicsObsmanDriver:
             sbid = self.sbid_pv.get()
             target = self.target_pv.get() # this doesnt refresh for some reason
             # initial setup
-            self.obsman.scan_changed(sbid, scanid, target, metadata=None)
+            info = ScanPrep(target, sbid, scanid)
+            self.obsman.scan_changed(info)
             while True:
                 time.sleep(1)
                 self.obsman.poll_process()
                 new_scanid = self.scan_pv.get()
                 if new_scanid != scanid:
-                    self.obsman.scan_changed(sbid, scanid, target, metadata=None)
+                    sbid = self.sbid_pv.get()
+                    target = self.target_pv.get() # this doesnt refresh for some reason
+                    info = ScanPrep(target, sbid, new_scanid)
+                    self.obsman.scan_changed(info)
                     scanid = new_scanid
         except KeyboardInterrupt:
             log.info('Ctrl-C detected')
@@ -241,6 +245,16 @@ class EpicsObsmanDriver:
             log.exception('Failiure polling process')
         finally:
             self.obsman.shutdown()
+
+
+
+def get_ant_numbers_from_obs_variables(obs_variables):
+    # sb_ants is a list like ['ant1','ant2',...,'ant36']
+    sb_ants = obs_variables['schedblock.antennas']
+
+    # convert to boolean mask
+    ant_numbers = np.array(list(map(lambda x: int(x.replace('ant','')), sb_ants)))
+    return ant_numbers
 
 
 # Wow  Subclassing MetadataSaver never received any metdata
@@ -267,8 +281,9 @@ class MetadataObsmanDriver:
             self.sbid = sbid
             # pick up antenna list from observation variables
             self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
-            self.scan_manager = ScanManager(self.obs_variables)
-            log.info('%d/%d active antennas %s', len(ant_numbers), NANT, ','.join(ant_numbers.astype('str')))
+            self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
+            self.scan_manager = ScanManager(self.ant_numbers )
+            log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
         elif sbid == self.sbid:
             assert state != ObsState.EXECUTING
             # It must have gone out of executing
@@ -293,7 +308,7 @@ class MetadataObsmanDriver:
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
-                info = ScanPrep.create_from_metafile_and_fcm(metadata, outdir, ant_numbers=ant_numbers)
+                info = ScanPrep.create_from_metafile(mgr.scan_metadata, self.ant_numbers)
                 self.obsman.scan_changed(info)
             else:
                 pass # continue not running a scan

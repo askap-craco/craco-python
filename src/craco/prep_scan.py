@@ -64,40 +64,53 @@ def first(x):
 NANT = 36
 
 class ScanPrep:
-    def __init__(self, targname:str, sbid, scan_id, beam_phase_centers:SkyCoord, fcmfile:str, outdir:str, start:Time, stop:Time, ant_numbers):
+    def __init__(self, targname:str, sbid, scan_id, outdir:str=None, fcmfile:str=None):
         '''
         ant_numbers is a 1 based np array of antennas which should be
         included in the array
         '''
-        assert len(beam_phase_centers) == 36
-            
-        self.outdir = outdir
+
         self.targname = targname
-        self.beam_phase_centers = beam_phase_centers
+        self.scan_id = scan_id
+        self.sbid = sbid
+
+        if outdir is None:
+            outdir = make_scan_directories(sbid, scan_id, targname)
+
+        self.outdir = outdir
 
         if fcmfile is None:
             fcmfile = os.environ['FCM']
 
-        self.fcmfile = fcmfile
-        self.start = start
-        self.stop = stop
-        self.scan_id = scan_id
-        self.sbid = sbid
+
         self.__mfile = None
-
-        if ant_numbers is None:
-            ant_numbers = np.arange(NANT) + 1
-
-        self.ant_numbers = ant_numbers
+        os.makedirs(self.outdir, exist_ok=True)
+        self.fcmfile = self.copy_file(fcmfile, 'fcm.txt')
 
     def save(self):
-        os.makedirs(self.outdir, exist_ok=True)
-        shutil.copyfile(self.fcmfile, self.local_fcm_file_name)
-        self.fcmfile = self.local_fcm_file_name
-        self.write_calcfiles()
-        self.run_calc()
         with open(self.index_file_name(self.outdir), 'wb') as fout:
             pickle.dump(self, fout)
+
+    def add_calc11_configuration(self, beam_phase_centers, start:Time, stop:Time):
+        assert len(beam_phase_centers) == 36
+        self.start = start
+        self.stop = stop
+        self.beam_phase_centers = beam_phase_centers
+        self.write_calcfiles()
+        self.run_calc()
+        return self
+
+    def copy_file(self, infile, newfile):
+        outfile = os.path.join(self.outdir, os.path.basename(infile))
+        shutil.copyfile(infile, os.path.join(self.outdir, outfile))
+        return outfile
+
+    def add_file(self, filename, contents):
+        outfile = os.path.join(self.outdir, filename)
+        with open(outfile) as w:
+            w.write(contents)
+
+        return outfile
 
 
     @staticmethod
@@ -122,8 +135,9 @@ class ScanPrep:
         else:
             raise FileNotFoundError()
 
+
     @staticmethod
-    def create_from_metafile_and_fcm(metafile, dout, obs_params, fcmfile=None, duration=1*u.hour):
+    def create_from_metafile(metafile, ant_numbers, fcmfile=None, duration=1*u.hour):
         if isinstance(metafile, str):
             metafile = MetadataFile(metafile)
 
@@ -134,13 +148,16 @@ class ScanPrep:
         nbeams = metafile.nbeam
         targname = metafile.source_name_at_time(t0)
 
+
         sources = [metafile.source_at_time(b, t0) for b in range(nbeams)]
         phase_centers = [s['skycoord'] for s in sources]
         sbid = metafile.sbid
         scan_id = metafile.d0['scan_id']
-        prep = ScanPrep(targname, sbid, scan_id, phase_centers, fcmfile, dout, t0, t0+duration, ant_numbers=ant_numbers)
+        prep = ScanPrep(targname, sbid, scan_id, fcmfile)
+        prep.add_calc11_configuration(phase_centers,t0, t0+duration)
+        prep.ant_numbers   = ant_numbers
         prep.metafilename = 'metafile.json'
-        metafile.saveto(os.path.join(dout, prep.metafilename))
+        metafile.saveto(os.path.join(prep.outdir, prep.metafilename))
         prep.save()
         return prep
 

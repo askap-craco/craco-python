@@ -31,23 +31,19 @@ class ScanManager:
     - All flag
 
     '''
-    def __init__(self, obs_variables, frac_onsource=1.0, nback:int=2):
+    def __init__(self, ant_numbers=None, frac_onsource=1.0, nback:int=2):
         '''
-        :obs_variables: observation variiables (parameterset)
+        :ant_numbers: 1 based antenna numbers to include
         :frac_onsource: Fraction of unmasked antennas to be onsource before we start anyway.
 
         '''
-        # sb_ants is a list like ['ant1','ant2',...,'ant36']
-        sb_ants = obs_variables['schedblock.antennas']
 
-        # convert to boolean mask
-        ant_numbers = np.array(list(map(lambda x: int(x.replace('ant','')), sb_ants)))
+        if ant_numbers is None:
+            ant_numbers = np.arange(NANT) + 1
 
-        ant_numbers=None
         ant_mask = np.zeros(NANT, dtype=bool)
         ant_mask[ant_numbers-1] = True
         
-        self.obs_variables = obs_variables
         self.ant_numbers = ant_numbers
         self.ant_mask = ant_mask
         self.last_meta = collections.deque(maxlen=nback)
@@ -56,11 +52,10 @@ class ScanManager:
         self._start_scan_mfile = None
         self.nback = nback
         self._ant_mask = np.ones(NANT, dtype=bool) if ant_mask is None else ant_mask.copy()
-        assert len(self._ant_mask) == NANT      
-
-        
+        assert len(self._ant_mask) == NANT              
         self._frac_onsource = float(frac_onsource)
         assert 0 < self._frac_onsource <= 1,' Frac_onsource has to be in (0, 1.0]'
+        
     def push_data(self, d):
         '''
         Push data into this ScanManager and update internal variables.
