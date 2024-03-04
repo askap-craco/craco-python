@@ -16,7 +16,10 @@ import shutil
 import time
 import signal
 import atexit
+import numpy as np
 from craco.prep_scan import touchfile,ScanPrep
+from craft.cmdline import strrange
+
 
 log = logging.getLogger(__name__)
 
@@ -44,8 +47,10 @@ def _main():
     parser.add_argument('-a','--card', help='Cards to download', default='1-12')
     parser.add_argument('--block', help='Blocks to download', default='5-7')
     parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
-    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)
+    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)    
     parser.add_argument('--metadata', help='Prep scan with this metadata file')
+    parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
+
     
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -84,7 +89,6 @@ def _main():
     #hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     hostfile = os.environ['HOSTFILE']
     shutil.copy(hostfile, scandir)
-    #pol='--pol-sum'
 
     if values.transpose:
         cmdname = 'mpipipeline.sh'
@@ -131,13 +135,18 @@ def _main():
     else:
         metafile = ''
 
+    valid_ants = set(prep.ant_numbers) # 1 based antenna numbers to include
+    all_ants = set(np.arange(36) + 1)
+    flagged_ants = all_ants - valid_ants # 1 based antenna number to not include
+    flagged_ants += set(values.flag_ants) # also flag antennas from the cmdline
+    flag_ant_str = ','.join(sorted(list(flagged_ants)))
+    antflag = '--flag-ants {flag_ant_str}'
+    
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag}'
     else:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2'
-
-    # for mpipipeline
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 
     log.info(f'Running command {cmd}')
 
