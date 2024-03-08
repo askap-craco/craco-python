@@ -54,7 +54,8 @@ tcpargs="--mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces"
 
 hostfile=mpi_skadi.txt
 cmd="mpirun -v --map-by ppr:1:socket  $ucxargs $commonargs  -hostfile $hostfile  `which osu_alltoall`  -m 2048:8000000  -f"
-#cmd="mpirun -v -map-by ppr:1:node  $ucxargs $commonargs  -host seren-01,seren-02,seren-03  `which osu_alltoall`  -m 2:20000 -f"
+#cmd="mpirun -v --map-by ppr:1:socket  $ucxargs $commonargs  -hostfile $hostfile  `which osu_alltoall`  -m 2048:8000000  -f : `which osu_alltoall` -m 2048:800000 -f"
+
 echo $cmd
 $cmd
 

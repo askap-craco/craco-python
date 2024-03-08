@@ -160,6 +160,14 @@ class SearchPipelineSink:
             except RuntimeError: # usually XRT error
                 log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
+
+    def set_next_plan(self, next_plan):
+        '''
+        Update the value of hte next plan. It might not necssarily be used immediately, but
+        we'll have it in hand just in case
+        '''
+        log.info('Got next plan %s', next_plan)
+        self._next_plan = next_plan
             
 
     def write(self, vis_block):
