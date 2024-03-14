@@ -73,7 +73,7 @@ class Step(ProcessingStep):
         ## 4. run the crossmatch - using a combined racs/pulsar catalogue 
     
         # get mean ra and dec from candidates file for further clustering 
-        ra, dec = ind['ra_deg'].mean(), ind['dec_deg'].mean()
+        ra, dec = ind['ra_deg'].median(), ind['dec_deg'].median()
 
         # filetering catalogue
         catdf, catcoord = catalog_cross_match.Step(p).filter_cat(ra=ra, 
