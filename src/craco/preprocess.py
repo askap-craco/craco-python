@@ -2,7 +2,7 @@ from . import calibration
 from iqrm import iqrm_mask
 import numpy as np
 from craft.craco import bl2ant, bl2array
-from numba import njit
+from numba import njit, jit
 
 def get_isMasked_nPol(block):
 
@@ -113,21 +113,38 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
-def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N, calsoln, target_input_rms, sky_sub = False, reset_scales = False, input_mask = None):
+#import pdb
+@njit
+def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub = False, reset_scales = False):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
-    Measures the input levels, and optionally rescales and does the sky subtraction.
+    Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
 
-    input_block: Input data array - (nbl, nf, nt). Can be a masked array or np.ndarray - complex64
-    input_mask: Input mask array - (nbl, nf, nt). If not provided, input_block needs to be a masked array
+    Ideally, one should just measure the cas and crs in the first pass.
+    Then get new masks and use them to mask bad data in the 2nd pass, while accumulating the rms statistics.
+    And then apply the measured rms values in the normalisation pass (3rd).
+    
+    But if you assume that the data would be flagged for the entire block at a time, then one can calculate the RFI masks after normalisation 
+    This is because data for which improper rms values would have been computed due to RFI will eventually get masked, so we don't care.
+    This allows us to process the data in just 2 passes.
+
+    you would want to just measure the statistics and cas/crs through this function.
+    Then you should get the masks using the cas and crs. Then re-apply the 
+
+    
+    input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
+    input_mask: Input mask array - (nbl, nf, nt). np.ndarray - boolean
     output_buf: Output data array - (nbl, nf, nt*nsubblock). Won't be a masked array - complex64
-    output_mask: Output masks array after combining the masks produced by the dynamic flagger
     isubblock: integer - output_buf can hold mulitple input_blocks - isubblock is the counter
     Ai: numpy array to keep track of the running mean (nbl, nf) - complex64
     Qi: numpy array to keep track of the running rms (nbl, nf) - complex64
     N: numpy array to keep track of the nnumbers added so far (nbl, nf) - int16
         This needs to be initialised with ones at the very beginning, otherwise bad things will happen
-    calsoln: numpy array containing the calibration solution (nbl, nf) - complex64
+    calsoln_data: numpy array containing the calibration solution (nbl, nf) - complex64
+    calsoln_mask: numpy array containing the calibration masks (nbl, nf) - boolean
+    cas: Sum of amplitude of all baselines - unmasked numpy array (nf, nt) - float
+    crs: Sum of real part of all baselines - unmasked numpy array (nf, nt) - float
+    cas_N: numpy array to keep track of the numbers added into cas and crs arrays so far (nf, nt) - int16 (must be initialed to 0s)
     target_input_rms: float, the rms value which needs to be set. If None, data will not be rescaled
     sky_sub: bool, Whether to do mean subtraction or not.
     reset_scales: bool, whether to keep on accumulating Ai and Qi values across blocks, or reset to zero at the start of this block
@@ -137,29 +154,40 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
     #TODO -- think about whether changing the order of the input_block could speed things up a bit more
     #TODO -- include the computation of CAS and the masks inside this function's first pass over the data
     #        Right now it is a bit too complicated to allow for a different nt for the flagger
-    nbl, nf, nt = input_block.shape
-
+    nbl, nf, nt = input_data.shape
+    '''
     if input_mask is None:
-        assert type(input_block)==np.ma.core.MaskedArray, f"Given - {type(input_block)}"
+        #assert type(input_block)==np.ma.core.MaskedArray, f"Given - {type(input_block)}"
         input_data = input_block.data
         #input_mask = np.any(input_block.mask, axis=0)   #We take the OR of all mask values along the Basline axis given that Keith says that if a packet is dropped, all baselines are gauranteed to be flagged for that time-freq spaxel
         input_mask = input_block.mask
 
     else:
         input_mask = input_mask
-        assert input_mask.shape == input_block.shape, f"Shape of the input masks should match that of input_block - Input_block.shape = {input_block.shape}, Given shape = {input_mask.shape}"
+        #assert input_mask.shape == input_block.shape, f"Shape of the input masks should match that of input_block - Input_block.shape = {input_block.shape}, Given shape = {input_mask.shape}"
 
         if type(input_block) == np.ma.core.MaskedArray:
             input_data = input_block.data
         elif type(input_block) == np.ndarray:
             input_data = input_block
         else:
-            raise ValueError(f"dtype of input block should be np.ma.core.MaskedArray, or nd.ndarray, found = {type(input_block)}")
+            #raise ValueError(f"dtype of input block should be np.ma.core.MaskedArray, or nd.ndarray, found = {type(input_block)}")
+            return 1
+    '''
+    input_data = input_data
+    input_mask = input_mask
 
-    assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
+    #assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
  
-    cal_data = calsoln.data
-    cal_mask = calsoln.mask
+    cal_data = calsoln_data
+    cal_mask = calsoln_mask
+
+    if target_input_rms is None:
+        target_rms_value = 0
+        apply_rms = False
+    else:
+        target_rms_value = target_input_rms     #I am copying the value in a new variable because numba doesn't like if a variable which can be None, has a multiplication statement within a conditional block.
+        apply_rms = True
 
     for i_bl in range(nbl):
         for i_f in range(nf):
@@ -167,9 +195,10 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
             if reset_scales:
                 Qi[i_bl, i_f] = 0
                 zeroth_samp = input_data[i_bl, i_f, 0]
-                zeroth_samp_mask = input_mask[i_bl, i_f, 0]
+                #zeroth_samp_mask = input_mask[i_bl, i_f, 0]
 
-                if not zeroth_samp_mask:
+                #if not zeroth_samp_mask:
+                if not input_mask[i_bl, i_f, 0]:
                     Ai[i_bl, i_f] = zeroth_samp
                     N[i_bl, i_f] = 2
                 else:
@@ -182,7 +211,7 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
                 output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
                 Ai[i_bl, i_f] = 0
                 Qi[i_bl, i_f] = 0
-                N[i_bl, i_f] = 1
+                N[i_bl, i_f] = 1                
                 continue
             
             for i_t in range(nt):
@@ -191,23 +220,38 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
 
                 if imask:
                     output_buf[i_bl, i_f, isubblock*nt + i_t] = 0
-                    continue
+
+                    # if i_bl == 0:
+                    #     #Reset the CAS and CRS values at the start of the block -- this means that when we compute CAS of a block, we effective compute the CAS of a block with a column of 0s appended at the start, which I think should be fine.
+                    #     cas[:, :] = 0
+                    #     crs[:, :] = 0
+
                 else:
-                    Qi[i_bl, i_f] = Qi[i_bl, i_f] + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp - Ai[i_bl, i_f])**2
+                    Qi.real[i_bl, i_f] = Qi[i_bl, i_f].real + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.real - Ai[i_bl, i_f].real)**2
+                    Qi.imag[i_bl, i_f] = Qi[i_bl, i_f].imag + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.imag - Ai[i_bl, i_f].imag)**2
                     Ai[i_bl, i_f] = Ai[i_bl, i_f] + (isamp - Ai[i_bl, i_f])/ N[i_bl, i_f]
                     N[i_bl, i_f] += 1
+        
+                    # if i_bl == 0:
+                    #     cas[i_f, i_t] = isamp.real**2 + isamp.imag**2
+                    #     crs[i_f, i_t] = isamp.real
+                    # else:
+                    #     cas[i_f, i_t] += isamp.real**2 + isamp.imag**2
+                    #     crs[i_f, i_t] += isamp.real
 
-                    if target_input_rms is None and not sky_sub:
+                    if not apply_rms and not sky_sub:
                         #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
                         #print(f"shapes of output_buf = {output_buf.shape}, cal_data = {cal_data.shape}")
                         output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp * cal_data[i_bl, i_f]
 
-            if target_input_rms or sky_sub:
-                rms_val_real = np.sqrt(Qi[i_bl, i_f].real / N[i_bl, i_f].real)
-                rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f].imag)
+            if apply_rms or sky_sub:
+                #pdb.set_trace()
+                rms_val_real = np.sqrt(Qi[i_bl, i_f].real / N[i_bl, i_f])
+                rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
                 rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
 
-                multiplier = cal_data[i_bl, i_f] * target_input_rms / rms_val
+                multiplier = cal_data[i_bl, i_f] * target_rms_value / rms_val
+                #pdb.set_trace()
                 #Loop through the data again and apply the various rescale factors and the cal soln
                 for i_t in range(nt):
                     isamp = input_data[i_bl, i_f, i_t]
@@ -218,13 +262,13 @@ def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N,
                         #We don't need to do anything here
                         pass
                     else:
-                        if sky_sub and not target_input_rms:
+                        if sky_sub and not apply_rms:
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp - Ai[i_bl, i_f]
 
-                        elif sky_sub and target_input_rms:
+                        elif sky_sub and apply_rms:
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier
 
-                        elif target_input_rms and not sky_sub:
+                        elif apply_rms and not sky_sub:
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f]
 
 
