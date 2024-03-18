@@ -3,6 +3,8 @@ import os
 from npy_append_array import NpyAppendArray as npa
 import gzip
 
+
+# oooh, gosh - this is noughty
 DM_CONSTANT = 4.15
 
 def location2pix(location, npix=256):
@@ -62,13 +64,16 @@ class CandidateWriter:
             '+.5f'  #dec_deg
         ]
 
-    def __init__(self, outname, overwrite = True, delimiter = "\t"):
+    def __init__(self, outname, first_tstart, overwrite = True, delimiter = "\t"):
         '''
         Initialises the object, opens file handler and writes the header (if appropriate)
 
         outname: str
                 Path to the output file. If it ends in '.npy' it will make a binary file
                 Otherwise '.txt' for human readable
+
+        first_start: Time
+                Astropy TIme for beginning of file
         
         overwrite: bool
                 overwrite an existing file or not
@@ -79,6 +84,7 @@ class CandidateWriter:
         '''
         self.outname = outname
         self.overwrite = overwrite
+        self.first_tstart = first_tstart
         outtype = outname.split('.')[-1].lower()
         assert outtype in ('gz', 'txt','npy'), f'Invalid output type {outtype} for {outname}'
         self.gzip = False
@@ -129,8 +135,9 @@ class CandidateWriter:
             hdr_str = self.delimiter.join(i for i in self.out_dtype.names)
             self.fout.write("# " + hdr_str + "\n")
                 
-    def interpret_cands(self, rawcands, iblk, plan, first_tstart, raw_noise_level):
+    def interpret_cands(self, rawcands, iblk, plan, raw_noise_level):
         ncands = len(rawcands)
+        first_tstart = self.first_tstart
         candidates = np.zeros(ncands, self.out_dtype)
 
         # don't bother computing everything it if it's empty
@@ -169,8 +176,8 @@ class CandidateWriter:
         else:
             raise Exception("VG has messed up somewhere! Kill him!")
 
-    def interpret_and_write_candidates(self, rawcands, iblk, plan, first_tstart, raw_noise_level):
-        c = self.interpret_cands(rawcands, iblk, plan, first_tstart, raw_noise_level)
+    def interpret_and_write_candidates(self, rawcands, iblk, plan, raw_noise_level):
+        c = self.interpret_cands(rawcands, iblk, plan, raw_noise_level)
         self.write_cands(c)
         return c
 
