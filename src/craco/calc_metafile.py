@@ -24,6 +24,7 @@ class CalcMetafile(MetadataFile):
     def __init__(self, fname, calc_results):
         super().__init__(fname)
         self._calc_results = calc_results
+        self.flags = np.zeros(self.nant, dtype=bool)
 
     def uvw_at_time(self, mjd, beam=None):
         assert beam is None, 'CalcMetafile only knows about 1 beam'
@@ -44,7 +45,7 @@ class CalcMetafile(MetadataFile):
         return uvw
 
     def flags_at_time(self, mjd):
-        return np.zeros(self.nant, dtype=bool)
+        return self.flags
         
 
 def _main():
@@ -62,3 +63,4 @@ def _main():
 
 if __name__ == '__main__':
     _main()
+
