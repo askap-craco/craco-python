@@ -137,7 +137,7 @@ class ScanPrep:
 
 
     @staticmethod
-    def create_from_metafile(metafile, ant_numbers, fcmfile=None, duration=1*u.hour):
+    def create_from_metafile(metafile, valid_ant_numbers, fcmfile=None, duration=1*u.hour):
         if isinstance(metafile, str):
             metafile = MetadataFile(metafile)
 
@@ -155,7 +155,7 @@ class ScanPrep:
         scan_id = metafile.d0['scan_id']
         prep = ScanPrep(targname, sbid, scan_id, fcmfile)
         prep.add_calc11_configuration(phase_centers,t0, t0+duration)
-        prep.ant_numbers   = ant_numbers
+        prep.valid_ant_numbers   = valid_ant_numbers
         prep.metafilename = 'metafile.json'
         metafile.saveto(os.path.join(prep.outdir, prep.metafilename))
         prep.save()

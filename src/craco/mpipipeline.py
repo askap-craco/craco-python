@@ -38,6 +38,7 @@ from craft.craco import ant2bl, baseline_iter
 from craco import mpiutil
 from craft.cmdline import strrange
 from craco.timer import Timer
+from craco.prep_scan import ScanPrep
 from craco.mpi_appinfo import MpiPipelineInfo
 
     
@@ -123,15 +124,24 @@ class MpiObsInfo:
 
         self.__fid0 = None # this gets sent with some transposes later
 
-        if self.pipe_info.is_beam_processor and values.metadata is not None:
-            # TODO: implement calc11 and getting sources from .... elsewhere
+        outdir = pipe_info.values.outdir
+        indir = outdir.replace('/data/craco/','/CRACO/DATA_00/') # yuck, yuck, yuck - but I don't have time for this right now
+        
+        if values.metadata is not None:
             self.md = MetadataFile(values.metadata)
+            valid_ants_0based = np.arange(self.nant)
         else:
-            self.md = MetadataDummy()
+            log.info('Loading scan prep from %d', indir)
+            self._prep = ScanPrep.load(indir)
+            self.md = self._prep.calc_meta_file(self.beamid)
+            valid_ants_0based = np.array(self._prep.valid_ant_numbers) - 1
+            #self.md = MetadataDummy()
 
-        self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
-        assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
-
+        assert np.all(valid_ants_0based >= 0)
+        flag_ants_0based = set(np.array(self.values.flag_ants) - 1)
+        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based))))
+        log.info('Valid ants: %s', self.valid_ants_0based+1)
+        #assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
   
     def sources(self):
         '''
