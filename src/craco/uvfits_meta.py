@@ -216,7 +216,10 @@ def open(*args, **kwargs):
         # it won't work for as it relies on all the machinery to overwrite UVWs which is only in metadata 
         # file at the moment.
         if 'calc11' in kwargs.keys():
-            raise ValueError('Sorry we dont yet know how to do calc11 without a metadata file. long story')
+            if kwargs['calc11']:
+                raise ValueError('Sorry we dont yet know how to do calc11 without a metadata file. long story')
+            
+            del kwargs['calc11']
 
         x = uvfits.open(*args, **kwargs)
     else:

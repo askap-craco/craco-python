@@ -385,7 +385,6 @@ class Pipeline:
                                   values.dflag_cas_threshold,
                                   values.dflag_ics_threshold,
                                   values.dflag_tblk)
-        self.first_tstart = plan.tstart
         self.update_plan(plan)
         self.image_starts = None
         self.fdmt_starts = None
@@ -1016,12 +1015,31 @@ class VisSource:
 
 
 class PipelineWrapper:
-    def __init__(self, f, values, devid):
-        self.plan = PipelinePlan(f, values)
+    def __init__(self, planinfo, values, devid, startinfo=None):
+        '''
+        Create a pipeilne wrapper
+        :planinfo: Adapter containg observation info for the plan
+        :values: command line arguments
+        :device id: pyxrt device ID - I don't recal why this is seaparet
+        :startinfo: Info adapter for the beginning of the file - we pull the tstart 
+        from this because the planinfo might have a tstart in the future. If None then we use 
+        planinfo
+        '''
+        self.plan = PipelinePlan(planinfo, values)
         self.device = pyxrt.device(devid)
         self.xbin = pyxrt.xclbin(values.xclbin)
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values
+
+        if startinfo is None:
+            startinfo = planinfo
+
+        self.startinfo = startinfo
+        self.first_tstart = startinfo.tstart
+
+        requested_start_mjd = startinfo.tstart if values.start_mjd is None else values.start_mjd
+        log.info('Making pipeline wrapper. first_tstart=%s plan_tstart=%s requirested mjd=%s diff=%s', self.first_tstart.tai.mjd,
+                 planinfo.tstart.tai.mjd, requested_start_mjd.tai.mjd, (requested_start_mjd - self.first_tstart).to(units.millisecond) )
 
         # New XRT versions return 'None' for IPs and return kernels instead
         iplist = self.xbin.get_ips()
@@ -1043,7 +1061,7 @@ class PipelineWrapper:
                'nifs':1,
                'src_raj_deg':plan.phase_center.ra.deg,
                'src_dej_deg':plan.phase_center.dec.deg,
-               'tstart':plan.tstart.utc.mjd,
+               'tstart':self.first_tstart.utc.mjd,
                'tsamp':plan.tsamp_s.value,
                'fch1':plan.fmin/1e6,
                'foff':plan.foff/1e6,
@@ -1079,9 +1097,9 @@ class PipelineWrapper:
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
-        if f.freq_config.nmasked_channels > 0:
-            log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
-            p.set_channel_flags(f.freq_config.channel_mask, True)
+        if planinfo.freq_config.nmasked_channels > 0:
+            log.info('Flagging channels from input: %d', planinfo.freq_config.nmasked_channels)
+            p.set_channel_flags(planinfo.freq_config.channel_mask, True)
             
         if values.flag_chans:
             log.info('Flagging %d channels %s from command line', len(values.flag_chans), values.flag_chans)
@@ -1098,7 +1116,7 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile)
+        candout = CandidateWriter(candfile, self.first_tstart)
         self.total_candidates = 0
         self.candout = candout
         self.iblk = 0
@@ -1176,7 +1194,7 @@ class PipelineWrapper:
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
         if len(candidates) > 0:
-            self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.first_tstart, p.last_bc_noise_level)
+            self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.last_bc_noise_level)
             t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1214,7 +1232,7 @@ class PipelineWrapper:
         self.iblk += 1
 
     def close(self):
-        candout = self.candout
+        candout = self.candoutc
         pc_filterbank = self.pc_filterbank
         mask_fil_writer = self.mask_fil_writer
         cas_fil_writer = self.cas_fil_writer
@@ -1261,9 +1279,10 @@ def _main():
         isamp_update = update_uv_blocks * nt // 2
 
     log.info('Creating UVW data for isamp=%d will update every %d samples', isamp_update, update_uv_blocks*nt)
-    adapter = f.vis_metadata(isamp_update)
+    plan_info = f.vis_metadata(isamp_update)
+    start_info = f.vis_metadata(0)
         
-    pipeline_wrapper = PipelineWrapper(adapter, values, values.device)
+    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
@@ -1288,10 +1307,10 @@ def _main():
             
             if update_now:
                 isamp_update += update_uv_blocks*nt
-                adapter = f.vis_metadata(isamp_update)
+                plan_info = f.vis_metadata(isamp_update)
                 t.tick('get_adapter')
-                log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
-                latest_plan = pipeline_wrapper.update_plan(adapter)
+                log.info('Updating plan iblk=%d isamp=%d plan_info=%s', iblk, isamp_update, plan_info)
+                latest_plan = pipeline_wrapper.update_plan(plan_info)
                 if values.save_psf:
                     psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
                     log.info("Saving the psf to disk with name=%s", psf_name)
@@ -1308,7 +1327,6 @@ def _main():
     finally:
         f.close()
         pipeline_wrapper.close()
-        handler.dump()
                      
 if __name__ == '__main__':
     _main()
