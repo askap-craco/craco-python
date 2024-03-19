@@ -135,10 +135,10 @@ def _main():
     else:
         metafile = ''
 
-    valid_ants = set(prep.ant_numbers) # 1 based antenna numbers to include
+    valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
     all_ants = set(np.arange(36) + 1)
     flagged_ants = all_ants - valid_ants # 1 based antenna number to not include
-    flagged_ants += set(values.flag_ants) # also flag antennas from the cmdline
+    flagged_ants = flagged_ants + set(values.flag_ants) # also flag antennas from the cmdline
     flag_ant_str = ','.join(sorted(list(flagged_ants)))
     antflag = '--flag-ants {flag_ant_str}'
     
@@ -159,7 +159,6 @@ def _main():
         logfile = open(os.path.join(scandir, 'run.log'), 'w')
 
     env = os.environ.copy()
-    env['SCANDIR'] = scandir
     proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT, env=env)
     finish = False
 
