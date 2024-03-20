@@ -126,20 +126,24 @@ class MpiObsInfo:
 
         outdir = pipe_info.values.outdir
         indir = outdir.replace('/data/craco/','/CRACO/DATA_00/') # yuck, yuck, yuck - but I don't have time for this right now
+        log.info('Loading scan prep from %s', indir)
+        self._prep = ScanPrep.load(indir)
         
         if values.metadata is not None:
             self.md = MetadataFile(values.metadata)
             valid_ants_0based = np.arange(self.nant)
         else:
-            log.info('Loading scan prep from %d', indir)
-            self._prep = ScanPrep.load(indir)
-            self.md = self._prep.calc_meta_file(self.beamid)
+            if self.pipe_info.mpi_app.is_beam_processor: # beamid only defined for beam processors
+                self.md = self._prep.calc_meta_file(self.beamid)
+            else:
+                self.md = None
+
             valid_ants_0based = np.array(self._prep.valid_ant_numbers) - 1
             #self.md = MetadataDummy()
 
         assert np.all(valid_ants_0based >= 0)
         flag_ants_0based = set(np.array(self.values.flag_ants) - 1)
-        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based))))
+        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based) - set([31,32,33,34,35,36]))))
         log.info('Valid ants: %s', self.valid_ants_0based+1)
         #assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
   
@@ -165,7 +169,7 @@ class MpiObsInfo:
         '''
         Returns np array (nant, 3) UVW values in seconds at the given time
         '''
-        uvw = self.md.uvw_at_time(mjd)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
+        uvw = self.md.uvw_at_time(mjd, self.beamid)[self.valid_ants_0based, :]  /constants.c #convert to seconds
 
         return uvw
 
@@ -943,12 +947,13 @@ def proc_beam_run(proc):
             t.tick('visblock')
             vis_file.write(vis_block)
             t.tick('visfile')
-            if req.Test:
+            if False: #req.test():
                 plan = req.wait()
                 req = beam_comm.irecv(source=1)
-            t.tick('recv plan')
-            pipeline_sink.set_next_plan(plan)
-            t.tick('set next plan')
+                t.tick('recv plan')
+                pipeline_sink.set_next_plan(plan)
+                t.tick('set next plan')
+                
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
 

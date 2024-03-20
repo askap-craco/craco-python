@@ -79,7 +79,7 @@ def _main():
 
     os.chdir(scandir)
 
-    touchfile('SCAN_START', directory=scandir)
+    touchfile('SCAN_START', directory=scandir, check_exists=False)
         
     target_file = os.path.join(scandir, 'ccap.fits')
     
@@ -138,9 +138,9 @@ def _main():
     valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
     all_ants = set(np.arange(36) + 1)
     flagged_ants = all_ants - valid_ants # 1 based antenna number to not include
-    flagged_ants = flagged_ants + set(values.flag_ants) # also flag antennas from the cmdline
-    flag_ant_str = ','.join(sorted(list(flagged_ants)))
-    antflag = '--flag-ants {flag_ant_str}'
+    flagged_ants = flagged_ants.union(set(values.flag_ants)) # also flag antennas from the cmdline
+    flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
+    antflag = f'--flag-ants {flag_ant_str}'
     
     # for mpicardcap
     if values.transpose:

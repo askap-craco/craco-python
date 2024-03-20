@@ -100,7 +100,7 @@ class ScanManager:
             else:
                 pass # Waiting for things to stabilise
 
-        log.debug('Got %d/%d good ants. Frac OK=%d flags ok? %s all_unchanged=%s ok to run? %s running? %s', \
+        log.debug('Got %d/%d good ants. Frac OK=%0.1fflags ok? %s all_unchanged=%s ok to run? %s running? %s', \
                   num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run, self.running)
         
         return self.running

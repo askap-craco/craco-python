@@ -78,6 +78,7 @@ class Obsman:
         # restart
         
         if running:
+            pass # don't restart yet - I think we need to load up a new scan info so we don't end up restaring with the same metadadta?
             self.start_process(self.curr_scan_info)
         
     def scan_changed(self, scan_info):

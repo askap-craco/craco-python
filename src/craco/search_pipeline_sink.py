@@ -163,8 +163,8 @@ class SearchPipelineSink:
 
     def set_next_plan(self, next_plan):
         '''
-        Update the value of hte next plan. It might not necssarily be used immediately, but
-        we'll have it in hand just in case
+        Update the value of the next plan. It might not necssarily be used immediately, but
+        we'll have it in hand just in case. The plan is a craco-plan that was made in a separate process
         '''
         log.info('Got next plan %s', next_plan)
         self._next_plan = next_plan

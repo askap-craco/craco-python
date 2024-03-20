@@ -13,16 +13,18 @@ echo "Running $0 with argumnets $@ `pwd` with rankfile=$rankfile hostfile=$hostf
 # IF HCOLL IS ENABED WITH col-hcoll-enable 1 THEN IT CAN HANGS ON MPI_FINALIZE !!!!
 # hcoll uses mlx5 even if its not enabled in UCX_TLS
 
-use_roce=0
-enable_hcoll=0
-verbose=1
+use_roce=1
+enable_hcoll=1
+verbose=0
+oob_verbose=0
+
 
 export HCOLL_VERBOSE=$verbose
 if [[ $use_roce == 1 ]] ; then
     echo "Setting up for RoCE"
     export UCX_NET_DEVICES=mlx5_0:1,mlx5_2:1
     export UCX_TLS=self,mm,cma,rc,rc_mlx5,ud,ud_mlx5
-    export UCX_IB_GID_INDEX=3
+    export UCX_IB_GID_INDEX=0
 else
     echo "Setting up for TCP"
     if [[ $(hostname) == "athena" ]] ; then
@@ -32,6 +34,12 @@ else
     export UCX_NET_DEVICES=ens3f0np0,ens6f0np0
     export UCX_TLS=self,tcp,mm,cma
 fi
+ifaces=$UCX_NET_DEVICES
+# use OB1 and TCP
+tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0 --mca orte_base_help_aggregate 0"
+
+# USE UCX
+ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno8303 --mca oob_base_verbose $oob_verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
 
 
 echo UCX_TLS=$UCX_TLS
@@ -57,14 +65,6 @@ if [[ -z $SCANDIR ]] ; then
     SCANDIR='.'
 fi
 echo "Using SCANDIR $SCANDIR"
-
-
-ifaces=$UCX_NET_DEVICES
-# use OB1 and TCP
-tcpargs=" --mca pml ob1 --mca btl tcp,self --mca btl_tcp_if_include $ifaces --mca oob_tcp_if_include $ifaces --mca coll_hcoll_enable $enable_hcoll -x coll_hcoll_np=0 --mca orte_base_help_aggregate 0"
-
-# USE UCX
-ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca oob_tcp_if_include eno8303 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll -x HCOLL_VERBOSE --mca pml_ucx_verbose $verbose"
 
 # can add --report-bindings to be verbose
 commonargs="-x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCANDIR"
@@ -104,12 +104,17 @@ nbeams=36
 #pipeline=printenv.sh
 echo Pipeline is $pipeline
 
-cmd="mpirun --display-map $commonargs $tcpargs -hostfile $HOSTFILE -map-by ppr:1:socket
-    -np $ncards -- $pipeline --proc-type rx    :  
-    -np $nbeams -- $pipeline --proc-type beam  :
-    -np $nbeams -- $pipeline --proc-type plan  :
-    -np 1       -- $pipeline --proc-type mgr   : 
+cmd="mpirun --display-map $commonargs -hostfile $HOSTFILE -map-by ppr:1:socket
+    $ucxargs -np $ncards -- $pipeline --proc-type rx    :  
+    $ucxargs -np $nbeams -- $pipeline --proc-type beam  :
+    $ucxargs -np $nbeams -- $pipeline --proc-type plan  :
+    $ucxargs -np 1       -- $pipeline --proc-type mgr   : 
+    $ucxargs 
     -np $nbeams -- $pipeline --proc-type cand "
+
+#cmd="mpirun --display-map $commonargs $tcpargs -hostfile $HOSTFILE -map-by ppr:1:socket
+#    -np $ncards -- $pipeline --proc-type rx    :  
+#    -np $nbeams -- $pipeline --proc-type beam  "
 
 echo on `date` running $cmd
 $cmd

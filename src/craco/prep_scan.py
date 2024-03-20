@@ -117,6 +117,9 @@ class ScanPrep:
     def load(outdir):
         with open(ScanPrep.index_file_name(outdir), 'rb') as fin:
             prep = pickle.load(fin)
+        
+        # set local out dir again in case this file has moved
+        prep.outdir = outdir
 
         return prep
 
@@ -182,7 +185,7 @@ class ScanPrep:
         Returns a calc metadata file for the given beam
         '''
         results = self.results_file(ibeam)
-        mfstub = self.metadata_file
+        mfstub = self.metadata_file_name
         calc_meta = CalcMetafile(mfstub.data, results)
         return calc_meta
 

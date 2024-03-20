@@ -1123,14 +1123,20 @@ class PipelineWrapper:
 
     def update_plan(self, new_data):
         '''
-        Literally make an entire new plan out of the data, and shove int ehlookup tables
+        Literally make an entire new plan out of the plan info data, and shove int ehlookup tables
         Completley inelegant, but better htan nothing for now
         '''
-        log.info('Updating plan')
+        log.info('Updating from data')
         old_plan = self.plan
         assert old_plan is not None
         self.plan = PipelinePlan(new_data, self.values, prev_plan=old_plan)
         self.pipeline.update_plan(self.plan)
+        return self.plan
+    
+    def update_plan_from_plan(self, new_plan):
+        log.info('Updating plan from plan')
+        self.plan = new_plan
+        self.pipeline.update_plan(new_plan)
         return self.plan
 
     def write(self, input_flat, cas=None, ics=None):
