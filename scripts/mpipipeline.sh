@@ -52,8 +52,8 @@ echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 extra_args="--hostfile $hostfile"
 
 # dont run this yet
-
-#mpipipeline --dump-rankfile $rankfile $extra_args $@
+rm rx.rank beam.rank
+mpipipeline --dump-rankfile $rankfile $extra_args $@
 
 retval=$?
 if [ $retval -ne 0 ]; then
@@ -99,23 +99,25 @@ mgrhost=skadi-00
 #    -rf beam.rank $pipeline   :
 #    -host $mgrhost -np 1 $pipeline "
 
-ncards=1
-nbeams=36
+ncards=$(cat rx.rank | wc -l)
+nbeams=$(cat beam.rank | wc -l)
+nhosts=$(cat $HOSTFILE | wc -l)
 #pipeline=printenv.sh
 echo Pipeline is $pipeline
+echo NBEAMS=$nbeams NCARDS=$ncards NHOSTS=$nhosts
 
-cmd="mpirun --display-map $commonargs -hostfile $HOSTFILE -map-by ppr:1:socket
-    $ucxargs -np $ncards -- $pipeline --proc-type rx    :  
-    $ucxargs -np $nbeams -- $pipeline --proc-type beam  :
-    $ucxargs -np $nbeams -- $pipeline --proc-type plan  :
-    $ucxargs -np 1       -- $pipeline --proc-type mgr   : 
-    $ucxargs 
-    -np $nbeams -- $pipeline --proc-type cand "
+#cmd="mpirun --oversubscribe --display-map $commonargs -hostfile $HOSTFILE 
+#    $ucxargs -np $ncards -map-by ppr:4:socket -- $pipeline --proc-type rx    :  
+#    $ucxargs -np $nbeams -map-by ppr:1:socket -- $pipeline --proc-type beam  :
+#    $ucxargs -np $nbeams -map-by ppr:1:socket -- $pipeline --proc-type plan  :
+#    $ucxargs -np 1       -map-by ppr:1:socket -- $pipeline --proc-type mgr   : 
+#    $ucxargs -np $nbeams -map-by ppr:1:socket -- $pipeline --proc-type cand "
 
 #cmd="mpirun --display-map $commonargs $tcpargs -hostfile $HOSTFILE -map-by ppr:1:socket
 #    -np $ncards -- $pipeline --proc-type rx    :  
 #    -np $nbeams -- $pipeline --proc-type beam  "
 
+cmd="mpirun --display-map $commonargs -rankfile mpipipeline.rank $ucxargs $pipeline"
 echo on `date` running $cmd
 $cmd
 

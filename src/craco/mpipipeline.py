@@ -549,9 +549,11 @@ def proc_rx_get_headers(proc):
 
     # tell all ranks about the headers
     rx_comm = pipe_info.mpi_app.app_comm
-    world = pipe_info.mpi_app.world
     all_hdrs = rx_comm.gather(ccap.fpga_headers, root=0)
-    log.info('Got headers from other RX. Broadcasting')
+    if all_hdrs is None:
+        all_hdrs = [] # Just return Empty if we're not root
+    
+    log.info('Got headers from other RX')
     proc.ccap = ccap
     return all_hdrs
 
