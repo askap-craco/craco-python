@@ -91,6 +91,7 @@ class MpiAppInfo:
         rxbeam_colour = 0 if self.is_rx_processor or self.is_beam_processor else -1
 
         # communicator for the data to from RX to beam
+        log.info('Splitting rxbeam colour=%d rank=%s', rxbeam_colour, self.world_rank)
         rx_beam_comm = comm.Split(rxbeam_colour, self.world_rank)
         self.rx_beam_comm = rx_beam_comm if rxbeam_colour >= 0 else None
 
