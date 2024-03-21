@@ -955,12 +955,13 @@ def proc_beam_run(proc):
             t.tick('visblock')
             vis_file.write(vis_block)
             t.tick('visfile')
-            if False: #req.test():
-                plan = req.wait()
-                req = beam_comm.irecv(source=1)
-                t.tick('recv plan')
+            plan_received, plan = req.test()
+            t.tick('recv plan')
+
+            if plan_received:
                 pipeline_sink.set_next_plan(plan)
                 t.tick('set next plan')
+                req = beam_comm.irecv(source=1)
                 
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
