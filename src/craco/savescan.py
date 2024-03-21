@@ -136,9 +136,13 @@ def _main():
         metafile = ''
 
     valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
-    all_ants = set(np.arange(36) + 1)
+
+    # Antenna handling for 36 antennas is a whole massive issue. WE're not going to handle that now. 
+    # we'll just assume we have 30 anntennas - there are all sorts of bugs in mpipipeline that cant handle sending through flagged ants 31-36
+    all_ants = set(np.arange(30) + 1)
     flagged_ants = all_ants - valid_ants # 1 based antenna number to not include
     flagged_ants = flagged_ants.union(set(values.flag_ants)) # also flag antennas from the cmdline
+    flagged_ants = flagged_ants - set(np.arange(6) + 31)
     flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
     antflag = f'--flag-ants {flag_ant_str}'
     

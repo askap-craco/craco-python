@@ -61,20 +61,23 @@ if [ $retval -ne 0 ]; then
     exit $?
 fi
 
-if [[ -z $SCANDIR ]] ; then
-    SCANDIR='.'
+if [[ -z $SCAN_DIR ]] ; then
+    SCAN_DIR='.'
 fi
-echo "Using SCANDIR $SCANDIR"
+echo "Using SCAN_DIR $SCAN_DIR"
 
 # can add --report-bindings to be verbose
-commonargs="-x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCANDIR"
+commonargs="-x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCAN_DIR"
 
 # runwith the rankfile
 
 echo "UCX_NET_DEVICES=$UCX_NET_DEVICES UCX_TLS=$UCX_TLS"
 
 echo "Making directories"
-mpirun -hostfile $hostfile -map-by ppr:1:node mkdir -p $SCANDIR
+# directories on host
+mpirun -hostfile $hostfile -map-by ppr:1:node mkdir -p $SCAN_DIR
+# local directory
+mkdir -p $SCAN_DIR
 
 # TODO: MPI can abort explosively if you like by doing `which python` -m mpi4py before `which pipeline`
 # but I hve trouble with pyton versions 
@@ -117,7 +120,7 @@ echo NBEAMS=$nbeams NCARDS=$ncards NHOSTS=$nhosts
 #    -np $ncards -- $pipeline --proc-type rx    :  
 #    -np $nbeams -- $pipeline --proc-type beam  "
 
-cmd="mpirun --display-map $commonargs -rankfile mpipipeline.rank $ucxargs $pipeline"
+cmd="mpirun  $commonargs -rankfile mpipipeline.rank $ucxargs $pipeline"
 echo on `date` running $cmd
 $cmd
 

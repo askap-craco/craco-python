@@ -143,7 +143,8 @@ class MpiObsInfo:
 
         assert np.all(valid_ants_0based >= 0)
         flag_ants_0based = set(np.array(self.values.flag_ants) - 1)
-        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based) - set([31,32,33,34,35,36]))))
+        # Make sure we remove antenans 31-36 (1 based) = 30-35 (00based)
+        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based) - set(np.arange(6) + 30))))
         log.info('Valid ants: %s', self.valid_ants_0based+1)
         #assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
   
@@ -360,6 +361,11 @@ class MpiObsInfo:
 
     @property
     def nant(self):
+        '''
+        Returns the number of antennas in teh source data.
+        Not necessarily the number of antennas that are valid or that will be transposed
+        '''
+        #log.info('Nant is %d nant_valid is %d valid ants: %s', self.main_merger.nant, self.nant_valid, self.valid_ants_0based)
         return self.main_merger.nant
 
     @property
