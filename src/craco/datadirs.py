@@ -224,14 +224,15 @@ class ScanDir:
         with open(self.scan_rank_file) as fp:
             rank_file_text = fp.read()
         node_beam_map = re.findall(
-            "=skadi-(\d{2}).*# Beam (\d{1,2}) xrtdevid",
+            "=skadi-(\d{2}).*# Beam .* (\d{1,2}).*xrtdevid",
             rank_file_text
         )
-
-        if len(node_beam_map) != 36:
-            log.info("not all beam recorded...")
         
         self.beam_node_dict = {int(beam): node for node, beam in node_beam_map}
+
+        if len(self.beam_node_dict) != 36:
+            log.info("not all beams recorded in rankfile... %s", self.beam_node_dict)
+
 
     def beam_uvfits_path(self, beam):
         scan_dir = self.datadirs.scan_dir(
@@ -374,3 +375,24 @@ class CalDir:
 
     def beam_cal_smoothfile(self, beam):
         return f"{self.beam_cal_dir(beam)}/b{beam:0>2}.aver.4pol.smooth.npy"
+
+
+def _main():
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument(dest='files', nargs='+')
+    parser.set_defaults(verbose=False)
+    values = parser.parse_args()
+    if values.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    dir = ScanDir(values.files[0])
+    print(len(dir.beam_node_dict), dir.beam_node_dict)
+    
+    
+
+if __name__ == "__main__":
+    _main()
