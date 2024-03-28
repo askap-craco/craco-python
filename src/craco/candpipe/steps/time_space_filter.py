@@ -127,7 +127,7 @@ class Step(ProcessingStep):
 
             subgrouped = data.groupby('spatial_id')
 
-            if mSlope > config['threshold']['mSlope']:
+            if (mSlope > config['threshold']['mSlope']) or (mSlope == 0):
                 spatial_idxs = list(subgrouped.max()['SNR'].nlargest(2).index)
             else:
                 spatial_idxs = list(subgrouped.max()['SNR'].nlargest(1).index)
