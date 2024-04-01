@@ -227,6 +227,12 @@ class ScanDir:
             "=skadi-(\d{2}).*# Beam .* (\d{1,2}).*xrtdevid",
             rank_file_text
         )
+
+        if len(node_beam_map) == 0:
+            node_beam_map = re.findall(
+                "=skadi-(\d{2}).*# Beam (\d{1,2}) xrtdevid",
+                rank_file_text
+            )
         
         self.beam_node_dict = {int(beam): node for node, beam in node_beam_map}
 
