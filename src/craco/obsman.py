@@ -73,13 +73,17 @@ class Obsman:
         self.shutdown()
 
     def restart_process(self):
-        running = self.process is not None
+        running = self.is_running
         self.terminate_process()
         # restart
         
         if running:
             pass # don't restart yet - I think we need to load up a new scan info so we don't end up restaring with the same metadadta?
             self.start_process(self.curr_scan_info)
+
+    @property
+    def is_running(self):
+        return self.process is not None
         
     def scan_changed(self, scan_info):
         sbid = scan_info.sbid
@@ -206,7 +210,9 @@ class Obsman:
             log.debug('Process pid=%s running with return code %s for %0.1f minutes', self.process.pid, retcode, minutes)
             if retcode is not None or minutes > self.values.timeout:
                 log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting', retcode, minutes, self.values.timeout)
-                self.restart_process()
+                self.terminate_process()
+                
+        return self.is_running
 
     def shutdown(self):
         log.info('Shutting down process')
@@ -302,10 +308,11 @@ class MetadataObsmanDriver:
         d = metadata_to_dict(pub_data, self.sbid)
         mgr = self.scan_manager
         next_scan_running = mgr.push_data(d)
+        self.scan_running = self.obsman.poll_process()
         if self.scan_running:
             if next_scan_running: # continue running scan
                 pass                
-            else: # stop running scan
+            else: # metadata says to stop running scan
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
@@ -314,9 +321,6 @@ class MetadataObsmanDriver:
             else:
                 pass # continue not running a scan
             
-        self.obsman.poll_process()
-        self.scan_running = next_scan_running
-
     def close(self):
         self.obsman.terminate_process()
 

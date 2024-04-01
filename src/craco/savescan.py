@@ -144,8 +144,11 @@ def _main():
     flagged_ants = flagged_ants.union(set(values.flag_ants)) # also flag antennas from the cmdline
     flagged_ants = flagged_ants - set(np.arange(6) + 31)
     flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
-    antflag = f'--flag-ants {flag_ant_str}'
-    
+
+    if flag_ant_str:
+        antflag = f'--flag-ants {flag_ant_str}'
+    else:
+        antflag = ''    
     # for mpicardcap
     if values.transpose:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag}'
