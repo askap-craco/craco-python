@@ -289,7 +289,7 @@ class MetadataObsmanDriver:
             # pick up antenna list from observation variables
             self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
             self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
-            self.scan_manager = ScanManager(self.ant_numbers )
+            self.scan_manager = ScanManager(self.ant_numbers, frac_onsource=self.obsman.values.frac_onsource )
             log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
         elif sbid == self.sbid:
             assert state != ObsState.EXECUTING
@@ -336,6 +336,7 @@ def _main():
     parser.add_argument(dest='cmd', nargs='+')
     parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')
     parser.add_argument('--driver', choices=('meta','epics'), default='meta', help='DRive with epics or metadata')
+    parser.add_argument('--frac-onsource', default=0.9, type=float, help='Fraction of antennas that need to be on source to start a scan')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
