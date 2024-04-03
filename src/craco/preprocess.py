@@ -113,9 +113,74 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
+@njit
+def fast_cas_crs(input_data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs):
+    '''
+    input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
+    bl_weights: Input mask array - (nbl - boolean; 0 for flagged, 1 for good
+    fixed_freq_weights: numpy array containing the fixed freq weights (nf) - boolean; 0 for flagged, 1 for good
+    input_tf_weights: numpy array containing 2D tf weights (nf, nt) - boolean; 0 for flagged, 1 for good
+    cas: Sum of amplitude of all baselines - unmasked numpy array (nf, nt) - float
+    crs: Sum of real part of all baselines - unmasked numpy array (nf, nt) - float
+    '''
+    nbl, nf, nt = input_data.shape
+    for i_bl in range(nbl):
+        if bl_weights[i_bl] == 0:
+            continue        #If all baselines happen to be flagged, then we don't touch cas and crs, which means the values may be garbage!!! TODO - fix this by ensuring cas and crs are 0s
+        for i_f in range(nf):
+            if fixed_freq_weights[i_f] == 0:
+                cas[i_f, :] = 0
+                crs[i_f, :] = 0
+            #If Keith can gaurantee that input_data will be zeroed whenever there is a packet drop or metadata is flagged, then I don't need to multiply by the input_weights here
+            channel_baseline = input_data[i_bl, i_f, :] * input_tf_weights[i_f, :]
+
+            if i_bl == 0:
+                cas[i_f, :] = channel_baseline.real**2 + channel_baseline.imag**2
+                crs[i_f, :] = channel_baseline.real**2
+            else:
+                cas[i_f, :] += channel_baseline.real**2 + channel_baseline.imag**2
+                crs[i_f, :] += channel_baseline.real**2
+
+
+def get_simple_dynamic_rfi_masks(cas, crs, finest_nt, tf_weights, freq_radius, freq_threshold, time_radius, time_threshold):
+    '''
+    cas - (nf, nt) ndarray float 64
+    crs - (nf, nt) ndarray float 64
+    finest_nt - finest timescale (in samples) on which rms needs to be measured to do RFI mitigation
+    tf_weights - (nf, nt) - ndarray boolean, the output mask array derived from cas and crs only.
+                - Either an empty boolean (initialed to 1s) can be passed to this function, or the input_tf_masks (coming from dropped packets) can be passed, which will then automatically merged with the dynamic RFI masks here
+    freq_radius - int, units of nchan
+    freq_threshold - float, threshold above which the cas_rmses would get zapped
+    '''
+    nf, nt = cas.shape
+    assert nt % finest_nt == 0, "nt has to be a integral multiple of finest_nt"
+
+    nsubblock = nt / finest_nt
+
+    for isubblock in range(nsubblock):
+        cas_rmses = cas[isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
+        crs_rmses = crs[isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
+
+        freq_flag_cas, _ = iqrm_mask(cas_rmses, freq_radius, freq_threshold)
+        freq_flag_crs, _ = iqrm_mask(crs_rmses, freq_radius, freq_threshold)
+
+        tf_weights[freq_flag_cas, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
+        tf_weights[freq_flag_crs, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
+
+
+
+def get_complicated_dynamic_rfi_masks(cas, crs, finest_nt, rmses, Ai, Qi, N):
+    nf, nt = cas.shape
+    assert nt % finest_nt == 0 and (nt / finest_nt) % 2 == 0, "nt has to be a multiple in power of 2 of finest_nt, i.e. nt = finest_nt * 2^x"
+
+    nsubblocks = nt / finest_nt
+
+    #Plan to do multi-layer rms computation where we measure the rms over different time scales
+
+
 #import pdb
 @njit
-def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub = False, reset_scales = False):
+def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
     Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
@@ -133,7 +198,9 @@ def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, c
 
     
     input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
-    input_mask: Input mask array - (nbl, nf, nt). np.ndarray - boolean
+    bl_weights: Input weights for baselines - (nbl) ndarray - boolean; 0 means bad, 1 means good
+    input_tf_weights: Input weights for tf - (nf, nt) [For example due to dropped packets] ndarray - boolean; 0 means bad, 1 means good
+    fixed_freq_weights: Fixed - (nf). np.ndarray - boolean; 0 for bad, 1 for good
     output_buf: Output data array - (nbl, nf, nt*nsubblock). Won't be a masked array - complex64
     isubblock: integer - output_buf can hold mulitple input_blocks - isubblock is the counter
     Ai: numpy array to keep track of the running mean (nbl, nf) - complex64
@@ -175,12 +242,11 @@ def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, c
             return 1
     '''
     input_data = input_data
-    input_mask = input_mask
+    reset_scales = isubblock==0
 
     #assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
  
     cal_data = calsoln_data
-    cal_mask = calsoln_mask
 
     if target_input_rms is None:
         target_rms_value = 0
@@ -190,54 +256,42 @@ def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, c
         apply_rms = True
 
     for i_bl in range(nbl):
+
+        if bl_weights[i_bl] == 0:
+            output_buf[i_bl, :, isubblock*nt:(isubblock+1)*nt] = 0
+
+            if reset_scales:
+                Ai[i_bl] = 0
+                Qi[i_bl] = 0
+                N[i_bl] = 1
+            else:
+                #If we are not resetting scales in this block, then we basically leave all Ai, Qis and Ns untouched
+                pass
+            
+            continue
+                
         for i_f in range(nf):
-        
             if reset_scales:
                 Qi[i_bl, i_f] = 0
-                zeroth_samp = input_data[i_bl, i_f, 0]
-                #zeroth_samp_mask = input_mask[i_bl, i_f, 0]
-
-                #if not zeroth_samp_mask:
-                if not input_mask[i_bl, i_f, 0]:
-                    Ai[i_bl, i_f] = zeroth_samp
-                    N[i_bl, i_f] = 2
-                else:
-                    Ai[i_bl, i_f] = 0
-                    N[i_bl, i_f] = 1
-
-            ical_mask = cal_mask[i_bl, i_f]
-            if ical_mask:
-                #Skip all the computation, directly set the output values to zero, and go to the next channel
-                output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
                 Ai[i_bl, i_f] = 0
-                Qi[i_bl, i_f] = 0
-                N[i_bl, i_f] = 1                
+                N[i_bl, i_f] = 1
+
+            if fixed_freq_weights[i_f] == 0:
+                output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
                 continue
             
             for i_t in range(nt):
                 isamp = input_data[i_bl, i_f, i_t]
-                imask = input_mask[i_bl, i_f, i_t]
+                imask = input_tf_weights[i_f, i_t]
 
                 if imask:
                     output_buf[i_bl, i_f, isubblock*nt + i_t] = 0
 
-                    # if i_bl == 0:
-                    #     #Reset the CAS and CRS values at the start of the block -- this means that when we compute CAS of a block, we effective compute the CAS of a block with a column of 0s appended at the start, which I think should be fine.
-                    #     cas[:, :] = 0
-                    #     crs[:, :] = 0
-
                 else:
-                    Qi.real[i_bl, i_f] = Qi[i_bl, i_f].real + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.real - Ai[i_bl, i_f].real)**2
-                    Qi.imag[i_bl, i_f] = Qi[i_bl, i_f].imag + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.imag - Ai[i_bl, i_f].imag)**2
-                    Ai[i_bl, i_f] = Ai[i_bl, i_f] + (isamp - Ai[i_bl, i_f])/ N[i_bl, i_f]
+                    Qi.real[i_bl, i_f] += (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.real - Ai[i_bl, i_f].real)**2
+                    Qi.imag[i_bl, i_f] += (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp.imag - Ai[i_bl, i_f].imag)**2
+                    Ai[i_bl, i_f] += (isamp - Ai[i_bl, i_f])/ N[i_bl, i_f]
                     N[i_bl, i_f] += 1
-        
-                    # if i_bl == 0:
-                    #     cas[i_f, i_t] = isamp.real**2 + isamp.imag**2
-                    #     crs[i_f, i_t] = isamp.real
-                    # else:
-                    #     cas[i_f, i_t] += isamp.real**2 + isamp.imag**2
-                    #     crs[i_f, i_t] += isamp.real
 
                     if not apply_rms and not sky_sub:
                         #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
@@ -255,7 +309,7 @@ def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, c
                 #Loop through the data again and apply the various rescale factors and the cal soln
                 for i_t in range(nt):
                     isamp = input_data[i_bl, i_f, i_t]
-                    imask = input_mask[i_bl, i_f, i_t]
+                    imask = input_tf_weights[i_f, i_t]
 
                     if imask:
                         #Output has already been set to zero in the first loop. 
@@ -272,7 +326,8 @@ def fast_preprpocess(input_data, input_mask, output_buf, isubblock, Ai, Qi, N, c
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f]
 
 
-                
+class FastPreprocess:
+    def __init__(self, cal_soln, values, )
 
                 
 

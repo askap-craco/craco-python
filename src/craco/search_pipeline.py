@@ -26,6 +26,7 @@ from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
+from craco.preprocess import fast_cas_crs, fast_preprpocess, get_simple_dynamic_rfi_masks
 from craco.candidate_writer import CandidateWriter
 from craco import write_psf as PSF
 
@@ -439,6 +440,13 @@ class Pipeline:
     def solarray(self):
         return self.cal_solution.solarray
 
+    @property
+    def solarray_avgd(self):
+        if self.solarray.ndim == 4:
+            return self.solarray.mean(axis=2)
+        else:
+            return self.solarray
+        
     @property
     def num_input_cells(self):
         '''
@@ -1023,6 +1031,12 @@ class PipelineWrapper:
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values
 
+        self.cas_block = np.zeros((plan.nf, plan.nt), dtype=np.float32)
+        self.crs_block = np.zeros((plan.nf, plan.nt), dtype=np.float32)
+        self.Ai = np.zeros((plan.nbl, plan.nf), dtype=np.complex64)
+        self.Qi = np.zeros((plan.nbl, plan.nf), dtype=np.complex64)
+        self.N = np.ones((plan.nbl, plan.nf), dtype=np.int16)
+
         # New XRT versions return 'None' for IPs and return kernels instead
         iplist = self.xbin.get_ips()
         if iplist is None:
@@ -1115,7 +1129,7 @@ class PipelineWrapper:
         self.pipeline.update_plan(self.plan)
         return self.plan
 
-    def write(self, input_flat, cas=None, ics=None):
+    def write(self, input_flat, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, cas=None, ics=None):
         '''
         cas, and ics if specified help with flagging
         '''
@@ -1138,6 +1152,33 @@ class PipelineWrapper:
             input_flat_cal = input_flat * values.target_input_rms
 
         else:
+
+            fast_cas_crs(input_data=input_flat, 
+                         bl_weights=bl_weights, 
+                         fixed_freq_weights=fixed_freq_weights,
+                         input_tf_weights=input_tf_weights,
+                         cas = self.cas_block, 
+                         crs = self.crs_block)
+            
+            get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
+                                         finest_nt = values.dflag_tblk,
+                                         tf_weights=input_tf_weights,
+                                         freq_radius=values.dflag_fradius,
+                                         freq_threshold=values.dflag_cas_threshold)
+            
+            fast_preprpocess(input_data=input_flat,
+                             bl_weights=bl_weights,
+                             fixed_freq_weights=fixed_freq_weights,
+                             input_tf_weights=input_tf_weights,
+                             output_buf=output_buf,
+                             isubblock=0,
+                             Ai=self.Ai,
+                             Qi=self.Qi,
+                             N=self.N,
+                             calsoln_data=p.solarray_avgd,
+                             target_input_rms=values.target_input_rms,
+                             sky_sub=True)
+            
             input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer, cas_fil_writer)
             t.tick('flag')
             
