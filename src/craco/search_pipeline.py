@@ -26,7 +26,7 @@ from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
-from craco.preprocess import fast_cas_crs, fast_preprpocess, get_simple_dynamic_rfi_masks
+from craco.preprocess import FastPreprocess
 from craco.candidate_writer import CandidateWriter
 from craco import write_psf as PSF
 
@@ -463,6 +463,7 @@ class Pipeline:
         sets the channel flags. this is done by updating the calibraiton solution
         '''
         return self.cal_solution.set_channel_flags(chanrange, flagval)
+        
 
     def flag_frequencies_from_file(self, flag_frequency_file:str, flagval:bool):
         '''
@@ -768,11 +769,9 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-        if values.simulate_data:
-            #If we have simulated data, the array won't be a masked array hence this if-else
-            self.fast_baseline2uv(input_flat, self.uv_out)
-        else:
-            self.fast_baseline2uv(input_flat.data, self.uv_out)
+
+
+        self.fast_baseline2uv(input_flat, self.uv_out)
         nuvwide = self.uv_out.shape[0]
         self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
         self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
@@ -1031,12 +1030,6 @@ class PipelineWrapper:
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values
 
-        self.cas_block = np.zeros((plan.nf, plan.nt), dtype=np.float32)
-        self.crs_block = np.zeros((plan.nf, plan.nt), dtype=np.float32)
-        self.Ai = np.zeros((plan.nbl, plan.nf), dtype=np.complex64)
-        self.Qi = np.zeros((plan.nbl, plan.nf), dtype=np.complex64)
-        self.N = np.ones((plan.nbl, plan.nf), dtype=np.int16)
-
         # New XRT versions return 'None' for IPs and return kernels instead
         iplist = self.xbin.get_ips()
         if iplist is None:
@@ -1093,6 +1086,7 @@ class PipelineWrapper:
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
+        #TODO - VG - cleanup this mess below where we deal with multiple ways of getting the flag values, and set them inside the pipeline object.. Eww!
         if f.freq_config.nmasked_channels > 0:
             log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
             p.set_channel_flags(f.freq_config.channel_mask, True)
@@ -1104,7 +1098,12 @@ class PipelineWrapper:
         if values.flag_frequency_file:
             log.info('Flagging channels from file %s', values.flag_frequency_file)
             p.flag_frequencies_from_file(values.flag_frequency_file, True)
-            
+
+        self.fixed_freq_weights = ~p.cal_solution.solarray.mask[0, :, 0, 0]
+
+        blk_shape = (plan.nbl, plan.nf, plan.nt)
+        self.fast_preprocessor = FastPreprocess(blk_shape, p.cal_solution.solarray, values, self.fixed_freq_weights)
+
         self.pipeline = p
         p.clear_buffers(values)
 
@@ -1129,7 +1128,7 @@ class PipelineWrapper:
         self.pipeline.update_plan(self.plan)
         return self.plan
 
-    def write(self, input_flat, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, cas=None, ics=None):
+    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None):
         '''
         cas, and ics if specified help with flagging
         '''
@@ -1152,38 +1151,9 @@ class PipelineWrapper:
             input_flat_cal = input_flat * values.target_input_rms
 
         else:
-
-            fast_cas_crs(input_data=input_flat, 
-                         bl_weights=bl_weights, 
-                         fixed_freq_weights=fixed_freq_weights,
-                         input_tf_weights=input_tf_weights,
-                         cas = self.cas_block, 
-                         crs = self.crs_block)
-            
-            get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
-                                         finest_nt = values.dflag_tblk,
-                                         tf_weights=input_tf_weights,
-                                         freq_radius=values.dflag_fradius,
-                                         freq_threshold=values.dflag_cas_threshold)
-            
-            fast_preprpocess(input_data=input_flat,
-                             bl_weights=bl_weights,
-                             fixed_freq_weights=fixed_freq_weights,
-                             input_tf_weights=input_tf_weights,
-                             output_buf=output_buf,
-                             isubblock=0,
-                             Ai=self.Ai,
-                             Qi=self.Qi,
-                             N=self.N,
-                             calsoln_data=p.solarray_avgd,
-                             target_input_rms=values.target_input_rms,
-                             sky_sub=True)
-            
-            input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer, cas_fil_writer)
-            t.tick('flag')
-            
-            input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
-            t.tick('calibrate')
+            self.fast_preprocessor(input_flat, bl_weights, input_tf_weights)
+            t.tick('preprocessor')
+            input_flat_cal = self.fast_preprocessor.output_buf
 
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
@@ -1194,11 +1164,8 @@ class PipelineWrapper:
             t.tick('inject')
 
         if pc_filterbank is not None:
-            #if we've simulated data, the array will not be a masked array, so we have to treat it differently
-            if values.simulate_data:
-                d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
-            else:
-                d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
+            d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
+
 
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)

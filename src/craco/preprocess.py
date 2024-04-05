@@ -1,6 +1,7 @@
 from . import calibration
 from iqrm import iqrm_mask
 import numpy as np
+import warnings, pdb
 from craft.craco import bl2ant, bl2array
 from numba import njit, jit
 
@@ -142,7 +143,7 @@ def fast_cas_crs(input_data, bl_weights, fixed_freq_weights, input_tf_weights, c
                 crs[i_f, :] += channel_baseline.real**2
 
 
-def get_simple_dynamic_rfi_masks(cas, crs, finest_nt, tf_weights, freq_radius, freq_threshold, time_radius, time_threshold):
+def get_simple_dynamic_rfi_masks(cas, crs, finest_nt, tf_weights, freq_radius, freq_threshold, use_crs = False):
     '''
     cas - (nf, nt) ndarray float 64
     crs - (nf, nt) ndarray float 64
@@ -155,17 +156,20 @@ def get_simple_dynamic_rfi_masks(cas, crs, finest_nt, tf_weights, freq_radius, f
     nf, nt = cas.shape
     assert nt % finest_nt == 0, "nt has to be a integral multiple of finest_nt"
 
-    nsubblock = nt / finest_nt
+    nsubblock = int(nt / finest_nt)
 
     for isubblock in range(nsubblock):
-        cas_rmses = cas[isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
-        crs_rmses = crs[isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
+        cas_rmses = cas[:, isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
+        if use_crs:
+            crs_rmses = crs[:, isubblock*finest_nt:(isubblock+1)*finest_nt].std(axis=-1)
 
         freq_flag_cas, _ = iqrm_mask(cas_rmses, freq_radius, freq_threshold)
-        freq_flag_crs, _ = iqrm_mask(crs_rmses, freq_radius, freq_threshold)
+        if use_crs:
+            freq_flag_crs, _ = iqrm_mask(crs_rmses, freq_radius, freq_threshold)
 
         tf_weights[freq_flag_cas, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
-        tf_weights[freq_flag_crs, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
+        if use_crs:
+            tf_weights[freq_flag_crs, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
 
 
 
@@ -243,7 +247,6 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
     '''
     input_data = input_data
     reset_scales = isubblock==0
-
     #assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
  
     cal_data = calsoln_data
@@ -282,7 +285,7 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
             
             for i_t in range(nt):
                 isamp = input_data[i_bl, i_f, i_t]
-                imask = input_tf_weights[i_f, i_t]
+                imask = input_tf_weights[i_f, i_t] == 0
 
                 if imask:
                     output_buf[i_bl, i_f, isubblock*nt + i_t] = 0
@@ -293,6 +296,7 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                     Ai[i_bl, i_f] += (isamp - Ai[i_bl, i_f])/ N[i_bl, i_f]
                     N[i_bl, i_f] += 1
 
+                    #pdb.set_trace()
                     if not apply_rms and not sky_sub:
                         #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
                         #print(f"shapes of output_buf = {output_buf.shape}, cal_data = {cal_data.shape}")
@@ -303,13 +307,25 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                 rms_val_real = np.sqrt(Qi[i_bl, i_f].real / N[i_bl, i_f])
                 rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
                 rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
+                #I've found that the rmses computed using the Qi formula is about 0.1947% lower than computed by np.std()
+                #So ideally I should multiply the rms_val by 1.001947 to get closer to the real rms
+                #But I haven't worked out the reason behind this discrepancy, so I'm hesitating from adding it.
 
+                if rms_val == 0:
+                    #rms_val can be zero if the channel was zapped by the dynamic RFI flagger
+                    #We can't assume that the flagging with zap the channel for all times in this block
+                    #So we have to save those masks in a time dependent way (i.e. in the input_tf_weights)
+                    #And therefore we can't just skip over those channels without entering the time loop and reaching this stage of applying_rms or subtracting the sky
+                    #So we have to deal with such cases here, by simply saying continue, as the output data has already been zeroed.
+                    #Otherwise, we will get annoying divison by zero errors when we compute the multiplier
+                    continue
+                
                 multiplier = cal_data[i_bl, i_f] * target_rms_value / rms_val
                 #pdb.set_trace()
                 #Loop through the data again and apply the various rescale factors and the cal soln
                 for i_t in range(nt):
                     isamp = input_data[i_bl, i_f, i_t]
-                    imask = input_tf_weights[i_f, i_t]
+                    imask = input_tf_weights[i_f, i_t] == 0
 
                     if imask:
                         #Output has already been set to zero in the first loop. 
@@ -327,10 +343,122 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
 
 
 class FastPreprocess:
-    def __init__(self, cal_soln, values, )
 
-                
+    #TODO -- add the capacity to write filterbank out for the masked values
 
+    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights):
+        self.cal_soln_array = self.make_averaged_cal_sol(cal_soln_array)
+        self.dflag_nt = values.dflag_tblk
+        self.dflag_fradius = values.dflag_fradius
+        self.dflag_fthreshold = values.dflag_cas_threshold
+        self.fixed_freq_weights = fixed_freq_weights
+        assert len(fixed_freq_weights) == blk_shape[1]
+        self.target_input_rms = values.target_input_rms
+
+        self.blk_shape = blk_shape
+        nbl, nf, nt = blk_shape
+        self.cas_block = np.zeros((nf, nt), dtype=np.float32)
+        self.crs_block = np.zeros((nf, nt), dtype=np.float32)
+        self.Ai = np.zeros((nbl, nf), dtype=np.complex64)
+        self.Qi = np.zeros((nbl, nf), dtype=np.complex64)
+        self.N = np.ones((nbl, nf), dtype=np.int16)
+
+        self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
+
+    def make_averaged_cal_sol(self, cal_soln_array):
+        '''
+        Takes the calibration solution masked array, checks if the soln has the polarisation axis in it.
+        If so, it takes the average across the pol axis and returns the data.
+        Otherwise leaves it as is.
+        It fills out the masks elements with 0s
+
+        Input
+        -----
+        cal_soln_array: np.ma.core.MaskedArray - shape (nbl, nf, npol, ...)
+
+        Returns
+        -------
+        cal_soln_array: np.array - shape (nbl, nf, ...)
+        '''
+        assert type(cal_soln_array) == np.ma.core.MaskedArray
+        cal_soln_array.fill_value = 0
+        if cal_soln_array.ndim == 4:
+            return cal_soln_array.mean(axis=2).filled().squeeze()
+        else:
+            return cal_soln_array.filled().squeeze()
+
+
+
+    def prepare_weights_and_block_from_masked_array(self, input_block):
+        '''
+        Extracts the bl_weights, fixed_freq_weights and input_tf_weights from a 3-D input_block
+        Fills the masked values in the input_block with 0s
+
+        Input
+        -----
+        input_block: np.ma.core.MaskedArray
+                    The input data block of shape (nbl, nf, nt) with an associated mask
+
+        Returns
+        -------
+        input_data: np.ndarray
+                    The input data block of shape (nbl, nf, nt) after filling out masked elements with 0s
+        bl_weights: np.ndarray
+                    The baseline wights array of shape (nbl)
+        input_tf_weights: np.ndarray
+                    The input weights array of shape (nf, nt)
+        fixed_freq_weights: np.ndarray
+                    The fixed frequency weights array of shape (nf)
+        '''
+        masks = input_block.mask
+        bl_weights = np.empty(masks.shape[0],dtype=np.bool)
+        for ii, bl in enumerate(masks):
+            bl_weights[ii] = ~np.all(bl)
+
+        tf_weights = ~input_block[bl_weights].mask[0]
+
+        input_block.fill_value = 0
+        return input_block.filled().squeeze(), bl_weights, tf_weights
+
+
+    def __call__(self, input_block, bl_weights = None, input_tf_weights = None):
+        '''
+        Performs the preprocessing steps on input_block
+        '''
+        if type(input_block) == np.ma.core.MaskedArray:
+            input_data, bl_weights, input_tf_weights = self.prepare_weights_and_block_from_masked_array(input_block)
+        else:
+            input_data = input_block
+            if bl_weights is None or input_tf_weights is None:
+                raise ValueError(f"I need bl_weights, fixed_freq_weights and input_tf_weights to be provided if the input block is not a masked array")
+            assert len(bl_weights) == self.blk_shape[0]
+            assert input_tf_weights.shape == self.blk_shape[1:]
+    
+        fast_cas_crs(input_data=input_data, 
+                        bl_weights=bl_weights, 
+                        fixed_freq_weights=self.fixed_freq_weights,
+                        input_tf_weights=input_tf_weights,
+                        cas = self.cas_block, 
+                        crs = self.crs_block)
+        
+        get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
+                                        finest_nt = self.dflag_nt,
+                                        tf_weights=input_tf_weights,
+                                        freq_radius=self.dflag_fradius,
+                                        freq_threshold=self.dflag_fthreshold)
+        
+        fast_preprpocess(input_data=input_data,
+                            bl_weights=bl_weights,
+                            fixed_freq_weights=self.fixed_freq_weights,
+                            input_tf_weights=input_tf_weights,
+                            output_buf=self.output_buf,
+                            isubblock=0,
+                            Ai=self.Ai,
+                            Qi=self.Qi,
+                            N=self.N,
+                            calsoln_data=self.cal_soln_array,
+                            target_input_rms=self.target_input_rms,
+                            sky_sub=True)
 
 class Calibrate:
     #TODO remove the dependence of Calibrate on plan -- needs to propage through to the calibration.py's CalSolution class
