@@ -33,6 +33,7 @@ class VisInfoAdapter:
         self.flag_ants = []
         self.iblk = iblk
         assert iblk >= 0
+        self._baselines = None
 
     def set_flagants(self, flag_ants):
         '''
@@ -53,6 +54,8 @@ class VisInfoAdapter:
         Returns dictionary by blid of baselines, containing UU,VV,WW in seconds
         Like a uv fits file
         '''
+        if self._baselines is not None:
+            return self._baselines
         # oooh, gee, this is going to be a headache if we get it wrong.
         # how does flagants work?
         # bleach. Gross. This requires much thinking
@@ -73,8 +76,8 @@ class VisInfoAdapter:
                  self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
 
         
-        bluvws = self.info.baselines_at_time(mjd_mid)
-        return bluvws
+        self._baselines = self.info.baselines_at_time(mjd_mid)
+        return self._baselines
 
     @property
     def nbl(self):
@@ -141,6 +144,7 @@ class SearchPipelineSink:
 
         devid = info.xrt_device_id
         self.pipeline = None
+        self._next_plan_data = None
         if devid is not None:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
@@ -161,14 +165,20 @@ class SearchPipelineSink:
                 log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
 
-    def set_next_plan(self, next_plan):
+    def set_next_plan(self, next_plan_data):
         '''
         Update the value of the next plan. It might not necssarily be used immediately, but
         we'll have it in hand just in case. The plan is a craco-plan that was made in a separate process
         '''
-        log.info('Got next plan %s', next_plan)
-        self._next_plan = next_plan
-            
+        log.info('Got next plan %s', next_plan_data)
+        self._next_plan_data = next_plan_data
+
+    @property
+    def ready_for_next_plan(self):
+        '''
+        Returns True if we're ready to accept the next plan
+        '''
+        return self._next_plan_data is None
 
     def write(self, vis_block):
         '''
@@ -226,8 +236,12 @@ class SearchPipelineSink:
         update_uv_blocks = self.info.values.update_uv_blocks
         update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
         if update_now:
-            self.adapter = VisInfoAdapter(self.info, self.iblk)
-            self.pipeline.update_plan(self.adapter)
+            #self.adapter = VisInfoAdapter(self.info, self.iblk)
+            #self.pipeline.update_plan(self.adapter)
+            pd = self._next_plan_data
+            assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
+            self.pipeline.update_plan_from_plan(pd['plan'])
+            self._next_plan_data = None # set it to None ready for the next plan
             
         t.tick('Update plan')
 

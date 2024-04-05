@@ -192,7 +192,10 @@ class Obsman:
         self.process = None
         self.curr_scanid = None
         log.info('CRACO stopped. process is None. Scanid is None')
-        
+
+    @property
+    def is_running(self):
+        return self.process is not None    
 
     def poll_process(self):
         '''
@@ -206,7 +209,11 @@ class Obsman:
             log.debug('Process pid=%s running with return code %s for %0.1f minutes', self.process.pid, retcode, minutes)
             if retcode is not None or minutes > self.values.timeout:
                 log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting', retcode, minutes, self.values.timeout)
-                self.restart_process()
+                #self.restart_process()
+                # were going to terminate and then get it to make a new scan
+                self.terminate_process()
+        
+        return self.is_running
 
     def shutdown(self):
         log.info('Shutting down process')
@@ -281,7 +288,13 @@ class MetadataObsmanDriver:
         if state == ObsState.EXECUTING:
             self.sbid = sbid
             # pick up antenna list from observation variables
-            self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
+            for retry in range(100):               
+                self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
+                # for some reason obs variables are not updated when the thing starts. Grrr.
+                if 'schedblock.antennas' in self.obs_variables:
+                    break
+                time.sleep(0.2)
+
             self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
             self.scan_manager = ScanManager(self.ant_numbers )
             log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
@@ -315,7 +328,7 @@ class MetadataObsmanDriver:
                 pass # continue not running a scan
             
         self.obsman.poll_process()
-        self.scan_running = next_scan_running
+        self.scan_running = next_scan_running and self.obsman.is_running
 
     def close(self):
         self.obsman.terminate_process()

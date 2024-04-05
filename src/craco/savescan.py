@@ -50,6 +50,7 @@ def _main():
     parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)    
     parser.add_argument('--metadata', help='Prep scan with this metadata file')
     parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
+    parser.add_argument('--search-beams', help='Beams to search')
 
     
     parser.set_defaults(verbose=False)
@@ -145,10 +146,15 @@ def _main():
     flagged_ants = flagged_ants - set(np.arange(6) + 31)
     flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
     antflag = f'--flag-ants {flag_ant_str}'
+
+    if values.search_beams:
+        search_beams = f'--search-beams {values.search_beams}'
+    else:
+        search_beams = ''
     
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag} {search_beams}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 

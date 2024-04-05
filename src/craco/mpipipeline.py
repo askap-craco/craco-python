@@ -16,6 +16,8 @@ import os
 import sys
 import logging
 from array import array
+from craft.craco_plan import PipelinePlan
+
 from craco import cardcap
 from craco.cardcap import NCHAN, NFPGA, NSAMP_PER_FRAME
 import craco.card_averager
@@ -30,7 +32,7 @@ import numba
 import glob
 import craft.sigproc as sigproc
 from craft.parset import Parset
-from craco.search_pipeline_sink import SearchPipelineSink
+from craco.search_pipeline_sink import SearchPipelineSink, VisInfoAdapter
 from craco.metadatafile import MetadataFile,MetadataDummy
 from scipy import constants
 from collections import namedtuple
@@ -133,7 +135,7 @@ class MpiObsInfo:
             self.md = MetadataFile(values.metadata)
             valid_ants_0based = np.arange(self.nant)
         else:
-            if self.pipe_info.mpi_app.is_beam_processor: # beamid only defined for beam processors
+            if self.pipe_info.mpi_app.is_in_beam_chain: # beamid only defined for beam processors
                 self.md = self._prep.calc_meta_file(self.beamid)
             else:
                 self.md = None
@@ -925,8 +927,6 @@ def proc_beam_run(proc):
     numprocs = pipe_info.mpi_app.app_size
     assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
 
-    # OK - I need to gather all the headers from the data recivers
-    # Beams don't kow headers, so we just send nothings
     if pipe_info.mpi_app.app_rank == 0:
         print(f'ObsInfo {info}')
 
@@ -937,9 +937,18 @@ def proc_beam_run(proc):
     vis_file = UvFitsFileSink(info)
     pipeline_sink = SearchPipelineSink(info)
     iblk = 0
-
+    # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
+    # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
+    # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
+    PLAN_MSG_SIZE = 16*1024*1024
+    PLANNER_RANK = 1 # rank of planner - probably should get from mpi_app
     beam_comm = pipe_info.mpi_app.beam_chain_comm
-    req = beam_comm.irecv(source=1)
+
+    # requested block to planner to get moving
+    update_uv_blocks = pipe_info.values.update_uv_blocks
+    planner_iblk = update_uv_blocks # start at this iblk
+    beam_comm.send(planner_iblk, dest=PLANNER_RANK) # tell planner to make plan starting on this block
+    req = beam_comm.irecv(PLAN_MSG_SIZE, source=PLANNER_RANK)
     transposer = proc.transposer
 
     try:
@@ -955,13 +964,17 @@ def proc_beam_run(proc):
             t.tick('visblock')
             vis_file.write(vis_block)
             t.tick('visfile')
-            plan_received, plan = req.test()
-            t.tick('recv plan')
 
-            if plan_received:
-                pipeline_sink.set_next_plan(plan)
-                t.tick('set next plan')
-                req = beam_comm.irecv(source=1)
+            if pipeline_sink.ready_for_next_plan:
+                plan_received, plan = req.test()
+                t.tick('recv plan')
+
+                if plan_received:
+                    pipeline_sink.set_next_plan(plan)
+                    planner_iblk += update_uv_blocks
+                    t.tick('set next plan')
+                    beam_comm.send(planner_iblk, dest=PLANNER_RANK)
+                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=PLANNER_RANK)
                 
             pipeline_sink.write(vis_block)
             t.tick('pipeline')
@@ -1041,20 +1054,30 @@ class BeamProcessor(Processor):
 class PlannerProcessor(Processor):
     def run(self):
         count = 0
-        req = None
         comm = self.pipe_info.mpi_app.beam_chain_comm
+        fid0 = self.obs_info.fid0
+        start_fid = self.obs_info.fid_of_block(1)
+        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        update_uv_blocks = self.pipe_info.values.update_uv_blocks
+        iblk = 0
+        adapter = VisInfoAdapter(self.obs_info, iblk)
+        plan = PipelinePlan(adapter, self.obs_info.values) # don't send this one. It was made once already when the beam processor made the pipeline
+        
+        while True:     
+            iblk += update_uv_blocks
 
-        while True:            
-            # asynchronously send plan
-            # just send a dictionary for now            
-            # calculate new plan here            
-            import time
-            time.sleep(10)
-            data = {'count':count}
-            if req is not None:
-                log.debug('Waiting for plan send request to complete %d', count)
-                req.wait()
-            req = comm.isend(data, dest=0)
+            req_iblk = comm.recv(source=0)
+            log.info('Got request to make plan for iblk=%d. My count=%d', req_iblk, iblk)
+            assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
+            adapter = VisInfoAdapter(self.obs_info, iblk)
+            plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
+            plan.fdmt_plan # lazy evaluate fdmt_plan
+            data = {'count':count, 'iblk': iblk, 'plan':plan}
+
+            # blocking send - it just sends the data. It continues whether or not the beam has received it.
+            # To not just fill buffers for ever, we'll need to wait for an ack from the beam
+            comm.send(data, dest=0)
+            log.info('Plan sent count=%d iblk=%d', count, iblk)
 
             count += 1
 

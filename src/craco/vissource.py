@@ -94,6 +94,7 @@ class CardCapNetworkSource:
         cardno = 0
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
+        self.skip_frames = 10*20 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
         for blk in values.block:
@@ -131,7 +132,10 @@ class CardCapNetworkSource:
         # This will start a few seconds into the future. We'd better get our skates on
         start_bat = self.ctrl.configure_and_start()
         self.start_bat = start_bat # BAT for when CRACO Go event happens. Data starts on the next BF frame boundary (i.e. 2048 FIDs)
-        self.fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
+        self.init_fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
+        self.fid0 = self.init_fid0 + np.uint64(self.skip_frames*NSAMP_PER_FRAME) # the frame ID iterator will skip this many frameids before starting
+        log.debug('Start bat was 0x%x init_fid=%d skipping %d frames. new FID=%d',
+                self.start_bat, start_bat, self.init_fid0, self.skip_frames, self.fid0)
         
         return self.fid0
 
