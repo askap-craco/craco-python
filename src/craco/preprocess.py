@@ -310,13 +310,13 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                 rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
                 '''
                 #To code the lines above in an efficient way, I can just do this - 
-                correction_factor = (1 + 1 / (2 * N[i_bl * i_f]))
+                correction_factor = (1 + 1 / (2 * N[i_bl, i_f]))
                 rms_val = np.sqrt( (Qi[i_bl, i_f].real + Qi[i_bl, i_f].imag) / (2 * N[i_bl, i_f]) ) * correction_factor
 
                 #I've found that the rmses computed using the Qi formula is about 0.1947%  [~ 1 - (N-1) / N) / 2, where N is 257] lower than computed by np.std()
                 #So ideally I should multiply the rms_val by 1.001947 to get closer to the real rms
                 #But I haven't worked out the reason behind this discrepancy, so I'm hesitating from adding this correction factor.
-
+                #pdb.set_trace()
                 if rms_val == 0:
                     #rms_val can be zero if the channel was zapped by the dynamic RFI flagger
                     #We can't assume that the flagging with zap the channel for all times in this block
@@ -343,6 +343,7 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp -  Ai[i_bl, i_f]) * calval
 
                         elif sky_sub and apply_rms:
+                            #pdb.set_trace()
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier
 
                         elif apply_rms and not sky_sub:
@@ -413,7 +414,8 @@ def fast_preprpocess_single_norm(input_data, bl_weights, fixed_freq_weights, inp
     input_data = input_data
     if isubblock==0:
         Ai[0] = 0j
-        Qi[0] = 0j
+        Qi[0] = 0
+        Qi[1] = 0
         N[0] = 1
     #assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
  
@@ -447,10 +449,12 @@ def fast_preprpocess_single_norm(input_data, bl_weights, fixed_freq_weights, inp
                 else:
                     #There is a bug in numba where I cannot set complex_var(128bit).real = real_var(64bit)
                     #See https://github.com/numba/numba/issues/3573
-                    Qi[0].real += (N[0] -1)/ N[0] * (isamp.real - Ai[0].real)**2
-                    Qi[0].imag += (N[0] -1)/ N[0] * (isamp.imag - Ai[0].imag)**2
-                    Ai += (isamp - Ai)/ N
-                    N += 1
+                    #if N[0] == 0:
+                    #    pdb.set_trace()
+                    Qi[0] += (N[0] -1)/ N[0] * (isamp.real - Ai[0].real)**2
+                    Qi[1] += (N[0] -1)/ N[0] * (isamp.imag - Ai[0].imag)**2
+                    Ai[0] += (isamp - Ai[0])/ N[0]
+                    N[0] += 1
 
                     #pdb.set_trace()
                     if not apply_rms and not sky_sub:
@@ -467,9 +471,9 @@ def fast_preprpocess_single_norm(input_data, bl_weights, fixed_freq_weights, inp
         rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
         '''
         #To code the lines above in an efficient way, I can just do this - 
-        correction_factor = (1 + 1 / (2 * N))
-        rms_val = np.sqrt( (Qi.real + Qi.imag) / (2 * N) ) * correction_factor
-        rms_val = rms_val[0]
+        correction_factor = (1 + 1 / (2 * N[0]))
+        rms_val = np.sqrt( (Qi[0] + Qi[1]) / (2 * N[0]) ) * correction_factor
+        #rms_val = rms_val[0]
 
         #I've found that the rmses computed using the Qi formula is about 0.1947%  [~ 1 - (N-1) / N) / 2, where N is 257] lower than computed by np.std()
         #So ideally I should multiply the rms_val by 1.001947 to get closer to the real rms
@@ -537,8 +541,8 @@ class FastPreprocess:
         self.single_norm = single_norm
         if single_norm:
             self.Ai = np.zeros(1, dtype=np.complex64)
-            self.Qi = np.zeros(1, dtype=np.complex64)
-            self.N = np.ones(1, dtype=np.int16)
+            self.Qi = np.zeros(2, dtype=np.float32)
+            self.N = np.ones(1, dtype=np.int32)
         else:
             self.Ai = np.zeros((nbl, nf), dtype=np.complex64)
             self.Qi = np.zeros((nbl, nf), dtype=np.complex64)
