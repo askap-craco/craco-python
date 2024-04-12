@@ -272,7 +272,7 @@ class MpiObsInfo:
         self.__fid0 = np.uint64(fid)
         tnow = Time.now()
         tstart = self.tstart
-        diff = (tstart - tnow)
+        diff = (tstart.tai - tnow.tai)
         diffsec = diff.to(u.second)
         log.info('Set FID0=%d. Tstart=%s = %s = %0.1f seconds from now', self.__fid0, tstart, tstart.iso, diffsec.value)
 
