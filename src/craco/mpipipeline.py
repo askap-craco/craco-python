@@ -270,6 +270,11 @@ class MpiObsInfo:
         Set frame iD of first data value
         '''
         self.__fid0 = np.uint64(fid)
+        tnow = Time.now()
+        tstart = self.tstart
+        diff = (tstart - tnow)
+        diffsec = diff.to(u.second)
+        log.info('Set FID0=%d. Tstart=%s = %s = %0.1f seconds from now', self.__fid0, tstart, tstart.iso, diffsec.value)
 
     @property
     def tstart(self):
@@ -961,6 +966,8 @@ def proc_beam_run(proc):
         while True:
             t = Timer()
             beam_data = transposer.recv()
+            if iblk == 0:
+                log.info('got block 0')
             beam_data_complex = transposer.drx_complex # a view into the same data.
             t.tick('transposer')
             cas_filterbank.write(beam_data['cas'])
