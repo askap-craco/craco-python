@@ -967,7 +967,7 @@ def get_parser():
     parser.set_defaults(fft_scale  =10.0)
     
     parser.set_defaults(os        = "2.1,2.1")
-    parser.set_defaults(xclbin    = "binary_container_1.xclbin.golden")
+    parser.set_defaults(xclbin    = os.environ.get('XCLBIN'))
     #parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
     #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
 
@@ -1238,7 +1238,7 @@ class PipelineWrapper:
         self.iblk += 1
 
     def close(self):
-        candout = self.candoutc
+        candout = self.candout
         pc_filterbank = self.pc_filterbank
         mask_fil_writer = self.mask_fil_writer
         cas_fil_writer = self.cas_fil_writer

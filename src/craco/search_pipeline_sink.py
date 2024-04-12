@@ -157,8 +157,8 @@ class SearchPipelineSink:
 
                 nfcas = info.nchan
                 cas_shape = (nfcas, nt)
-                self.cas_data = np.zeros(cas_shape, dtype=np.float32)
-                self.ics_data = self.cas_data.copy()
+                ##self.cas_data = np.zeros(cas_shape, dtype=np.float32)
+                #self.ics_data = self.cas_data.copy()
                 
                 self.t = 0
             except RuntimeError: # usually XRT error
@@ -198,7 +198,7 @@ class SearchPipelineSink:
         # Don't forget, the data itself might need to be blocked into nt=256 which is what the pipeline wants
         # copy data into local buffer
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
-        assert vis_data.dtype == np.complex64, 'I think we can only handle complex data in this function'
+        assert vis_data.dtype == np.complex64, f'I think we can only handle complex data in this function. Vis data type was {vis_data.dtype} {vis_data.shape}'
         output_nt = self.pipeline_data.shape[2]
         
         assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
@@ -222,8 +222,9 @@ class SearchPipelineSink:
 
 
             cas_fslice = slice(fstart*6,fend*6)
-            self.cas_data[cas_fslice, tstart:tend] = vis_block.cas[irx,...].T
-            self.ics_data[cas_fslice, tstart:tend] = vis_block.ics[irx,...].T
+            # # need to fix shapes - but viveks' new prepare pipeline does it anyway
+            #self.cas_data[cas_fslice, tstart:tend] = vis_block.cas[irx,...].T 
+            #self.ics_data[cas_fslice, tstart:tend] = vis_block.ics[irx,...].T
 
 
         self.t += vis_nt
@@ -247,7 +248,7 @@ class SearchPipelineSink:
 
         if self.t == output_nt:
             try:
-                self.pipeline.write(self.pipeline_data, self.cas_data, self.ics_data)
+                self.pipeline.write(self.pipeline_data)
                 t.tick('Pipeline write')
                 self.t = 0
             except RuntimeError: # usuall XRT error

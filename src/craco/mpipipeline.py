@@ -90,7 +90,10 @@ def set_scheduler(priority:int, policy=None):
         
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
-CPLX_DTYPE = np.float32 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
+# Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension.
+# But fast card_averager doesn't support it for now.
+CPLX_DTYPE = np.float32 
+
 
 class MpiObsInfo:
     '''
@@ -392,7 +395,7 @@ class MpiObsInfo:
         return s
 
 
-def get_transpose_dtype(values):
+def get_transpose_dtype(values, real_dtype=REAL_DTYPE, cplx_dtype=CPLX_DTYPE):
     nbeam = values.nbeams
     nt = values.nt
     nant = values.nant_valid
@@ -400,7 +403,7 @@ def get_transpose_dtype(values):
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
     npol = 1 # card averager always averagers pol
-    dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
+    dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, real_dtype, cplx_dtype)
     return dt
 
 ## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
@@ -411,6 +414,7 @@ class DtypeTransposer:
         self.nbeam = info.nbeams
         self.nrx = info.nrx
         self.dtype = get_transpose_dtype(info)
+        self.dtype_complex = get_transpose_dtype(info, cplx_dtype=np.complex64) # the guaranteed compelx version. SearchPipeline needs it
         self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(self.dtype)
         self.msgsize = self.dtype.itemsize
         self.nmsgs = 1
@@ -461,6 +465,7 @@ class ByteTransposer:
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
         self.nbeam = info.nbeams
         self.nrx = info.nrx
+        self.dtype_complex = get_transpose_dtype(info, cplx_dtype=np.complex64) # the guaranteed compelx version. SearchPipeline needs it
         self.dtype = get_transpose_dtype(info)
         self.mpi_dtype = MPI.BYTE
         values = info.values
@@ -540,6 +545,7 @@ class TransposeReceiver(DtypeTransposer):
         self.rx_displacements[:nrx] = np.arange(nrx, dtype=np.int32)
         self.drx = np.zeros(nrx, dtype=self.dtype)
         self.dtx = np.zeros((1), dtype=self.dtype) # dummy buffer for sending TODO: make zero if possible
+        self.drx_complex = self.drx.view(dtype=self.dtype_complex) # make a complex view into the same data
 
     def recv(self):
         return self.all2all(self.dtx)
@@ -736,7 +742,7 @@ class FilterbankSink:
         data has shape (nrx, nt,  nchan_per_rx) e.g. (36, 128, 24) 
         '''
 
-        assert beam_data.dtype == np.float32, 'WE set nbits=32 for this filterbank, so if it isnt we need to do some work'
+        assert beam_data.dtype == np.float32, f'WE set nbits=32 for this filterbank, so if it isnt we need to do some work. Type was {beam_data.dtype}'
         dout = np.transpose(beam_data, [1, 0, 2])
 #        if rank == 0:
             #print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
@@ -940,7 +946,7 @@ def proc_beam_run(proc):
     # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
     # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
     # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
-    PLAN_MSG_SIZE = 16*1024*1024
+    PLAN_MSG_SIZE = 32*1024*1024
     PLANNER_RANK = 1 # rank of planner - probably should get from mpi_app
     beam_comm = pipe_info.mpi_app.beam_chain_comm
 
@@ -955,14 +961,16 @@ def proc_beam_run(proc):
         while True:
             t = Timer()
             beam_data = transposer.recv()
+            beam_data_complex = transposer.drx_complex # a view into the same data.
             t.tick('transposer')
             cas_filterbank.write(beam_data['cas'])
             t.tick('cas')
             ics_filterbank.write(beam_data['ics'])
             t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+            vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
             t.tick('visblock')
-            vis_file.write(vis_block)
+            vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
             t.tick('visfile')
 
             if pipeline_sink.ready_for_next_plan:
@@ -976,7 +984,7 @@ def proc_beam_run(proc):
                     beam_comm.send(planner_iblk, dest=PLANNER_RANK)
                     req = beam_comm.irecv(PLAN_MSG_SIZE, source=PLANNER_RANK)
                 
-            pipeline_sink.write(vis_block)
+            pipeline_sink.write(vis_block_complex)
             t.tick('pipeline')
 
             if beamid == 0 and False:
