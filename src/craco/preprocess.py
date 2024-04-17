@@ -309,13 +309,8 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                 rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
                 rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
                 '''
-                #To code the lines above in an efficient way, I can just do this - 
-                correction_factor = (1 + 1 / (2 * N[i_bl, i_f]))
-                rms_val = np.sqrt( (Qi[i_bl, i_f].real + Qi[i_bl, i_f].imag) / (2 * N[i_bl, i_f]) ) * correction_factor
+                rms_val = np.sqrt( (Qi[i_bl, i_f].real + Qi[i_bl, i_f].imag) / (2 * (N[i_bl, i_f]-1) ) ).astype(np.float32) 
 
-                #I've found that the rmses computed using the Qi formula is about 0.1947%  [~ 1 - (N-1) / N) / 2, where N is 257] lower than computed by np.std()
-                #So ideally I should multiply the rms_val by 1.001947 to get closer to the real rms
-                #But I haven't worked out the reason behind this discrepancy, so I'm hesitating from adding this correction factor.
                 #pdb.set_trace()
                 if rms_val == 0:
                     #rms_val can be zero if the channel was zapped by the dynamic RFI flagger
@@ -470,14 +465,7 @@ def fast_preprpocess_single_norm(input_data, bl_weights, fixed_freq_weights, inp
         rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
         rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
         '''
-        #To code the lines above in an efficient way, I can just do this - 
-        correction_factor = (1 + 1 / (2 * N[0]))
-        rms_val = np.sqrt( (Qi[0] + Qi[1]) / (2 * N[0]) ) * correction_factor
-        #rms_val = rms_val[0]
-
-        #I've found that the rmses computed using the Qi formula is about 0.1947%  [~ 1 - (N-1) / N) / 2, where N is 257] lower than computed by np.std()
-        #So ideally I should multiply the rms_val by 1.001947 to get closer to the real rms
-        #But I haven't worked out the reason behind this discrepancy, so I'm hesitating from adding this correction factor.
+        rms_val = np.sqrt( (Qi[0] + Qi[1]) / (2 * (N[0]-1)) )
 
         if rms_val == 0:
             #rms_val can be zero if the channel was zapped by the dynamic RFI flagger
@@ -541,11 +529,11 @@ class FastPreprocess:
         self.single_norm = single_norm
         if single_norm:
             self.Ai = np.zeros(1, dtype=np.complex64)
-            self.Qi = np.zeros(2, dtype=np.float32)
+            self.Qi = np.zeros(2, dtype=np.float64)
             self.N = np.ones(1, dtype=np.int32)
         else:
             self.Ai = np.zeros((nbl, nf), dtype=np.complex64)
-            self.Qi = np.zeros((nbl, nf), dtype=np.complex64)
+            self.Qi = np.zeros((nbl, nf), dtype=np.complex128)
             self.N = np.ones((nbl, nf), dtype=np.int16)
 
         self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
