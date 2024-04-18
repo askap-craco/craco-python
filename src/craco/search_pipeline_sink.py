@@ -156,7 +156,7 @@ class SearchPipelineSink:
                 self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
 
                 nfcas = info.nchan
-                cas_shape = (nfcas, nt)
+                #cas_shape = (nfcas, nt)
                 ##self.cas_data = np.zeros(cas_shape, dtype=np.float32)
                 #self.ics_data = self.cas_data.copy()
                 
@@ -186,11 +186,12 @@ class SearchPipelineSink:
         vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
         or 
         vishape = (nbl, vis_nc, vis_nt) if np.complex64
+        
         '''
         if self.pipeline is None:
             return
 
-        t = Timer()
+        assert False, 'Do not use. Were now accumulating blocks in another MPI process'
         vis_data = vis_block.data
         
         # TODO: convert input beam data to whatever search_pipeline wants
@@ -205,9 +206,7 @@ class SearchPipelineSink:
         assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
         assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
 
-        info = self.info
         blflags = vis_block.baseline_flags[:,np.newaxis,np.newaxis]
-
         tstart = self.t
         tend = tstart + vis_nt
 
@@ -228,8 +227,18 @@ class SearchPipelineSink:
 
 
         self.t += vis_nt
+        self.write_pipeline_data(pipeline_data)
 
-        t.tick('Copy')
+    def write_pipeline_data(self, pipeline_data):
+        '''
+        Writes already accumulated pipeline data
+        Should be a masked array of dtype=compelx64 and shape
+        (nbl, nf, nt=256)
+
+        Also updates plan if necessary
+        '''
+
+        t = Timer()
 
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
@@ -237,27 +246,25 @@ class SearchPipelineSink:
         update_uv_blocks = self.info.values.update_uv_blocks
         update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
         if update_now:
-            #self.adapter = VisInfoAdapter(self.info, self.iblk)
-            #self.pipeline.update_plan(self.adapter)
-            pd = self._next_plan_data
+            pd = self._next_plan_data # comes from another MPI rank
             assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
             self.pipeline.update_plan_from_plan(pd['plan'])
             self._next_plan_data = None # set it to None ready for the next plan
             
         t.tick('Update plan')
 
-        if self.t == output_nt:
-            try:
-                self.pipeline.write(self.pipeline_data)
-                t.tick('Pipeline write')
-                self.t = 0
-            except RuntimeError: # usuall XRT error
-                log.exception('Error sending data to pipeline. Disabling this pipeline')
-                self.pipeline.close()
-                self.pipeline = None
+        try:
+            self.pipeline.write(self.pipeline_data)
+            t.tick('Pipeline write')
+            self.t = 0
+        except RuntimeError: # usuall XRT error
+            log.exception('Error sending data to pipeline. Disabling this pipeline')
+            self.pipeline.close()
+            self.pipeline = None
 
         self.iblk += 1
         self.last_write_timer = t
+
             
         
     def close(self):

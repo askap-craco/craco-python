@@ -42,6 +42,7 @@ from craft.cmdline import strrange
 from craco.timer import Timer
 from craco.prep_scan import ScanPrep
 from craco.mpi_appinfo import MpiPipelineInfo
+from craco.visblock_accumulator import VisblockAccumulator
 
     
 log = logging.getLogger(__name__)
@@ -912,7 +913,7 @@ class UvFitsFileSink:
         self.close()
         
 
-def proc_beam_get_fid0(proc):
+def transpose_beam_get_fid0(proc):
     info = proc.obs_info
 
     transposer = TransposeReceiver(info)
@@ -923,7 +924,7 @@ def proc_beam_get_fid0(proc):
 
     return 0
 
-def proc_beam_run(proc):
+def transpose_beam_run(proc):
     set_scheduler(BEAM_PRIORITY)
     pipe_info = proc.pipe_info
     info = proc.obs_info
@@ -942,25 +943,26 @@ def proc_beam_run(proc):
         print(f'ObsInfo {info}')
 
     os.makedirs(values.outdir, exist_ok=True)
+
+    nf = len(info.vis_channel_frequencies)
+    nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
+    nbl = info.nbl_flagged    
     
     cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
-    pipeline_sink = SearchPipelineSink(info)
+    vis_accum = VisblockAccumulator(nbl, nf, nt)
     iblk = 0
-    # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
-    # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
-    # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
-    PLAN_MSG_SIZE = 32*1024*1024
-    PLANNER_RANK = 1 # rank of planner - probably should get from mpi_app
+
+    beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
     beam_comm = pipe_info.mpi_app.beam_chain_comm
 
     # requested block to planner to get moving
-    update_uv_blocks = pipe_info.values.update_uv_blocks
-    planner_iblk = update_uv_blocks # start at this iblk
-    beam_comm.send(planner_iblk, dest=PLANNER_RANK) # tell planner to make plan starting on this block
-    req = beam_comm.irecv(PLAN_MSG_SIZE, source=PLANNER_RANK)
     transposer = proc.transposer
+
+    # warmup send
+    beam_comm.send(vis_accum.pipeline_data, dest=beam_proc_rank)
+
 
     try:
         while True:
@@ -979,20 +981,12 @@ def proc_beam_run(proc):
             t.tick('visblock')
             vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
             t.tick('visfile')
-
-            if pipeline_sink.ready_for_next_plan:
-                plan_received, plan = req.test()
-                t.tick('recv plan')
-
-                if plan_received:
-                    pipeline_sink.set_next_plan(plan)
-                    planner_iblk += update_uv_blocks
-                    t.tick('set next plan')
-                    beam_comm.send(planner_iblk, dest=PLANNER_RANK)
-                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=PLANNER_RANK)
-                
-            pipeline_sink.write(vis_block_complex)
-            t.tick('pipeline')
+            vis_accum.write(vis_block_complex)
+            t.tick('accumulate')
+            if vis_accum.is_full:
+                beam_comm.send(vis_accum.pipeline_data, dest=beam_proc_rank)
+                vis_accum.reset()
+                t.tick('Send')
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -1009,7 +1003,85 @@ def proc_beam_run(proc):
         cas_filterbank.close()
         ics_filterbank.close()
         vis_file.close()
+        vis_accum.close()
+
+def proc_beam_run(proc):
+    #set_scheduler(BEAM_PRIORITY)
+    pipe_info = proc.pipe_info
+    info = proc.obs_info
+
+    nbeam = pipe_info.nbeams
+    values = pipe_info.values
+    beamid = pipe_info.beamid
+    nrx = info.nrx
+    numprocs = pipe_info.mpi_app.app_size
+    assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
+
+    pipeline_sink = SearchPipelineSink(info)
+    iblk = 0
+    # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
+    # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
+    # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
+    PLAN_MSG_SIZE = 32*1024*1024
+
+    planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
+    transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
+    beam_comm = pipe_info.mpi_app.beam_chain_comm
+
+    # requested block to planner to get moving
+    update_uv_blocks = pipe_info.values.update_uv_blocks
+    planner_iblk = update_uv_blocks # start at this iblk
+    beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
+    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
+
+    #nf = len(info.vis_channel_frequencies)
+    #nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
+    #nbl = info.nbl_flagged    
+    #vis_accum = VisblockAccumulator(nbl, nf, nt)
+    
+    # warumup recv
+    pipeline_data = beam_comm.recv(source=transposer_rank)
+
+    try:
+        while True:
+            t = Timer()
+            # recieve from transposer rank
+            pipeline_data = beam_comm.recv(source=transposer_rank)
+
+            t.tick('recv')
+            if iblk == 0:
+                log.info('got block 0')
+            
+
+            if pipeline_sink.ready_for_next_plan:
+                plan_received, plan = req.test()
+                t.tick('recv plan')
+
+                if plan_received:
+                    pipeline_sink.set_next_plan(plan)
+                    planner_iblk += update_uv_blocks
+                    t.tick('set next plan')
+                    beam_comm.send(planner_iblk, dest=planner_rank)
+                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
+    
+
+            pipeline_sink.write_pipeline_data(pipeline_data)        
+            t.tick('pipeline')
+
+            if beamid == 0 and False:
+                log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
+
+            if t.total.perf > 0.120 and iblk > 0:
+                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
+
+            iblk += 1
+
+
+
+    finally:
+        print(f'Closing beam files for {beamid}')
         pipeline_sink.close()
+
 
 
 class Processor:
@@ -1056,13 +1128,16 @@ class RxProcessor(Processor):
     def run(self):
         return proc_rx_run(self)
 
-class BeamProcessor(Processor):
-
+class BeamTransposer(Processor):
     def get_fid0(self):
         # Need to run dummy tranpose before fid0 is broadcast, otehrwise we get
         # a deadlock
-        return proc_beam_get_fid0(self)
+        return transpose_beam_get_fid0(self)
 
+    def run(self):
+        return transpose_beam_run(self)
+
+class BeamProcessor(Processor):
     def run(self):
         return proc_beam_run(self)
 
@@ -1125,10 +1200,10 @@ class CandMgrProcessor(Processor):
             dout = []
             dout = tx_comm.gather(dout, root=0) # Come to me my pretties! Mwhahahahahaha!
 
-        
-
-def processor_class_factory(app):                
-    if app.is_beam_processor:
+def processor_class_factory(app):                    
+    if app.is_beam_transposer:
+        proc_klass = BeamTransposer
+    elif app.is_beam_processor:
         proc_klass = BeamProcessor
     elif app.is_rx_processor:
         proc_klass = RxProcessor
@@ -1139,7 +1214,7 @@ def processor_class_factory(app):
     elif app.is_cand_manager:
         proc_klass = CandMgrProcessor
     else:
-        raise ValueError('Case not handled')
+        raise ValueError(f'Case not handled {app.app_num} {app.rank_info}')
     
     return proc_klass
 

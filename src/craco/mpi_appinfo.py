@@ -48,7 +48,8 @@ class MpiAppInfo:
     '''
     Assume we have 5 types of process:
     RX - receives data from cards -  per card
-    BEAMPROC - processes beam data - 1 per beam
+    BEAMTRAN - receives beam transpose. 1 per beam.
+    BEAMPROC - processes beam data. 1 per beam
     PLANNER - creates plan and sends async to beamproc - 1 per beam
     BEAM_CAND - recieves candidates from BEAMPROC - 1 per beam
     CAND_MGR - consolidate candidates from BEAM_CAND  - 1 per application
@@ -67,10 +68,18 @@ class MpiAppInfo:
     '''
 
     RX_APPNUM = 0
-    BEAMPROC_APPNUM = 1
-    PLANNER_APPNUM = 2
-    CAND_MGR_APPNUM = 3 # want manager before beam cand processor so it ends up as rank 0 in the cand_comm
-    BEAM_CAND_APPNUM = 4
+    BEAMTRAN_APPNUM = 1
+    BEAMPROC_APPNUM = 2
+    PLANNER_APPNUM = 3
+    CAND_MGR_APPNUM = 4 # want manager before beam cand processor so it ends up as rank 0 in the cand_comm
+    BEAM_CAND_APPNUM = 5
+
+    # inside a beam chain
+    BEAMTRAN_RANK = 0
+    BEAMPROC_RANK = 1
+    PLANNER_RANK = 2
+    CANDPROC_RANK = 3
+
 
  
     def __init__(self, pipe_info, proctype):
@@ -88,7 +97,7 @@ class MpiAppInfo:
         self.app_rank = self.app_comm.Get_rank()
         self.app_size = self.app_comm.Get_size()
 
-        rxbeam_colour = 0 if self.is_rx_processor or self.is_beam_processor else -1
+        rxbeam_colour = 0 if self.is_rx_processor or self.is_beam_transposer else -1
 
         # communicator for the data to from RX to beam
         log.info('Splitting rxbeam colour=%d rank=%s', rxbeam_colour, self.world_rank)
@@ -103,12 +112,14 @@ class MpiAppInfo:
         
         if self.is_in_beam_chain:
             bcrank = self.beam_chain_comm.Get_rank()
-            if self.is_rx_processor:
-                assert bcrank == 0
+            if self.is_beam_transposer:
+                assert bcrank == MpiAppInfo.BEAMTRAN_RANK
+            elif self.is_beam_processor:
+                assert bcrank == MpiAppInfo.BEAMPROC_RANK
             elif self.is_planner_processor:
-                assert bcrank == 1
+                assert bcrank == MpiAppInfo.PLANNER_RANK
             elif self.is_cand_processor:
-                assert bcrank == 2
+                assert bcrank == MpiAppInfo.CANDPROC_RANK
 
         # candidate communicator.
         # rank=[0] is manager,
@@ -138,13 +149,20 @@ class MpiAppInfo:
         and you work out which appnum you are based on your world rank and other stuff.
         '''
         #appnum = MPI.COMM_WORLD.Get_attr(MPI.APPNUM)  # we no longer use apps
-        rankinfo = self.pipe_info.all_ranks[self.world_rank]
-        return rankinfo.APP_ID  
-        
+        rankinfo = self.rank_info
+        return rankinfo.APP_ID
     
+    @property
+    def rank_info(self):
+        return self.pipe_info.all_ranks[self.world_rank]
+        
     @property
     def is_rx_processor(self):
         return self.app_num == MpiAppInfo.RX_APPNUM
+    
+    @property
+    def is_beam_transposer(self):
+        return self.app_num == MpiAppInfo.BEAMTRAN_APPNUM
     
     @property
     def is_beam_processor(self):
@@ -164,7 +182,7 @@ class MpiAppInfo:
 
     @property
     def is_in_beam_chain(self):
-        return self.is_beam_processor or self.is_planner_processor or self.is_cand_processor
+        return self.is_beam_transposer or self.is_beam_processor or self.is_planner_processor or self.is_cand_processor
 
     @property
     def beamid(self):
@@ -189,11 +207,18 @@ class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slo
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
         return s
     
+class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','slot','core'])):
+    APP_ID = MpiAppInfo.BEAMTRAN_APPNUM
+    @property
+    def rank_file_str(self):
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} transpose receiver '
+        return s
+    
 class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     APP_ID = MpiAppInfo.BEAMPROC_APPNUM
     @property
     def rank_file_str(self):
-        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam processor {self.beamid} xrtdevid={self.xrt_device_id}'
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} processor xrtdevid={self.xrt_device_id}'
         return s
 
 class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slot','core'])):
@@ -293,6 +318,8 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
                 devid = None
 
         log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
+        pipe_info.add_rank(BeamTranRankInfo(beam, rank, host, slot, core))
+        rank += 1
         pipe_info.add_rank(BeamProcRankInfo(beam, rank, host, slot, core, devid))
         rank += 1
         pipe_info.add_rank(PlannerRankInfo(beam, rank, host, slot, core))
@@ -359,6 +386,7 @@ class MpiPipelineInfo:
     @property
     def beam_ranks(self):
         return self.get_ranks_for_app(MpiAppInfo.BEAMPROC_APPNUM)
+    
     @property
     def receiver_ranks(self):
         return self.get_ranks_for_app(MpiAppInfo.RX_APPNUM)
