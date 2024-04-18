@@ -1,7 +1,7 @@
 
 import logging
 import numpy as np
-from craco.preprocess import fast_preprpocess
+from craco.preprocess import fast_preprocess, fast_preprocess_single_norm
 from craco.vis_subtractor import VisSubtractor
 
 from craft import uvfits, craco_plan
@@ -117,12 +117,12 @@ block0 = block0.squeeze()
 
 #variables needed for fast_preprocess
 input_block = block0.copy()
-input_data = input_block.data
+global_input_data = input_block.data
 input_mask = input_block.mask
 
 nbl, nf, nt = input_block.shape
 isubblock = 0
-output_buf = np.zeros_like(input_data)
+global_output_buf = np.zeros_like(global_input_data)
 #output_mask = np.zeros_like(input_mask)
 
 Ai = np.zeros((nbl, nf), dtype=np.complex64)
@@ -137,9 +137,91 @@ cal= calsoln.solarray.mean(axis=2).squeeze()
 calsoln_data = cal.data
 calsoln_mask = cal.mask
 
+
+
 def test_calibration_equality():
     original_calibrated_data = original_apply_cal(calsoln.solarray, block0)
-    fast_calibrated_data = fast_preprpocess(input_block, input_mask, output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub=False, reset_scales=True)
+    fast_calibrated_data = fast_preprocess(input_block, input_mask, global_output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub=False, reset_scales=True)
 
     assert np.allclose(original_calibrated_data, fast_calibrated_data)
     
+def test_fast_preprocess_single_norm_with_zero():
+    input_data = np.zeros_like(global_input_data, dtype=np.complex64)
+    output_buf = np.zeros_like(input_data)
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    isubblock = 0
+    Ai = np.zeros(1, dtype=np.complex64)
+    Qi = np.zeros(2, dtype=np.float64)
+    N = np.ones(1, dtype=np.int32) 
+    calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
+    target_input_rms = 512
+    sky_sub = True
+
+    fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
+    assert np.isclose(Ai.real, 0)
+    assert np.isclose(Ai.imag, 0)
+    assert np.isclose(Qi[0], 0)
+    assert np.isclose(Qi[0], 0)
+    assert N == input_data.size + 1
+    assert np.all(output_buf.real == 0)
+    assert np.all(output_buf.imag == 0)
+
+
+def test_fast_preprocess_single_norm_with_ones():
+    input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
+    output_buf = np.zeros_like(input_data)
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    isubblock = 0
+    Ai = np.zeros(1, dtype=np.complex64)
+    Qi = np.zeros(2, dtype=np.float64)
+    N = np.ones(1, dtype=np.int32) 
+    calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
+    target_input_rms = 512
+    sky_sub = True
+
+    fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
+    assert np.isclose(Ai.real, 1)
+    assert np.isclose(Ai.imag, 1)
+    assert np.isclose(Qi[0], 0)
+    assert np.isclose(Qi[0], 0)
+    assert N == input_data.size + 1
+    assert np.isclose(np.mean(output_buf.real), 0), f"{np.mean(output_buf.real)}"
+    assert np.isclose(np.mean(output_buf.imag), 0), f"{np.mean(output_buf.imag)}"
+    assert np.isclose(np.std(output_buf.real), target_input_rms)
+    assert np.isclose(np.std(output_buf.imag), target_input_rms)
+
+
+def test_fast_preprocess_single_norm_with_data():
+    input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
+    output_buf = np.zeros_like(input_data)
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    isubblock = 0
+    Ai = np.zeros(1, dtype=np.complex64)
+    Qi = np.zeros(2, dtype=np.float64)
+    N = np.ones(1, dtype=np.int32) 
+    calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
+    target_input_rms = 512
+    sky_sub = True
+
+    fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
+    assert np.isclose(Ai.real, 1)
+    assert np.isclose(Ai.imag, 1)
+    assert np.isclose(Qi[0], 0)
+    assert np.isclose(Qi[0], 0)
+    assert N == input_data.size + 1
+    assert np.isclose(np.mean(output_buf.real), 0)
+    assert np.isclose(np.mean(output_buf.imag), 0)
+    assert np.isclose(np.std(output_buf.real), target_input_rms)
+    assert np.isclose(np.std(output_buf.imag), target_input_rms)
+
+
+
+
+
+
