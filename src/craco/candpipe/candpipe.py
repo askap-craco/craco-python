@@ -72,12 +72,14 @@ class Pipeline:
         if not os.path.exists(self.psf_fname):
             self.steps = [
                 steps.cluster.Step(self),
+                steps.time_space_filter.Step(self), 
                 steps.catalog_cross_match.Step(self),
             ]
         else:
             self.psf_header = self.get_header()
             self.steps = [
                 steps.cluster.Step(self),
+                steps.time_space_filter.Step(self), 
                 steps.catalog_cross_match.Step(self),
                 steps.alias_filter.Step(self), 
                 steps.injection_filter.Step(self), 

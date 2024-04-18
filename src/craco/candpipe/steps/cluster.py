@@ -2,6 +2,11 @@
 """
 Clusters the input
 
+1. Get the cluster id (time/dm cluster)
+2. and spatial id (spatial cluster) to rawcat
+3. and pass to next filtering layer
+4. save rawcat.csv catalogue 
+
 Copyright (C) CSIRO 2023
 """
 import pylab
@@ -29,7 +34,7 @@ def get_parser():
     '''
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='cluster arguments', formatter_class=ArgumentDefaultsHelpFormatter, add_help=False)
-    parser.add_argument('--cluster-min-sn', type=float, help='Minimum S/N of cluster output', default=None)
+    # parser.add_argument('--cluster-min-sn', type=float, help='Minimum S/N of cluster output', default=None)
     parser.add_argument('--save-rfi', action='store_true', help='Save removed rfi into a file')
     return parser
 
@@ -56,30 +61,21 @@ class Step(ProcessingStep):
         log.debug('Got %d candidates type=%s, columns=%s', len(ind), type(ind), ind.columns)
         
         # do first clustering - time/dm/boxcar
-        candidates, clustered = self.dbscan(ind)
+        uncluster = self.time_dm_clustering(ind)
 
         # do second clustering - spatial/mpix/lpix 
-        candidates, clustered = self.spatial_clustering(candidates, clustered)
+        uncluster = self.spatial_clustering(uncluster)
 
-        # save the clustered file - intermediate products
+        # save the raw uncluster file - intermediate products
         if self.pipeline.args.save_intermediate:
             cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
             log.info('Saving raw candfile with cluster id to file %s.rawcat.csv', cand_fname)
-            clustered.to_csv(cand_fname + ".rawcat.csv")
+            uncluster.to_csv(cand_fname + ".rawcat.csv")
         
-        # do classification - rule out RFI
-        outd = self.classify(candidates)
-
-        # apply command line argument for minimum S/N and only return those values
-        if self.pipeline.args.cluster_min_sn is not None:
-            outd = outd[outd['SNR'] > self.pipeline.args.cluster_min_sn]
-        
-
-        return outd
+        return uncluster
 
     def close(self):
         pass
-
 
     def rescale_data(self, data, eps_params):
         '''
@@ -100,7 +96,7 @@ class Step(ProcessingStep):
         return rescaled_data, reference_eps_param
     
 
-    def dbscan(self, data):
+    def time_dm_clustering(self, data):
 
         ### reset the index just in case...
         data = data.reset_index(drop=True)
@@ -145,101 +141,35 @@ class Step(ProcessingStep):
         # data is the original dataframe
         data["cluster_id"] = cls.labels_
 
-        cand_group = data.groupby("cluster_id")
-
-        unique_cand = data.loc[cand_group["SNR"].idxmax()]
-        unique_cand["lpix_rms"] = cand_group["lpix"].std().to_numpy()
-        unique_cand["mpix_rms"] = cand_group["mpix"].std().to_numpy()
-        unique_cand["centl"] = cand_group["lpix"].mean().to_numpy()
-        unique_cand["centm"] = cand_group["mpix"].mean().to_numpy()
-        unique_cand["num_samps"] = cand_group.size().to_numpy()
-
-        return unique_cand, data
+        return data 
 
 
-    def spatial_clustering(self, candidates, clustered):
+    def spatial_clustering(self, uncluster):
         '''
         Do second clustering, and generate spatial coherent clusters
         '''
         config = self.pipeline.config 
 
         # add one extra column - how many spatial clusters for each time/dm cluster
+        grouped = uncluster.groupby('cluster_id').std()
 
-        num_spatial = []
-        labels = []
+        # select clusters that needs to do spatial clustering 
+        idxs = np.array( (grouped['lpix'] > config['threshold']['lpix_rms']) | (grouped['mpix'] > config['threshold']['mpix_rms']) )
+        uncluster['spatial_id'] = -1
 
-        for i in range(len(candidates)):
-            if candidates['lpix_rms'].iloc[i] > config['threshold']['lpix_rms'] and candidates['mpix_rms'].iloc[i] > config['threshold']['mpix_rms'] :
-                data = clustered[clustered['cluster_id'] == i]
-                rescaled_data, reference_eps_param = self.rescale_data(data, config['eps2'])
-                cls = DBSCAN(eps=reference_eps_param, min_samples=config['min_samples']).fit(rescaled_data)  
-                num_spatial.append(max(cls.labels_))
-                labels.append(cls.labels_)
-                clustered.loc[data.index, 'spatial_id'] = cls.labels_
-            else:
-                data = clustered[clustered['cluster_id'] == i]
-                num_spatial.append(-1)
-                labels.append([0])
-                clustered.loc[data.index, 'spatial_id'] = -1
+        log.debug("%s time/dm clusters are doing spatial clustering...", sum(idxs))
 
-        candidates['num_spatial'] = num_spatial
-        candidates['spatial_id'] = -1
+        for i in grouped[idxs].index:
+            data = uncluster[uncluster['cluster_id'] == i]
+            rescaled_data, reference_eps_param = self.rescale_data(data, config['eps2'])
+            cls = DBSCAN(eps=reference_eps_param, min_samples=config['min_samples']).fit(rescaled_data)  
+            uncluster.loc[data.index, 'spatial_id'] = cls.labels_
 
-        # ======
+        # replace spatial clusters for all other clusters to -1
+        # uncluster.fillna({'spatial_id': -1}, inplace=True)
+        uncluster['spatial_id'] = uncluster['spatial_id'].astype(int)
 
-        candidates['cluster_id'] = range(len(candidates))
+        return uncluster 
 
-        # create a new file, adding more rows + spatial id
-        candidates_new = candidates[(candidates['num_spatial'] <=0) | (candidates['num_spatial'] > config['threshold']['num_spatial'])]
-        candidates_new = candidates_new.reset_index(drop=True)
-
-        j = len(candidates_new)
-
-        for ind in range(len(candidates)):
-            
-            if candidates['num_spatial'].iloc[ind] <=0 or candidates['num_spatial'].iloc[ind] > config['threshold']['num_spatial']:
-                continue
-            
-            for i in range(max(labels[ind])+1):
-                data = clustered[clustered['cluster_id'] == ind][labels[ind] == i]
-                # find highest SNR row
-                cand_ind = data['SNR'].idxmax()
-                candidates_new.loc[j] = data.loc[cand_ind]
-                candidates_new.loc[j, 'lpix_rms'] = np.std(data['lpix'])
-                candidates_new.loc[j, 'mpix_rms'] = np.std(data['mpix'])
-                candidates_new.loc[j, 'num_samps'] = len(data)
-                candidates_new.loc[j, 'centl'] = np.mean(data['lpix'])
-                candidates_new.loc[j, 'centm'] = np.mean(data['mpix'])
-                candidates_new.loc[j, 'num_spatial'] = 0
-                
-                j += 1
-
-        return candidates_new, clustered
-
-
-
-    def classify(self, candidates_new):
-
-        config = self.pipeline.config 
-        cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
-
-        # RFI
-        rfi_ind = ((candidates_new['num_samps'] <= config['threshold']['num_samps']) | (candidates_new['num_spatial'] > config['threshold']['num_spatial'])) & (candidates_new['SNR'] < config['threshold']['max_snr'])
-        log.debug("Found %d rfi signals", sum(rfi_ind))
-
-        # Central ghost 
-        cet_ind = (candidates_new['lpix'] >= 126) & (candidates_new['lpix'] <= 130) & (candidates_new['mpix'] >= 126) & (candidates_new['mpix'] <= 130)
-
-        if self.pipeline.args.save_rfi:
-            # candidates_rfi = candidates_new[rfi_ind]
-            candidates_rfi = candidates_new[rfi_ind | cet_ind]
-            log.info('Saving selected rfi to file %s.rfi.csv', cand_fname)
-            candidates_rfi.to_csv(cand_fname + ".rfi.csv")
-
-        # others | which is suppose to be candidates! 
-        # candidates_fin = candidates_new[(~rfi_ind)]
-        candidates_fin = candidates_new[(~rfi_ind) & (~cet_ind)]
-
-        return candidates_fin 
-
+        
 
