@@ -26,6 +26,7 @@ from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
+from craco.preprocess import FastPreprocess
 from craco.candidate_writer import CandidateWriter
 from craco import write_psf as PSF
 
@@ -439,6 +440,13 @@ class Pipeline:
         return self.cal_solution.solarray
 
     @property
+    def solarray_avgd(self):
+        if self.solarray.ndim == 4:
+            return self.solarray.mean(axis=2)
+        else:
+            return self.solarray
+        
+    @property
     def num_input_cells(self):
         '''
         Returns the total number of cells added together in the grid
@@ -454,6 +462,7 @@ class Pipeline:
         sets the channel flags. this is done by updating the calibraiton solution
         '''
         return self.cal_solution.set_channel_flags(chanrange, flagval)
+        
 
     def flag_frequencies_from_file(self, flag_frequency_file:str, flagval:bool):
         '''
@@ -759,11 +768,9 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-        if values.simulate_data:
-            #If we have simulated data, the array won't be a masked array hence this if-else
-            self.fast_baseline2uv(input_flat, self.uv_out)
-        else:
-            self.fast_baseline2uv(input_flat.data, self.uv_out)
+
+
+        self.fast_baseline2uv(input_flat, self.uv_out)
         nuvwide = self.uv_out.shape[0]
         self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
         self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
@@ -1108,7 +1115,12 @@ class PipelineWrapper:
         if values.flag_frequency_file:
             log.info('Flagging channels from file %s', values.flag_frequency_file)
             p.flag_frequencies_from_file(values.flag_frequency_file, True)
-            
+
+        self.fixed_freq_weights = ~p.cal_solution.solarray.mask[0, :, 0, 0]
+
+        blk_shape = (plan.nbl, plan.nf, plan.nt)
+        self.fast_preprocessor = FastPreprocess(blk_shape, p.cal_solution.solarray, values, self.fixed_freq_weights, sky_sub = True, single_norm = True)
+
         self.pipeline = p
         p.clear_buffers(values)
 
@@ -1139,7 +1151,7 @@ class PipelineWrapper:
         self.pipeline.update_plan(new_plan)
         return self.plan
 
-    def write(self, input_flat, cas=None, ics=None):
+    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None):
         '''
         cas, and ics if specified help with flagging
         '''
@@ -1162,11 +1174,9 @@ class PipelineWrapper:
             input_flat_cal = input_flat * values.target_input_rms
 
         else:
-            input_flat = p.flag_input(input_flat, cas, ics, mask_fil_writer, cas_fil_writer)
-            t.tick('flag')
-            
-            input_flat_cal = p.calibrate_input(input_flat) #  This takes a while TODO: Add to fastbaseline2uv
-            t.tick('calibrate')
+            self.fast_preprocessor(input_flat, bl_weights, input_tf_weights)
+            t.tick('preprocessor')
+            input_flat_cal = self.fast_preprocessor.output_buf
 
         if do_dump(values.dump_input, iblk):
             input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
@@ -1177,11 +1187,8 @@ class PipelineWrapper:
             t.tick('inject')
 
         if pc_filterbank is not None:
-            #if we've simulated data, the array will not be a masked array, so we have to treat it differently
-            if values.simulate_data:
-                d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
-            else:
-                d = input_flat_cal.real.mean(axis=0).T.data.astype(np.float32)
+            d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
+
 
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
