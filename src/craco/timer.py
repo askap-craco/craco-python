@@ -7,6 +7,8 @@ Copyright (C) CSIRO 2022
 import logging
 import time
 from collections import OrderedDict
+from craco.mpi_tracefile import MpiTracefile
+from craco.tracing import tracing
 
 log = logging.getLogger(__name__)
 
@@ -51,13 +53,22 @@ class Timer:
         self.last_ts = Timestamp.now()
         self.init_ts = self.last_ts
         self.ticks = OrderedDict()
+        self.tracefile = MpiTracefile()
 
     def tick(self, name):
         ts = Timestamp.now()
         tdiff = ts - self.last_ts
         self.ticks[name] = tdiff
-        self.last_ts = ts
+
+        # add completion event for this thing
+        # timestamps are integer microseconds
+        complete_event = tracing.CompleteEvent(name, 
+            ts = int(self.last_ts.perf * 1e6), 
+            dur=int(tdiff.perf)*1e6, 
+            tdur=int(tdiff.process)*1e6) # not sure if this should be process or perf?
+        self.tracefile.tracefile += complete_event
         
+        self.last_ts = ts        
         return tdiff
 
     @property

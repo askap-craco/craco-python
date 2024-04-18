@@ -1006,10 +1006,10 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-        if type(inblock) in [np.ndarray]:       #I removed the support for numpy.maksed_array on 12 Feb 2024, but I should add it back"
+        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:       #I removed the support for numpy.maksed_array on 12 Feb 2024, but I should add it back"
             block = inblock
         else:
-            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(inblock)}")
 
         if iblock == 0:
             history_shape = list(block.shape)

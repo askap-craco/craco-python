@@ -31,7 +31,7 @@ fi
 
 # Nice hack - just create rankfile based on the mpipipeline- handy that beams are rank 0-35
 beam_only_rankfile=$indir/beam_only.rank
-grep Beam $rankfile > $beam_only_rankfile
+beam_rank_file $rankfile > $beam_only_rankfile
 
 rootdir=$(dirname $0)
 cmd="mpirun -wdir $indir -rankfile $beam_only_rankfile -x INDIR=$indir -x START_CARD -x RUNNAME $@ "

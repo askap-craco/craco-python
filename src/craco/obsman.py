@@ -73,13 +73,17 @@ class Obsman:
         self.shutdown()
 
     def restart_process(self):
-        running = self.process is not None
+        running = self.is_running
         self.terminate_process()
         # restart
         
         if running:
             pass # don't restart yet - I think we need to load up a new scan info so we don't end up restaring with the same metadadta?
             self.start_process(self.curr_scan_info)
+
+    @property
+    def is_running(self):
+        return self.process is not None
         
     def scan_changed(self, scan_info):
         sbid = scan_info.sbid
@@ -296,7 +300,7 @@ class MetadataObsmanDriver:
                 time.sleep(0.2)
 
             self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
-            self.scan_manager = ScanManager(self.ant_numbers )
+            self.scan_manager = ScanManager(self.ant_numbers, frac_onsource=self.obsman.values.frac_onsource )
             log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
         elif sbid == self.sbid:
             assert state != ObsState.EXECUTING
@@ -315,10 +319,11 @@ class MetadataObsmanDriver:
         d = metadata_to_dict(pub_data, self.sbid)
         mgr = self.scan_manager
         next_scan_running = mgr.push_data(d)
+        self.scan_running = self.obsman.poll_process()
         if self.scan_running:
             if next_scan_running: # continue running scan
                 pass                
-            else: # stop running scan
+            else: # metadata says to stop running scan
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
@@ -345,6 +350,7 @@ def _main():
     parser.add_argument(dest='cmd', nargs='+')
     parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')
     parser.add_argument('--driver', choices=('meta','epics'), default='meta', help='DRive with epics or metadata')
+    parser.add_argument('--frac-onsource', default=0.9, type=float, help='Fraction of antennas that need to be on source to start a scan')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
