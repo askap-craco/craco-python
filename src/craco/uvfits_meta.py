@@ -17,6 +17,7 @@ from craco.metadatafile import MetadataFile, to_uvw, uvw_to_array
 from craft import uvfits
 from craft.craco import ant2bl,bl2ant,time_block_with_uvw_range
 from craft.vis_metadata import VisMetadata
+from craco.uvwsource_calc11 import UvwSourceCalc11
 from astropy.io import fits
 from scipy import constants
 import astropy.units as u
@@ -79,11 +80,31 @@ class VisViewMeta:
         data['WW'] = uvw_out[2,:]
 
         return data
+    
+
+class UvwSourceMeta:
+    '''
+    UVW source (like the uvwsource_calc11 but for metadata file)
+    '''
+    def __init__(self, meta_file, beamid:int):
+        self.meta_file = meta_file
+        self.beamid = beamid
+        assert 0<= beamid < self.meta_file.nbeam, f'Invalid beamid {beamid}'
+    
+    def uvw_array_at_time(self, tuvw:Time):
+        beamid = self.beamid
+        uvw = self.meta_file.uvw_at_time(tuvw)[:, beamid, :] / constants.c
+        return uvw
 
 class UvfitsMeta(uvfits.UvFits):
-    def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None, start_mjd=None,end_mjd=None):
+    def __init__(self, hdulist, max_nbl=None, mask=True, skip_blocks=0, metadata_file=None, start_mjd=None,end_mjd=None,calc11=None):
         self.meta_file = MetadataFile(metadata_file)
+        self.uvw_source = None
         super().__init__(hdulist, max_nbl, mask, skip_blocks, start_mjd, end_mjd)
+        if calc11:
+            self.uvw_source = UvwSourceCalc11.from_uvfits(self)
+        else:
+            self.uvw_source = UvwSourceMeta(self.meta_file, self.beamid)
 
     def vis_metadata(self, isamp:int):
         '''
@@ -117,10 +138,18 @@ class UvfitsMeta(uvfits.UvFits):
     def uvw_array_at_time(self, tuvw:Time):
         '''
         Returns interpolated UVW array.
-        For all baselines
+        For all baselines - irresective of flagging
+        for the beamid returned by self.beamid
+        :returns: [NANT, 3] numpy array in units of seconds
         '''
-        beamid = self.beamid
-        uvw = self.meta_file.uvw_at_time(tuvw)[:, beamid, :] / constants.c
+        if self.uvw_source is None:
+            # This smells, butis ncessary currtently:
+            # __init__ needs to look at .vis to find baselines, but it uses uvw_source in .vis so it fails.
+            # just return zeros for now
+            nant = 36
+            return np.zeros((nant, 3))
+        
+        uvw = self.uvw_source.uvw_array_at_time(tuvw)
         return uvw
 
     def baselines_at_time(self, tuvw:Time):
@@ -175,32 +204,23 @@ class UvfitsMeta(uvfits.UvFits):
         src = self.meta_file.source_at_time(self.beamid, self.tstart)
         coord = src['skycoord']
         return coord
-
-    def _create_masked_data2(self, dout_data, start_sampno):
-        dout_complex_data = dout_data[..., 0, :] + 1j*dout_data[..., 1, :]
-        mask = np.zeros(dout_complex_data.shape, dtype=bool)
-        nt = mask.shape[-1]
-        t0 = self.sample_to_time(start_sampno)
-        t1 = self.sample_to_time(start_sampno+nt)
-        flags_t0 = self.meta_file.flags_at_time(t0)
-        flags_t1 = self.meta_file.flags_at_time(t1)
-        flags = flags_t0 | flags_t1
-        if self.mask:
-            for ibl, blid in enumerate(self.internal_baseline_order):
-                a1,a2 = bl2ant(blid)
-                ia1, ia2 = (a1 - 1), (a2 - 1)
-                f = flags[ia1] or flags[ia2] 
-                mask[ibl,...] = f
-            
-            dout_complex_data = np.ma.MaskedArray(data = dout_complex_data, mask = mask)
-
-        return dout_complex_data
-
+    
 def open(*args, **kwargs):
-    logging.info('Opening file %s', args[0])
+    logging.info('Opening uvfits_meta %s %s', args, kwargs)
     mfile = kwargs.get('metadata_file', None)
     if mfile is None:
-        del kwargs['metadata_file']
+        if 'metadata_file' in kwargs.keys():
+            del kwargs['metadata_file']
+        
+        # in principle calc11 could be used without a metadata file, but 
+        # it won't work for as it relies on all the machinery to overwrite UVWs which is only in metadata 
+        # file at the moment.
+        if 'calc11' in kwargs.keys():
+            if kwargs['calc11']:
+                raise ValueError('Sorry we dont yet know how to do calc11 without a metadata file. long story')
+            
+            del kwargs['calc11']
+
         x = uvfits.open(*args, **kwargs)
     else:
         x = UvfitsMeta(fits.open(*args, **kwargs), **kwargs)

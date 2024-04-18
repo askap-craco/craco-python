@@ -14,6 +14,7 @@ import sys
 import logging
 from craco.metadatafile import MetadataFile
 from astropy import units as u
+from astropy.time import Time
 
 
 log = logging.getLogger(__name__)
@@ -24,9 +25,11 @@ class CalcMetafile(MetadataFile):
     def __init__(self, fname, calc_results):
         super().__init__(fname)
         self._calc_results = calc_results
+        self.flags = np.zeros(self.nant, dtype=bool)
 
     def uvw_at_time(self, mjd, beam=None):
-        assert beam is None, 'CalcMetafile only knows about 1 beam'
+        #assert beam is None, 'CalcMetafile only knows about 1 beam'
+        # it will tell us the beam, we ignore it
 
         offset = 90*0.110*u.second*0 # An integration
         d = self._calc_results.scans[0].eval_src0_poly((mjd + offset).utc.value)
@@ -44,7 +47,11 @@ class CalcMetafile(MetadataFile):
         return uvw
 
     def flags_at_time(self, mjd):
-        return np.zeros(self.nant, dtype=bool)
+        return self.flags
+
+    def source_name_at_time(self, time: Time):
+        return self.data[0]['target_name']
+
         
 
 def _main():
@@ -62,3 +69,4 @@ def _main():
 
 if __name__ == '__main__':
     _main()
+

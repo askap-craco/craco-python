@@ -204,6 +204,7 @@ class MetadataFile:
         self.antnames = antnames
         self._sources_b0 = self.sources(0) # just used for sourcenames
         self.nbeam = 36 # hmm
+        self.nant = len(self.antnames)
 
         # Keys for eeach etnry are:
         #dict_keys(['antenna_targets', 'antennas', 'beams_direction', 'beams_offsets', 'cycle_period', 'flagged', 'phase_direction', 'polangle', 'polmode', 'sbid', 'scan_id', 'schedulingblock_id', 'sky_frequency', 'target_direction', 'target_name', 'timestamp'])

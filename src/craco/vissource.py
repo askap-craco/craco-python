@@ -104,6 +104,8 @@ class CardCapNetworkSource:
                 if procid > numprocs:
                     break
 
+        log.debug('numprocs %s block_cards %s', numprocs, block_cards)
+
         self.ctrl = cardcap.MpiCardcapController(pipe_info.rx_comm,
                                                   pipe_info.values,
                                                   block_cards)

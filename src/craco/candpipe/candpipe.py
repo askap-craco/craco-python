@@ -15,6 +15,7 @@ import os
 import sys
 import logging
 import traceback
+from astropy.io import fits
 
 from . import steps
 from craco.plot_cand import load_cands
@@ -71,11 +72,14 @@ class Pipeline:
         if not os.path.exists(self.psf_fname):
             self.steps = [
                 steps.cluster.Step(self),
+                steps.time_space_filter.Step(self), 
                 steps.catalog_cross_match.Step(self),
             ]
         else:
+            self.psf_header = self.get_header()
             self.steps = [
                 steps.cluster.Step(self),
+                steps.time_space_filter.Step(self), 
                 steps.catalog_cross_match.Step(self),
                 steps.alias_filter.Step(self), 
                 steps.injection_filter.Step(self), 
@@ -113,6 +117,15 @@ class Pipeline:
             os.makedirs(outdir, exist_ok=True)
         else:
             log.debug('Directory %s exists.', outdir)
+
+
+    def get_header(self):
+        fitsfile = self.psf_fname
+        # Open the FITS file and get the header
+        with fits.open(fitsfile) as hdul:
+            header = hdul[0].header
+
+        return header
 
     
     def run(self):

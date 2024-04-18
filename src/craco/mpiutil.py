@@ -5,6 +5,7 @@ MPI Utility classe
 Copyright (C) CSIRO 2020
 """
 import mpi4py
+from mpi4py import MPI
 import logging
 from array import array
 import numpy as np
@@ -42,19 +43,6 @@ def parse_hostfile(hostfile):
             hosts.append(bits[0])
 
     return hosts
-
-
-class MpiPipeline:
-    def __init__(self, nbeam:int):
-        self.nbeam = nbeam
-        self.__beam_processes = []
-        self.__root_proceses = []
-
-    def beam_process(self, func):
-        self.__beam_processes.append(func)
-
-    def root_process(self, func):
-        self.__root_processes.append(func)
 
 
 

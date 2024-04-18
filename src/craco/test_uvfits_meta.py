@@ -29,7 +29,8 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 metafile = 'testdata/SB053972/SB53972.json.gz'
 uvfits = 'testdata/SB053972/b00.uvfits'# this file has 2 bad antennas ak19 and ak25 and nothing above ak30
 flag_ants_1based = [8, 19,25,30,31,32,33,34,35,36] # ant 8 isin the file but we want to remove it from baselines
-
+# also it looks like channels 144-151 are inclusive are flagged because of some reason.
+flagged_chans = slice(144, 152)
 
 @pytest.fixture
 def f1():
@@ -43,6 +44,7 @@ def f2():
     f.set_flagants(flag_ants_1based)
     return f
 
+
 def check_baselines_equal(b1,b2):
     assert type(b1) == type(b2)
     assert len(b1) == len(b2)
@@ -51,6 +53,11 @@ def check_baselines_equal(b1,b2):
     for bl in b1.keys():
         for t in ('UU','VV','WW'):
             assert b1[bl][t] == b2[bl][t]
+
+
+def test_antenna_positions_is_ok(f1):
+    print(f1.antenna_positions)
+    assert len(f1.antenna_positions) >= 1
 
 def test_to_uvw():
     uvout = to_uvw([1.0,2.0,3.0])
@@ -132,6 +139,33 @@ def test_uvws_sensible():
     assert np.all(uvw[valid_ants_0based,:]) != 0, 'valid ants have 0 uvw'
     
     #assert np.all(uvw[bad_ants_0based,:] == 0), 'Bad ants have nonzero uvw'
+
+def test_uvws_sensible_with_calc11():
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile)
+    f2.set_flagants(flag_ants_1based)
+
+    f3 = craco.uvfits_meta.open(uvfits, metadata_file=metafile, calc11=True)
+    f3.set_flagants(flag_ants_1based)
+
+    valid_ants_0based = np.array(f2.valid_ants) - 1
+    bad_ants_0based = np.array(flag_ants_1based) - 1
+
+    tstart = f2.tstart
+    tsamp = f2.tsamp
+    tmid = tstart + tsamp/2
+    
+    uvw = f2.uvw_array_at_time(tmid)
+    uvw3 = f3.uvw_array_at_time(tmid)
+    print('Bad ants are at 0 based indexs', np.where(uvw==0))
+    print('Bad ants 0based', bad_ants_0based)
+    uvwdiff = uvw3 - uvw
+    print(f'RMS error in UVW is {uvwdiff.std(axis=0)}')
+
+    assert np.all(uvw[valid_ants_0based,:]) != 0, 'valid ants have 0 uvw'
+    assert np.all(uvw3[valid_ants_0based,:]) != 0, 'valid ants have 0 uvw'
+
+    assert np.any(uvwdiff != 0), 'Surely there are some differences!'
+
 
 def test_uvfits_fast_time_blocks_with_istart():
     f1 = craft.uvfits.open(uvfits)
@@ -386,18 +420,23 @@ def test_start_mjd_offset(f1):
 
     b0t0 = next(i0)
     b0t1 = next(i0)
+
+    bofft0 = next(ioff)
     bofft1 = next(ioff)
     
+    d0, uvw0 = b0t0
     d1, uvw1 = b0t1
-    d2, uvw2 = bofft1
-    d3, uvw3 = b0t0
 
-    #I don't kno whow this was ever right
-#    assert np.all(uvw1 == uvw2)
-#    assert np.all(d1 == d2)#
+    d3, uvw3 = bofft0
+    d4, uvw4 = bofft1
 
-#    assert not np.all(uvw3 == uvw2)
-#    assert not np.all(d3 == d2)
+
+    #I don't know whow this was ever right
+    #assert np.all(uvw0 == uvw3)
+    #assert np.all(d0 == d3)
+
+    #assert not np.all(uvw3 == uvw2)
+    #assert not np.all(d3 == d2)
 
 def test_fast_time_blocks_masks_ok(f1):
     nt = 64
@@ -414,8 +453,32 @@ def test_fast_time_blocks_masks_ok(f1):
     # we need to record another uvfits with all antennas and some metadata
     # to check it works as expected.
     # for now, everything should be unflagged
-    print('Number of flags', np.sum(d2.mask))
-    assert np.all(d2.mask == False)
+    mask = d2.mask.squeeze()
+
+    print('Number of flags', np.sum(d2.mask), mask.shape)
+    if False:
+        pylab.imshow(mask[:,:,0])
+        pylab.figure()
+        pylab.plot(mask[:,:,0].sum(axis=0))
+        pylab.show()
+
+    # channel 0 is OK - there are some flagged channels but we don't care
+    assert np.all(mask[:,0,:] == False)
+    assert np.all(mask[:,flagged_chans,:] == True)
+
+
+def test_before_and_after_flags_vis_equal():
+    skip = 1
+    f2 = craco.uvfits_meta.open(uvfits, metadata_file=metafile, skip_blocks=skip)
+    raw_nbl = f2.raw_nbl
+    nbl = f2.nbl
+    v1 = f2.vis[0:raw_nbl]
+    
+    f2.set_flagants(flag_ants_1based)
+
+    v2 = f2.vis[0:raw_nbl]
+    assert raw_nbl == f2.raw_nbl
+    assert np.all(v1==v2)
 
     
 

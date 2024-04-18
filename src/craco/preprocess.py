@@ -114,6 +114,124 @@ def average_pols(block, keepdims = True):
     return block
 
 
+def fast_preprpocess(input_block, output_buf, output_mask, isubblock, Ai, Qi, N, calsoln, target_input_rms, sky_sub = False, reset_scales = False, input_mask = None):
+    '''
+    Loops over all dimensions of the input_block. Applies the calibration soln,
+    Measures the input levels, and optionally rescales and does the sky subtraction.
+
+    input_block: Input data array - (nbl, nf, nt). Can be a masked array or np.ndarray - complex64
+    input_mask: Input mask array - (nbl, nf, nt). If not provided, input_block needs to be a masked array
+    output_buf: Output data array - (nbl, nf, nt*nsubblock). Won't be a masked array - complex64
+    output_mask: Output masks array after combining the masks produced by the dynamic flagger
+    isubblock: integer - output_buf can hold mulitple input_blocks - isubblock is the counter
+    Ai: numpy array to keep track of the running mean (nbl, nf) - complex64
+    Qi: numpy array to keep track of the running rms (nbl, nf) - complex64
+    N: numpy array to keep track of the nnumbers added so far (nbl, nf) - int16
+        This needs to be initialised with ones at the very beginning, otherwise bad things will happen
+    calsoln: numpy array containing the calibration solution (nbl, nf) - complex64
+    target_input_rms: float, the rms value which needs to be set. If None, data will not be rescaled
+    sky_sub: bool, Whether to do mean subtraction or not.
+    reset_scales: bool, whether to keep on accumulating Ai and Qi values across blocks, or reset to zero at the start of this block
+                    Note -- reset_scales flag should set to true when this function is called for the first time, or we need to ensure that
+                    Ai, Qi and N are initialised properly outside this function.
+    '''
+    #TODO -- think about whether changing the order of the input_block could speed things up a bit more
+    #TODO -- include the computation of CAS and the masks inside this function's first pass over the data
+    #        Right now it is a bit too complicated to allow for a different nt for the flagger
+    nbl, nf, nt = input_block.shape
+
+    if input_mask is None:
+        assert type(input_block)==np.ma.core.MaskedArray, f"Given - {type(input_block)}"
+        input_data = input_block.data
+        #input_mask = np.any(input_block.mask, axis=0)   #We take the OR of all mask values along the Basline axis given that Keith says that if a packet is dropped, all baselines are gauranteed to be flagged for that time-freq spaxel
+        input_mask = input_block.mask
+
+    else:
+        input_mask = input_mask
+        assert input_mask.shape == input_block.shape, f"Shape of the input masks should match that of input_block - Input_block.shape = {input_block.shape}, Given shape = {input_mask.shape}"
+
+        if type(input_block) == np.ma.core.MaskedArray:
+            input_data = input_block.data
+        elif type(input_block) == np.ndarray:
+            input_data = input_block
+        else:
+            raise ValueError(f"dtype of input block should be np.ma.core.MaskedArray, or nd.ndarray, found = {type(input_block)}")
+
+    assert type(calsoln)==np.ma.core.MaskedArray, f"Given - {type(calsoln)}"
+ 
+    cal_data = calsoln.data
+    cal_mask = calsoln.mask
+
+    for i_bl in range(nbl):
+        for i_f in range(nf):
+        
+            if reset_scales:
+                Qi[i_bl, i_f] = 0
+                zeroth_samp = input_data[i_bl, i_f, 0]
+                zeroth_samp_mask = input_mask[i_bl, i_f, 0]
+
+                if not zeroth_samp_mask:
+                    Ai[i_bl, i_f] = zeroth_samp
+                    N[i_bl, i_f] = 2
+                else:
+                    Ai[i_bl, i_f] = 0
+                    N[i_bl, i_f] = 1
+
+            ical_mask = cal_mask[i_bl, i_f]
+            if ical_mask:
+                #Skip all the computation, directly set the output values to zero, and go to the next channel
+                output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
+                Ai[i_bl, i_f] = 0
+                Qi[i_bl, i_f] = 0
+                N[i_bl, i_f] = 1
+                continue
+            
+            for i_t in range(nt):
+                isamp = input_data[i_bl, i_f, i_t]
+                imask = input_mask[i_bl, i_f, i_t]
+
+                if imask:
+                    output_buf[i_bl, i_f, isubblock*nt + i_t] = 0
+                    continue
+                else:
+                    Qi[i_bl, i_f] = Qi[i_bl, i_f] + (N[i_bl, i_f] -1)/ N[i_bl, i_f] * (isamp - Ai[i_bl, i_f])**2
+                    Ai[i_bl, i_f] = Ai[i_bl, i_f] + (isamp - Ai[i_bl, i_f])/ N[i_bl, i_f]
+                    N[i_bl, i_f] += 1
+
+                    if target_input_rms is None and not sky_sub:
+                        #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
+                        output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp * cal_data[i_bl, i_f]
+
+            if target_input_rms or sky_sub:
+                rms_val_real = np.sqrt(Qi[i_bl, i_f].real / N[i_bl, i_f].real)
+                rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f].imag)
+                rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
+
+                multiplier = cal_data[i_bl, i_f] * target_input_rms / rms_val
+                #Loop through the data again and apply the various rescale factors and the cal soln
+                for i_t in range(nt):
+                    isamp = input_data[i_bl, i_f, i_t]
+                    imask = input_mask[i_bl, i_f, i_t]
+
+                    if imask:
+                        #Output has already been set to zero in the first loop. 
+                        #We don't need to do anything here
+                        pass
+                    else:
+                        if sky_sub and not target_input_rms:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp - Ai[i_bl, i_f]
+
+                        elif sky_sub and target_input_rms:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier
+
+                        elif target_input_rms and not sky_sub:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f]
+
+
+                
+
+                
+
 
 class Calibrate:
     #TODO remove the dependence of Calibrate on plan -- needs to propage through to the calibration.py's CalSolution class
@@ -472,10 +590,10 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
+        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:       #I removed the support for numpy.maksed_array on 12 Feb 2024, but I should add it back"
             block = inblock
         else:
-            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(inblock)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -483,6 +601,9 @@ class Dedisp:
             history_shape = tuple(history_shape)
 
             self.dm_history = np.zeros(history_shape, dtype=block.dtype)
+       
+        if self.dm == 0:
+            return inblock
 
         attached_block = np.concatenate([self.dm_history, block], axis=-1)
         rolled_block = np.zeros_like(attached_block)

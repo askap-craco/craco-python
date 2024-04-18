@@ -18,9 +18,9 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-def snip(infile, outfile, startidx, nblk, metadata_file=None, start_mjd = None):
+def snip(infile, outfile, startidx, nblk, metadata_file=None, start_mjd = None, calc11=False):
     hdr = fits.getheader(infile)
-    inf = uvfits_meta.open(infile, metadata_file=metadata_file, start_mjd = start_mjd)
+    inf = uvfits_meta.open(infile, metadata_file=metadata_file, start_mjd = start_mjd, calc11=calc11)
     with open(outfile, 'wb') as fout:
         fout.seek(0,0)
         hdrb = bytes(hdr.tostring(), 'utf-8')
@@ -71,6 +71,7 @@ def _main():
     parser.add_argument('--start-samp', type=int, help='Start sample', default=0)
     parser.add_argument('-N','--nsamp', type=int, help='Number of samples', default=1)
     parser.add_argument('-O','--outfile', help='Output file', required=True)
+    parser.add_argument('--calc11', action='store_true', default=False, help='Interpolate UVWs with calc11')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -83,7 +84,8 @@ def _main():
          values.start_samp,
          values.nsamp,
          values.metadata,
-         values.start_mjd)
+         values.start_mjd,
+         values.calc11)
     
 
 if __name__ == '__main__':

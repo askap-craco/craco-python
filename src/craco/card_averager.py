@@ -473,8 +473,8 @@ def average13(packets, tscrunch, dout=None, dout2=None):
 def vis_reshape(din, cross_idxs, dout):
     npkt, nt, nbl_in, _ = din.shape
     nbl_out = len(cross_idxs)
-    expected_dout = (NBEAM, nbl_out, NCHAN, nt, 2)
-    assert dout.shape == expected_dout, f'Invalid dout shape {dout.shape} {din.shape} {nbl_out} {nt}'
+    expected_dout_shape = (NBEAM, nbl_out, NCHAN, nt, 2)
+    assert dout.shape == expected_dout_shape, f'Invalid dout shape dout={dout.shape} expected={expected_dout_shape} {din.shape} {nbl_out} {nt}'
     assert npkt == NBEAM*NCHAN
     dout[:32, ...] = din[:32*4,...].reshape(NCHAN,32,nt,nbl_in,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
     dout[32:, ...] = din[32*4:,...].reshape(NCHAN,4 ,nt,nbl_in,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
@@ -608,6 +608,8 @@ class Averager:
         
         if exclude_ants is None:
             exclude_ants = []
+
+        assert np.all(np.array(exclude_ants) - 1 < nant), f'We cant handle flagging antennas > nant={nant} We dont have the logic. execlude ants={exclude_ants}'
 
         self.nant_in = nant
         self.nant_out = self.nant_in - len(exclude_ants)
