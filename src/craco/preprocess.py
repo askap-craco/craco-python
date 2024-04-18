@@ -586,7 +586,7 @@ class FastPreprocess:
                     The fixed frequency weights array of shape (nf)
         '''
         masks = input_block.mask
-        bl_weights = np.empty(masks.shape[0],dtype=np.bool)
+        bl_weights = np.empty(masks.shape[0],dtype=bool)
         for ii, bl in enumerate(masks):
             bl_weights[ii] = ~np.all(bl)
 

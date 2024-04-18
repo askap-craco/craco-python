@@ -167,6 +167,9 @@ class Tracefile:
     __iadd__ = append
 
     def close(self):
+        if self.fout is None:
+            return
+        
         fout = self.fout
         if self.type == 'array':
             fout.write('\n]')

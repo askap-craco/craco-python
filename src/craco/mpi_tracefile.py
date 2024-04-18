@@ -37,12 +37,13 @@ class MpiTracefile:
     def __init__(self):
         comm = MPI.COMM_WORLD
         self.rank = comm.Get_rank()
-        self.filename = f'rank_{self.rank:03d}.trace'
+        self.filename = f'rank_{self.rank:03d}_trace.json'
         self.tracefile  = Tracefile(self.filename, 'array')
         atexit.register(self.close)
 
     def close(self):
-        self.tracefile.close()
+        if self.tracefile is not None:
+            self.tracefile.close()
 
 
 

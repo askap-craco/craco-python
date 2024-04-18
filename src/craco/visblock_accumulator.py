@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-class VisblockAccumulator:
+class VisblockAccumulatorMasked:
     def __init__(self, nbl, nf, nt):
         shape = (nbl, nf, nt)
         self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
@@ -48,7 +48,6 @@ class VisblockAccumulator:
             self.pipeline_data.mask[:,fstart:fend, tstart:tend] = chanmask | blflags
 
         self.t += vis_nt
-        output_nt = self.pipeline_data.shape[2]
 
     @property
     def msg_size(self):
@@ -62,6 +61,64 @@ class VisblockAccumulator:
     
     def reset(self):
         self.t = 0
+
+    def close(self):
+        pass
+
+class VisblockAccumulatorStruct:
+    def __init__(self, nbl, nf, nt):
+        shape = (nbl, nf, nt)
+        dt = np.dtype([
+            ('vis', np.complex64, (nbl,nf,nt)),
+            ('tf_weights', bool, (nf,nt)),
+            ('bl_weights', bool, (nbl,))
+        ])
+        self.pipeline_data = np.zeros((1), dtype=dt)[0]
+        self.dtype = dt
+        self.t = 0
+        self.nt = nt
+
+    def write(self, vis_block):
+        vis_data = vis_block.data
+        assert len(vis_data.shape) >= 4, f'Invalid vis data shape {vis_data.shape} {vis_data.dtype}'
+        nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+        assert vis_data.dtype == np.complex64, f'I think we can only handle complex data in this function. Vis data type was {vis_data.dtype} {vis_data.shape}'
+        output_nt = self.pipeline_data.shape[2]
+        
+        assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
+        assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
+        assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
+        blflags = vis_block.baseline_flags # True = Bad, False=Good
+        blweights = not blflags # True = Good, False = bad
+        # If any baselines in the current block are bad, we make them bad for hte whole block
+        self.pipeline_data['bl_weights'] &= blweights
+        
+        tstart = self.t
+        tend = tstart + vis_nt
+
+        # loop through each card
+        for irx in range(nrx):
+            fstart = irx*vis_nc
+            fend = fstart + vis_nc
+            chan_weights = abs(vis_data[irx, ...]) != 0
+            self.pipeline_data['vis'][:,fstart:fend, tstart:tend] = vis_data[irx, ...]
+            self.pipeline_data['tf_weights'][:,fstart:fend, tstart:tend] = chan_weights
+
+        self.t += vis_nt
+
+    @property
+    def msg_size(self):                
+        s = self.pipeline_data.nbytes
+        return s
+
+    @property
+    def is_full(self):
+        return self.t == self.nt
+    
+    def reset(self):
+        self.t = 0
+        self.pipeline_data['bl_weights'][:] = True # make them all good again
+        # Don't need to reset 'vis' and 'tf_weights' as they will be overidden
 
     def close(self):
         pass

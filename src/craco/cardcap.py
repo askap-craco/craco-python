@@ -401,6 +401,7 @@ class FpgaCapturer:
             if immediate != expected_immediate:
                 self.total_missing += diff
                 log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} MISSED PACKET imm={immediate}={hex(immediate)} expected={expected_immediate} Diff={diff} fid={fid}={hex(fid)} fid_diff={fid_diff}   nmiss={self.total_missing} nbytes={nbytes} qloading={rx.currentQueueLoading}')
+                
             
 
             self.curr_imm = immediate

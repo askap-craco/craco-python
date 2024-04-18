@@ -238,6 +238,9 @@ class SearchPipelineSink:
         Also updates plan if necessary
         '''
 
+        if self.pipeline is None:
+            return
+        
         t = Timer()
 
         # Update UVWs if necessary
@@ -254,13 +257,13 @@ class SearchPipelineSink:
         t.tick('Update plan')
 
         try:
-            self.pipeline.write(self.pipeline_data)
+            self.pipeline.write(pipeline_data['vis'], pipeline_data['bl_weights'], pipeline_data['tf_weights'])
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error
             log.exception('Error sending data to pipeline. Disabling this pipeline')
             self.pipeline.close()
-            self.pipeline = None
+            self.pipeline = None        
 
         self.iblk += 1
         self.last_write_timer = t
@@ -276,6 +279,7 @@ class SearchPipelineSink:
         
 
 def _main():
+
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')

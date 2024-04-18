@@ -961,7 +961,7 @@ def transpose_beam_run(proc):
     transposer = proc.transposer
 
     # warmup send
-    beam_comm.send(vis_accum.pipeline_data, dest=beam_proc_rank)
+    beam_comm.Send(vis_accum.pipeline_data, dest=beam_proc_rank)
 
 
     try:
@@ -984,9 +984,10 @@ def transpose_beam_run(proc):
             vis_accum.write(vis_block_complex)
             t.tick('accumulate')
             if vis_accum.is_full:
-                beam_comm.send(vis_accum.pipeline_data, dest=beam_proc_rank)
-                vis_accum.reset()
+                beam_comm.Send(vis_accum.pipeline_data, dest=beam_proc_rank)
                 t.tick('Send')
+                vis_accum.reset()
+                t.tick('vis reset')
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -1034,25 +1035,25 @@ def proc_beam_run(proc):
     beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
     req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
 
-    #nf = len(info.vis_channel_frequencies)
-    #nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
-    #nbl = info.nbl_flagged    
-    #vis_accum = VisblockAccumulator(nbl, nf, nt)
+    nf = len(info.vis_channel_frequencies)
+    nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
+    nbl = info.nbl_flagged    
+    vis_accum = VisblockAccumulator(nbl, nf, nt)
+    pipeline_data = vis_accum.pipeline_data
     
     # warumup recv
-    pipeline_data = beam_comm.recv(source=transposer_rank)
+    beam_comm.Recv(vis_accum.pipeline_data, source=transposer_rank)
 
     try:
         while True:
             t = Timer()
             # recieve from transposer rank
-            pipeline_data = beam_comm.recv(source=transposer_rank)
+            beam_comm.Recv(vis_accum.pipeline_data, source=transposer_rank)
 
             t.tick('recv')
             if iblk == 0:
                 log.info('got block 0')
             
-
             if pipeline_sink.ready_for_next_plan:
                 plan_received, plan = req.test()
                 t.tick('recv plan')

@@ -51,6 +51,7 @@ def _main():
     parser.add_argument('--metadata', help='Prep scan with this metadata file')
     parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
     parser.add_argument('--search-beams', help='Beams to search')
+    parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
 
     
     parser.set_defaults(verbose=False)
@@ -102,7 +103,12 @@ def _main():
         pol = '--pol-sum'
     else:
         pol = '--dual-pol'
-    
+
+    if values.phase_center_filterbank:
+        pcb = f'--phase-center_filterbank {values.phase_center_filterbank}'
+    else:
+        pcb = ''
+
 
     if beam == -1: # all beams
         beam = '' # all beams
@@ -158,7 +164,7 @@ def _main():
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag} {search_beams}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4 {metafile} {antflag} {search_beams}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 
