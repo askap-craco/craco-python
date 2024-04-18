@@ -169,7 +169,7 @@ class Tracefile:
     def close(self):
         fout = self.fout
         if self.type == 'array':
-            fout.write(']')
+            fout.write('\n]')
         else:
             fout.write('\n],')
             sf = json.dumps(self.stackframes)
