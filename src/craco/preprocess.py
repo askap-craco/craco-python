@@ -3,7 +3,7 @@ from iqrm import iqrm_mask
 import numpy as np
 import warnings, pdb
 from craft.craco import bl2ant, bl2array
-from numba import njit, jit
+from numba import njit, jit, prange
 
 def get_isMasked_nPol(block):
 
@@ -183,8 +183,8 @@ def get_complicated_dynamic_rfi_masks(cas, crs, finest_nt, rmses, Ai, Qi, N):
 
 
 #import pdb
-@njit
-def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
+@njit(parallel=True, cache=True)
+def fast_preprocess(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
     Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
@@ -344,8 +344,8 @@ def fast_preprpocess(input_data, bl_weights, fixed_freq_weights, input_tf_weight
                         elif apply_rms and not sky_sub:
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f] * calval
                 
-@njit
-def fast_preprpocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
+@njit(parallel=True, cache=True)
+def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
     Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
@@ -537,6 +537,8 @@ class FastPreprocess:
             self.N = np.ones((nbl, nf), dtype=np.int16)
 
         self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
+        #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
+        #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
     def make_averaged_cal_sol(self, cal_soln_array):
         '''
@@ -620,7 +622,7 @@ class FastPreprocess:
                                         freq_radius=self.dflag_fradius,
                                         freq_threshold=self.dflag_fthreshold)
         if not self.single_norm:
-            fast_preprpocess(input_data=input_data,
+            fast_preprocess(input_data=input_data,
                             bl_weights=bl_weights,
                             fixed_freq_weights=self.fixed_freq_weights,
                             input_tf_weights=input_tf_weights,
@@ -633,7 +635,7 @@ class FastPreprocess:
                             target_input_rms=self.target_input_rms,
                             sky_sub=self.sky_sub)
         else:
-            fast_preprpocess_single_norm(input_data=input_data,
+            fast_preprocess_single_norm(input_data=input_data,
                             bl_weights=bl_weights,
                             fixed_freq_weights=self.fixed_freq_weights,
                             input_tf_weights=input_tf_weights,
