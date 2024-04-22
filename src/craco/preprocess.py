@@ -309,6 +309,9 @@ def fast_preprocess(input_data, bl_weights, fixed_freq_weights, input_tf_weights
                 rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
                 rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
                 '''
+                if N[i_bl, i_f] == 1:
+                    continue    #This can happen when the whole channel is flagged, so we'll get a division by zero error in the line below
+
                 rms_val = np.sqrt( (Qi[i_bl, i_f].real + Qi[i_bl, i_f].imag) / (2 * (N[i_bl, i_f]-1) ) ).astype(np.float32) 
 
                 #pdb.set_trace()
@@ -465,6 +468,10 @@ def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, inpu
         rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
         rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
         '''
+
+        if N[0] == 1:
+            return  #All data must have been flagged. If I don't return here, then we get a division by zero error in the line below
+        
         rms_val = np.sqrt( (Qi[0] + Qi[1]) / (2 * (N[0]-1)) )
 
         if rms_val == 0:
