@@ -204,7 +204,7 @@ def test_fast_preprocess_single_norm_with_data():
     Ai = np.zeros(1, dtype=np.complex64)
     Qi = np.zeros(2, dtype=np.float64)
     N = np.ones(1, dtype=np.int32) 
-    calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
+    #calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
     target_input_rms = 512
     sky_sub = True
 
@@ -225,3 +225,26 @@ def test_fast_preprocess_single_norm_with_data():
     assert np.isclose(np.mean(output_buf.imag), expected_final_mean.imag, rtol=0.001, atol=0.1)
     assert np.isclose(np.std(output_buf) / np.sqrt(2), target_input_rms, rtol=0.001, atol=0.1)
 
+def notest_fast_preprocess_with_single_norm_equality_with_old_function():
+    block0.mask = False     #Remove all masks from block0, so that we can compare apples to apples
+    original_calibrated_output = original_calibrate_input(solarray = cal[:, :, np.newaxis], values_subtract = nt, values_target_input_rms = values.target_input_rms, input_flat_raw = block0)
+    input_data = global_input_data.copy()
+    output_buf = np.zeros_like(input_data)
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    isubblock = 0
+    Ai = np.zeros(1, dtype=np.complex64)
+    Qi = np.zeros(2, dtype=np.float64)
+    N = np.ones(1, dtype=np.int32) 
+    target_input_rms = values.target_input_rms
+    sky_sub = True
+
+    expected_mean = np.mean(input_data)
+    expected_std = np.std(input_data) / np.sqrt(2)
+    expected_final_mean = 0 + 0j
+
+    fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
+
+    print(output_buf[0, 0, 0], original_calibrated_output.data[0, 0, 0])
+    assert np.all(np.isclose(output_buf, original_calibrated_output.data, atol = 0.1, rtol = 0.001))
