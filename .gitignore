@@ -15,7 +15,7 @@ header*.txt
 *.cand
 *.rank
 
-trace*.json
+*trace*.json
 
 
 # visual stdio stuff

@@ -103,6 +103,36 @@ def test_tracefile_array_of_tests_json():
     t.close()
     d = jsonfile(fname)
     check_event_list(test_events, d)
+
+def test_tracefile_metadata():
+    fname = 'trace_test_events_with_metadata.json'
+    t = Tracefile(fname, type='array')
+    t.add_metadata(process_name='My proc name', process_labels='plabel1 plabel2',
+                   process_sort_index=0, thread_name='My thread name',
+                   thread_sort_index=0)
+    
+    for e in test_events:
+        t += e
+    t.close()
+    d = jsonfile(fname)
+    #check_event_list(test_events, d) weve added metadata in there
+
+def test_event_with_numpy_scalars():
+    trace_file = Tracefile('numpy_scalars.json', type='array')
+    curr_frameid = np.uint64(4096)
+    last_frameid = np.uint64(2048)
+    frame_id = np.uint64(2048)
+    nlost_frames = int(curr_frameid) - int(last_frameid)
+    nlost_curr = curr_frameid - frame_id
+    ts = int(time.perf_counter()*1e6)
+
+    args = {'lost_frames':nlost_frames, 
+        'curr_minus_expected':nlost_curr, 
+        'expected_frame_id':frame_id, 
+        'current_frameid':curr_frameid,
+        'last_frameid':last_frameid}
+    trace_file += InstantEvent('PacketLoss', ts)
+    trace_file += CounterEvent('PacketLoss', ts, args)
     
 
 def _main():

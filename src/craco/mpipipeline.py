@@ -42,7 +42,7 @@ from craft.cmdline import strrange
 from craco.timer import Timer
 from craco.prep_scan import ScanPrep
 from craco.mpi_appinfo import MpiPipelineInfo
-from craco.visblock_accumulator import VisblockAccumulator
+from craco.visblock_accumulator import VisblockAccumulatorStruct
 
     
 log = logging.getLogger(__name__)
@@ -951,7 +951,7 @@ def transpose_beam_run(proc):
     cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
-    vis_accum = VisblockAccumulator(nbl, nf, nt)
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
     iblk = 0
 
     beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
@@ -960,8 +960,8 @@ def transpose_beam_run(proc):
     # requested block to planner to get moving
     transposer = proc.transposer
 
-    # warmup send
-    beam_comm.Send(vis_accum.pipeline_data, dest=beam_proc_rank)
+   # warmup send
+    beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
 
 
     try:
@@ -984,7 +984,7 @@ def transpose_beam_run(proc):
             vis_accum.write(vis_block_complex)
             t.tick('accumulate')
             if vis_accum.is_full:
-                beam_comm.Send(vis_accum.pipeline_data, dest=beam_proc_rank)
+                beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
                 t.tick('Send')
                 vis_accum.reset()
                 t.tick('vis reset')
@@ -1038,17 +1038,17 @@ def proc_beam_run(proc):
     nf = len(info.vis_channel_frequencies)
     nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
     nbl = info.nbl_flagged    
-    vis_accum = VisblockAccumulator(nbl, nf, nt)
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
     pipeline_data = vis_accum.pipeline_data
     
     # warumup recv
-    beam_comm.Recv(vis_accum.pipeline_data, source=transposer_rank)
+    beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
 
     try:
         while True:
             t = Timer()
             # recieve from transposer rank
-            beam_comm.Recv(vis_accum.pipeline_data, source=transposer_rank)
+            beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
 
             t.tick('recv')
             if iblk == 0:
@@ -1088,6 +1088,7 @@ def proc_beam_run(proc):
 class Processor:
     def __init__(self, pipe_info):
         self.pipe_info = pipe_info
+        
         is_rx = pipe_info.mpi_app.is_rx_processor
         world = self.pipe_info.mpi_app.world
         hdrs = self.get_headers()

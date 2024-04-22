@@ -29,17 +29,26 @@ class MpiTracefile:
 
     _instance = None
 
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            cls._instance = super().__new__(cls, *args, **kwargs)
-        return cls._instance
-    
     def __init__(self):
         comm = MPI.COMM_WORLD
         self.rank = comm.Get_rank()
         self.filename = f'rank_{self.rank:03d}_trace.json'
         self.tracefile  = Tracefile(self.filename, 'array')
+        log.info('Opened tracefile %s', self.filename)
         atexit.register(self.close)
+
+    @staticmethod
+    def instance():
+        if not MpiTracefile._instance:
+            MpiTracefile._instance = MpiTracefile()
+
+        return MpiTracefile._instance
+
+    def __iadd__(self, entry):
+        return self.tracefile.append(entry)
+    
+    def now_ts(self):
+        return self.tracefile.now_ts()
 
     def close(self):
         if self.tracefile is not None:

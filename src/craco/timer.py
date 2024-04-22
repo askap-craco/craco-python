@@ -15,13 +15,14 @@ log = logging.getLogger(__name__)
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class Timestamp:
-    def __init__(self, perf, process):
+    def __init__(self, perf, process, tai_ns):
         self.perf = perf # *does* include time spent in sleep
         self.process = process # system+CPU time. Does *not* include time spent in sleep
+        self.tai_ns = tai_ns
 
     @staticmethod
     def now():
-        return Timestamp(time.perf_counter(), time.process_time())
+        return Timestamp(time.perf_counter(), time.process_time(), time.clock_gettime_ns(time.CLOCK_TAI))
 
     @property
     def sleep(self):
@@ -42,7 +43,7 @@ class Timestamp:
         return self.perf
 
     def __sub__(self, ts):
-        return Timestamp(self.perf - ts.perf, self.process - ts.process)
+        return Timestamp(self.perf - ts.perf, self.process - ts.process, self.tai_ns - ts.tai_ns)
 
     def __str__(self):
         s = f'{self.process*1e3:0.1f}ms CPU + {self.sleep*1e3:0.1f}ms sleep'
@@ -53,7 +54,7 @@ class Timer:
         self.last_ts = Timestamp.now()
         self.init_ts = self.last_ts
         self.ticks = OrderedDict()
-        self.tracefile = MpiTracefile()
+        self.tracefile = MpiTracefile.instance()
 
     def tick(self, name):
         ts = Timestamp.now()
@@ -63,9 +64,9 @@ class Timer:
         # add completion event for this thing
         # timestamps are integer microseconds
         complete_event = tracing.CompleteEvent(name, 
-            ts = int(self.last_ts.perf * 1e6), 
-            dur=int(tdiff.perf)*1e6, 
-            tdur=int(tdiff.process)*1e6) # not sure if this should be process or perf?
+            ts = self.last_ts.tai_ns //1e3, 
+            dur=int(tdiff.perf*1e6), 
+            tdur=int(tdiff.process*1e6)) # not sure if this should be process or perf?
         self.tracefile.tracefile += complete_event
         
         self.last_ts = ts        

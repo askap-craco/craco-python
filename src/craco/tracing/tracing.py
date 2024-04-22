@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import traceback
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -28,13 +29,16 @@ ALL_PHASES = 'BEXiCbnestfPNODMVvRc'
 
 class TrivialEncoder(json.JSONEncoder):
     def default(self, o):
-        d = o.__dict__.copy()
+        if hasattr(o, '__dict__'):
+            d = o.__dict__.copy()
 
-        # id can't be an attribute, so we stire it as _id
-        # as an attribute and convert to the non underscored version in the encoder
-        if '_id' in d:
-            d['id'] = d['_id']
-            del d['_id']
+            # id can't be an attribute, so we stire it as _id
+            # as an attribute and convert to the non underscored version in the encoder
+            if '_id' in d:
+                d['id'] = d['_id']
+                del d['_id']
+        elif isinstance(o, np.uint64):
+            d = int(o)
 
         return d
 
@@ -53,10 +57,15 @@ class Event:
 
         if tid is not None:
             self.tid = tid
-            
-        self.ts = ts
+
+        if ts is None:
+            ts = time.clock_gettime(time.CLOCK_TAI)*1e6
+
+        self.ts = ts    
+        
         if cat is None:
             cat = ''
+
         self.cat = cat
         self.ph = ph
         if type(name) == bytes:
@@ -93,6 +102,10 @@ class CompleteEvent(Event):
         if tdur is not None:
             self.tdur = tdur
 
+class MetadataEvent(Event):
+    def __init__(self, name, pid=None, tid=None, cat='', args=None):
+        super().__init__(name, None, None, 'M', pid, tid, cat, args)
+        
 class CounterEvent(Event):
     def __init__(self, name, ts ,args, _id=None, sf=None, pid=None, tid=None, cat=None):
         super().__init__(name, ts, sf, 'C', pid, tid, cat, args)
@@ -131,6 +144,8 @@ class FlowEvent(Event):
 
         if scope is not None:
             self.scope = scope
+
+    
    
 
 class Tracefile:
@@ -141,6 +156,7 @@ class Tracefile:
         '''
         assert type in ('array','object')
         self.type = type
+        #assert not os.path.exists(fname), f'Tracefile {fname} already exists'
         self.fout = open(fname, 'wt')
         self._nevents = 0
         fout = self.fout
@@ -152,6 +168,37 @@ class Tracefile:
     @property
     def stackframes(self):
         return []
+    
+    def add_metadata(self, 
+                     pid=None,tid=None,
+                     process_name=None,
+                     process_labels=None,
+                     process_sort_index=None,
+                     thread_name=None,
+                     thread_sort_index=None):
+        if process_name is not None:
+            self += MetadataEvent('process_name', args={'name':process_name}, pid=pid, tid=tid)
+        
+        if process_labels is not None:
+            self += MetadataEvent('process_labels', args={'labels':process_labels}, pid=pid, tid=tid)
+
+        if process_sort_index is not None:
+            self += MetadataEvent('process_sort_index', args={'sort_index':process_sort_index}, pid=pid, tid=tid)
+
+        if thread_name is not None:
+            self += MetadataEvent('thread_name', args={'name':process_sort_index}, pid=pid, tid=tid)
+
+        if thread_sort_index is not None:
+            self += MetadataEvent('thread_sort_index', args={'sort_index':process_sort_index}, pid=pid, tid=tid)
+        
+
+    def now_ts(self):
+        '''
+        Return now in TAI in microseconds as an integer
+        Useful if you want to send multiple events through with exactly the same timestamp 
+        '''
+        ts = int(time.clock_gettime_ns(time.CLOCK_TAI)//1000)
+        return ts
 
     def append(self, d):
         s = json.dumps(d, cls=TrivialEncoder)

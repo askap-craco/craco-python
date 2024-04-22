@@ -15,6 +15,7 @@ from craco import mpiutil
 from collections import namedtuple, OrderedDict
 from craft.cmdline import strrange
 from mpi4py import MPI
+from craco.mpi_tracefile import MpiTracefile
 
 
 log = logging.getLogger(__name__)
@@ -183,6 +184,22 @@ class MpiAppInfo:
     @property
     def is_in_beam_chain(self):
         return self.is_beam_transposer or self.is_beam_processor or self.is_planner_processor or self.is_cand_processor
+    
+    @property
+    def proc_name(self):
+        '''
+        Returns the RankInfo class name without the 'Rankinfo' part
+        '''
+        info = self.rank_info
+        n = info.__class__.__name__.replace('RankInfo','')
+        return n
+    
+    @property
+    def proc_labels(self):
+        '''
+        Returns some kindof labelling of this process as a space-delimited string
+        '''
+        return self.rank_info.labels
 
     @property
     def beamid(self):
@@ -207,6 +224,13 @@ class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slo
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
         return s
     
+    def __str__(self):
+        return f"Rx {self.block}/{self.card}/{self.fpga}"
+
+    @property
+    def labels(self):
+        return f'block{self.block} card{self.card} fpga{self.fpga} {self.host}'
+    
 class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAMTRAN_APPNUM
     @property
@@ -214,12 +238,23 @@ class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','s
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} transpose receiver '
         return s
     
+    def __str__(self):
+        return f'BeamTran {self.beamid}'
+    
+    @property
+    def labels(self):
+        return f'beam{self.beamid} {self.host}'
+    
 class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     APP_ID = MpiAppInfo.BEAMPROC_APPNUM
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} processor xrtdevid={self.xrt_device_id}'
         return s
+    
+    @property
+    def labels(self):
+        return f'beam{self.beamid} {self.host}'
 
 class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.PLANNER_APPNUM
@@ -227,6 +262,10 @@ class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slo
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Planner'
         return s
+    
+    @property
+    def labels(self):
+        return f'beam{self.beamid} {self.host}'
 
 class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAM_CAND_APPNUM
@@ -234,6 +273,10 @@ class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','s
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Cand processor'
         return s
+    
+    @property
+    def labels(self):
+        return f'beam{self.beamid} {self.host}'
 
 
 class CandMgrRankInfo(namedtuple('CandMgrRankInfo', ['rank','host','slot','core'])):
@@ -242,6 +285,10 @@ class CandMgrRankInfo(namedtuple('CandMgrRankInfo', ['rank','host','slot','core'
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Cand manager'
         return s
+    
+    @property
+    def labels(self):
+        return f'{self.host}'
     
 
 def populate_ranks(pipe_info, fpga_per_rx=3):
@@ -376,6 +423,10 @@ class MpiPipelineInfo:
         populate_ranks(self, values)      
 
         self.mpi_app = MpiAppInfo(self, values.proc_type)
+        MpiTracefile.instance().tracefile.add_metadata(process_name=self.mpi_app.proc_name,
+                                                       process_labels=self.mpi_app.proc_labels,
+                                                       process_sort_index=self.world_rank)
+
 
     def add_rank(self, rankinfo):
         self.all_ranks[rankinfo.rank] = rankinfo

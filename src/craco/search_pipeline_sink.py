@@ -257,7 +257,14 @@ class SearchPipelineSink:
         t.tick('Update plan')
 
         try:
-            self.pipeline.write(pipeline_data['vis'], pipeline_data['bl_weights'], pipeline_data['tf_weights'])
+            vis = pipeline_data['vis']
+            bl_weights = pipeline_data['bl_weights']
+            tf_weights = pipeline_data['tf_weights']
+            log.info('Pipeline data abs(vis).mean=%0.1e bl_weights=%s/%s tf_weights=%s/%s',
+                    abs(vis).mean(),
+                     bl_weights.sum(), bl_weights.size,
+                     tf_weights.sum(), tf_weights.size)
+            self.pipeline.write(vis, bl_weights, tf_weights)
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error

@@ -1,0 +1,3 @@
+[
+{"pid": 3629529, "tid": 139749595928384, "ts": 4224100713740, "cat": "", "ph": "i", "name": "PacketLoss", "args": {}},
+{"pid": 3629529, "tid": 139749595928384, "ts": 4224100713740, "cat": "", "ph": "C", "name": "PacketLoss", "args": {"lost_frames": 2048, "curr_minus_expected": 2048, "expected_frame_id": 2048, "current_frameid": 4096, "last_frameid": 2048}}
