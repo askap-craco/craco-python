@@ -769,11 +769,7 @@ class Pipeline:
 
         '''
 
-
-        self.fast_baseline2uv(input_flat, self.uv_out)
-        nuvwide = self.uv_out.shape[0]
-        self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
-        self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
+        self.fast_baseline2uv(input_flat, self.inbuf.nparr, values.input_scale)
         return self
 
     def copy_input(self, input_flat, values):
