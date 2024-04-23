@@ -17,6 +17,8 @@ import astropy.units as u
 from astropy.time import Time
 from astropy.coordinates import SkyCoord, Angle
 from craft import craco_wcs
+from pytest import fixture
+from numpy.testing import assert_allclose
 
 log = logging.getLogger(__name__)
 
@@ -38,39 +40,77 @@ class FakePlan:
                                             self.tsamp_s)
         self.wcs = self.craco_wcs.wcs2
 
+@fixture
+def plan():
+    return FakePlan()
+
 
 def write(writer, N=8192):
     d = np.ones(N, dtype=CandidateWriter.raw_dtype)
     d['snr'] *= 5000
+    d['time'] = np.arange(N)
     plan = FakePlan()
     raw_noise_level = 100.237862348756234578
-    icands = writer.interpret_cands(d, 1, plan, plan.first_tstart, raw_noise_level)
+    iblk = 1
+
+    icands = writer.interpret_cands(d, iblk, plan, raw_noise_level)
     writer.write_cands(icands)
     writer.close()
+    return icands
 
-def test_write_text():
-    writer = CandidateWriter('test.txt', overwrite=True)
+def test_write_text(plan):
+    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
     writer.fout.flush()
     header = open('test.txt', 'r').read()
     print(header)
     assert header[0] == '#'
     write(writer)
 
-def test_write_npy():
-    writer = CandidateWriter('test.npy', overwrite=True)
+def test_write_npy(plan):
+    writer = CandidateWriter('test.npy', plan.first_tstart, overwrite=True)
     write(writer)
 
-def test_write_gz():
-    writer = CandidateWriter('test.txt.gz', overwrite=True)
+def test_write_gz(plan):
+    writer = CandidateWriter('test.txt.gz', plan.first_tstart, overwrite=True)
     write(writer)
 
-def test_write_text_n_0():
-    writer = CandidateWriter('test.txt', overwrite=True)
+def test_write_text_n_0(plan):
+    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
     writer.fout.flush()
     header = open('test.txt', 'r').read()
     print(header)
     assert header[0] == '#'
     write(writer,0)
+
+def test_time_conversion(plan):
+    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    icands = write(writer)
+
+    # I changed the code a bit, so I just ant to check I haven't ruined it with respect ot the old code
+    # this is what the old code used to do
+    old_mjd = plan.first_tstart.utc.mjd + icands['obstime_sec'].astype(writer.out_dtype['mjd']) / 3600 / 24
+    new_mjd = icands['mjd']
+    diff = (new_mjd - old_mjd)*86400
+    print(diff)
+    #assert np.all(diff == 0), f'Badd difference {diff}'
+    assert_allclose(old_mjd, new_mjd)
+
+def test_latency(plan):
+    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    icands = write(writer)
+
+    # I changed the code a bit, so I just ant to check I haven't ruined it with respect ot the old code
+    # this is what the old code used to do
+    assert np.all(icands['latency_ms'] >0 )
+
+    now = plan.first_tstart
+    # this is a bit insane, setting now to the begnning, because the latencie will be negative, but what the heck
+    
+    icands = writer.update_latency(icands, now=now) 
+    #assert icands[0]['obstime_sec'] == 0.0
+    #assert icands[0]['latency_ms'] == 0
+    assert np.all(icands['latency_ms'] < 0)
+    
 
 
 def _main():

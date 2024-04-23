@@ -2,6 +2,8 @@ import numpy as np
 import os
 from npy_append_array import NpyAppendArray as npa
 import gzip
+from astropy.time import Time
+from astropy import units as u
 
 
 # oooh, gosh - this is noughty
@@ -43,7 +45,9 @@ class CandidateWriter:
             ('mjd', '<f8'),
             ('dm_pccm3', '<f4'),
             ('ra_deg', '<f4'),
-            ('dec_deg', 'f4')
+            ('dec_deg', 'f4'),
+            ('ibeam', '<u1'), # beam number
+            ('latency_ms', '<f4') # latency in milliseconds. Can be update occasionally
         ]
     )
     out_dtype_formats = \
@@ -61,10 +65,12 @@ class CandidateWriter:
             '.9f',  #mjd
             '.3f',  #dm_pccm3
             '.5f',  #ra_deg
-            '+.5f'  #dec_deg
+            '+.5f',  #dec_deg
+            'g', # ibeam
+            '.1f' # latency
         ]
 
-    def __init__(self, outname, first_tstart, overwrite = True, delimiter = "\t"):
+    def __init__(self, outname, first_tstart, overwrite = True, delimiter = "\t", ibeam=0):
         '''
         Initialises the object, opens file handler and writes the header (if appropriate)
 
@@ -95,11 +101,14 @@ class CandidateWriter:
         
         self.outtype = outtype
         self.delimiter = delimiter
+        self.ibeam = ibeam
         self.make_string_formatter()
         self.open_files()
+        
 
     def make_string_formatter(self):
         string_formatter = ""
+        assert len(self.out_dtype) == len(self.out_dtype_formats), f'{len(self.out_dtype)} != {len(self.out_dtype_formats)}'
         for ii in range(len(self.out_dtype)):
             string_formatter += f"{{{ii}:{self.out_dtype_formats[ii]}}}\t"
 
@@ -135,15 +144,20 @@ class CandidateWriter:
             hdr_str = self.delimiter.join(i for i in self.out_dtype.names)
             self.fout.write("# " + hdr_str + "\n")
                 
-    def interpret_cands(self, rawcands, iblk, plan, raw_noise_level):
+    def interpret_cands(self, rawcands, iblk, plan, raw_noise_level, candbuf=None):
         ncands = len(rawcands)
         first_tstart = self.first_tstart
-        candidates = np.zeros(ncands, self.out_dtype)
+        if candbuf is None:
+            candidates = np.zeros(ncands, self.out_dtype)
+        else:
+            assert candbuf.dtype == self.out_dtype
+            candidates = candbuf[:ncands]
 
         # don't bother computing everything it if it's empty
         # also location2pix fails as you cant verctorize on size 0 inputs
         if ncands == 0:
             return candidates
+        
 
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
@@ -156,14 +170,41 @@ class CandidateWriter:
         candidates['iblk'] = iblk
         tsamp_s = plan.tsamp_s.value
         candidates['obstime_sec'] = candidates['total_sample'] * tsamp_s
-        candidates['mjd'] = first_tstart.utc.mjd + candidates['obstime_sec'].astype(self.out_dtype['mjd']) / 3600 / 24
+        
+        # must set obstime_sec *BEFORE* calculating cand times
+        cand_times = self.calc_cand_times(candidates) # Astropy times to calculate latency
+
+        candidates['mjd'] = cand_times.utc.mjd
         dmdelay_ms = rawcands['dm'] * tsamp_s * 1e3
         candidates['dm_pccm3'] = dmdelay_ms / DM_CONSTANT / ((plan.fmin/1e9)**-2 - (plan.fmax/1e9)**-2)
         coords = plan.wcs.pixel_to_world(candidates['lpix'], candidates['mpix'])
         candidates['ra_deg'] = coords.ra.deg
         candidates['dec_deg'] = coords.dec.deg
+        candidates['ibeam'] = self.ibeam
+
+        candidates = self.update_latency(candidates, cand_times)
 
         return candidates
+    
+    def update_latency(self, candidates, cand_times=None, now=None):
+        if now is None:
+            now = Time.now()
+
+        if cand_times is None:
+            cand_times = self.calc_cand_times(candidates)
+
+        candidates['latency_ms'] = (now - cand_times).to(u.millisecond)
+        return candidates
+    
+    def calc_cand_times(self, candidates):
+        '''
+        Returns astropy Time so we can calculate latency
+        '''
+        # Old code: candidates['mjd'] = first_tstart.utc.mjd + candidates['obstime_sec'].astype(self.out_dtype['mjd']) / 3600 / 24
+        cand_times = self.first_tstart + candidates['obstime_sec']*u.second
+        return cand_times
+
+
     
     def write_cands(self, candidates):
         if self.outtype == 'npy':
@@ -176,8 +217,8 @@ class CandidateWriter:
         else:
             raise Exception("VG has messed up somewhere! Kill him!")
 
-    def interpret_and_write_candidates(self, rawcands, iblk, plan, raw_noise_level):
-        c = self.interpret_cands(rawcands, iblk, plan, raw_noise_level)
+    def interpret_and_write_candidates(self, rawcands, iblk, plan, raw_noise_level, candbuf=None):
+        c = self.interpret_cands(rawcands, iblk, plan, raw_noise_level, candbuf)
         self.write_cands(c)
         return c
 
