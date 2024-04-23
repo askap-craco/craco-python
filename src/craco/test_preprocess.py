@@ -191,12 +191,12 @@ def test_fast_preprocess_single_norm_with_ones():
     assert N == input_data.size + 1
     assert np.isclose(np.mean(output_buf.real), 0), f"{np.mean(output_buf.real)}"
     assert np.isclose(np.mean(output_buf.imag), 0), f"{np.mean(output_buf.imag)}"
-    assert np.isclose(np.std(output_buf.real), target_input_rms)
-    assert np.isclose(np.std(output_buf.imag), target_input_rms)
+    assert np.isclose(np.std(output_buf.real), 0)
+    assert np.isclose(np.std(output_buf.imag), 0)
 
 
 def test_fast_preprocess_single_norm_with_data():
-    input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
+    input_data = global_input_data.copy()
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
     bl_weights = np.ones(nbl, dtype=np.bool)
@@ -209,16 +209,22 @@ def test_fast_preprocess_single_norm_with_data():
     target_input_rms = 512
     sky_sub = True
 
+    expected_mean = np.mean(input_data)
+    expected_std = np.std(input_data) / np.sqrt(2)
+    expected_final_mean = 0 + 0j
+
     fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
-    assert np.isclose(Ai.real, 1)
-    assert np.isclose(Ai.imag, 1)
-    assert np.isclose(Qi[0], 0)
-    assert np.isclose(Qi[0], 0)
+
+    measured_std = np.sqrt((Qi[0] + Qi[1])/ 2 / (N[0]-1 ))
+    print(measured_std, N, N[0], Qi, Qi[0], np.sqrt(Qi[0] / (N[0] - 1)))
+
+    assert np.isclose(Ai.real[0], expected_mean.real, rtol=0.001, atol=0.1)
+    assert np.isclose(Ai.imag[0], expected_mean.imag, rtol=0.001, atol=0.1)
+    assert np.isclose(measured_std, expected_std, rtol=0.001, atol=0.1)
     assert N == input_data.size + 1
-    assert np.isclose(np.mean(output_buf.real), 0)
-    assert np.isclose(np.mean(output_buf.imag), 0)
-    assert np.isclose(np.std(output_buf.real), target_input_rms)
-    assert np.isclose(np.std(output_buf.imag), target_input_rms)
+    assert np.isclose(np.mean(output_buf.real), expected_final_mean.real, rtol=0.001, atol=0.1)
+    assert np.isclose(np.mean(output_buf.imag), expected_final_mean.imag, rtol=0.001, atol=0.1)
+    assert np.isclose(np.std(output_buf) / np.sqrt(2), target_input_rms, rtol=0.001, atol=0.1)
 
 
 
