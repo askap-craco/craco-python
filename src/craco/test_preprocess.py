@@ -6,6 +6,8 @@ from craco.vis_subtractor import VisSubtractor
 
 from craft import uvfits, craco_plan
 from craco import uvfits_meta, calibration
+from pytest import fixture
+import os
 
 log = logging.getLogger(__name__)
 
@@ -103,49 +105,59 @@ fname = "/data/craco/gup037/DATA/SB057841/DATA/DATA_01/craco/SB057841/scans/00/2
 meta_name = "/data/craco/gup037/DATA/SB057841/SB057841/SB57841.json.gz"
 calname = "/data/craco/gup037/DATA/SB057841/SB057841/cal/00/b00.aver.4pol.smooth.npy"
 
+# add this so pytest actually detects the tests without breaking. 
+# this is dangeours but otherwise we can't run detect tests in VSCODE
+# TODO: Use pytest.fixture properly
+# ALSO TODO: FInd a way of storing test data properly.
+f = None
+if os.path.exists(fname): 
+    values = craco_plan.get_parser().parse_args(["--flag-ants", "12,15,20,30", "--calibration", calname])
 
-values = craco_plan.get_parser().parse_args(["--flag-ants", "12,15,20,30", "--calibration", calname])
-f = uvfits_meta.open(fname, metadata_file = meta_name)
-f.set_flagants(values.flag_ants)
+    f = uvfits_meta.open(fname, metadata_file = meta_name)
+    f.set_flagants(values.flag_ants)
 
-plan = craco_plan.PipelinePlan(f, values)
-calsoln = calibration.CalibrationSolution(plan)
+    plan = craco_plan.PipelinePlan(f, values)
+    calsoln = calibration.CalibrationSolution(plan)
 
-block0, uvws0 = next(f.fast_time_blocks(nt = 256))
-block0 = block0.squeeze()
+    block0, uvws0 = next(f.fast_time_blocks(nt = 256))
+    block0 = block0.squeeze()
 
 
-#variables needed for fast_preprocess
-input_block = block0.copy()
-global_input_data = input_block.data
-input_mask = input_block.mask
+    #variables needed for fast_preprocess
+    input_block = block0.copy()
+    global_input_data = input_block.data
+    input_mask = input_block.mask
 
-nbl, nf, nt = input_block.shape
-isubblock = 0
-global_output_buf = np.zeros_like(global_input_data)
-#output_mask = np.zeros_like(input_mask)
+    nbl, nf, nt = input_block.shape
+    isubblock = 0
+    global_output_buf = np.zeros_like(global_input_data)
+    #output_mask = np.zeros_like(input_mask)
 
-Ai = np.zeros((nbl, nf), dtype=np.complex64)
-Qi = np.zeros((nbl, nf), dtype=np.complex64)
-N = np.ones((nbl, nf), dtype=np.int16)
+    Ai = np.zeros((nbl, nf), dtype=np.complex64)
+    Qi = np.zeros((nbl, nf), dtype=np.complex64)
+    N = np.ones((nbl, nf), dtype=np.int16)
 
-cas = np.zeros((nf, nt), dtype=np.float64)
-crs = np.zeros((nf, nt), dtype=np.float64)
-cas_N = np.zeros((nf, nt), dtype=np.int16)
+    cas = np.zeros((nf, nt), dtype=np.float64)
+    crs = np.zeros((nf, nt), dtype=np.float64)
+    cas_N = np.zeros((nf, nt), dtype=np.int16)
 
-cal= calsoln.solarray.mean(axis=2).squeeze()
-calsoln_data = cal.data
-calsoln_mask = cal.mask
+    cal= calsoln.solarray.mean(axis=2).squeeze()
+    calsoln_data = cal.data
+    calsoln_mask = cal.mask
 
 
 
 def test_calibration_equality():
+    if f is None: # Ignore if we haven't opned the files
+        return
     original_calibrated_data = original_apply_cal(calsoln.solarray, block0)
     fast_calibrated_data = fast_preprocess(input_block, input_mask, global_output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub=False, reset_scales=True)
 
     assert np.allclose(original_calibrated_data, fast_calibrated_data)
     
 def test_fast_preprocess_single_norm_with_zero():
+    if f is None: # Ignore if we haven't opned the files
+        return
     input_data = np.zeros_like(global_input_data, dtype=np.complex64)
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
@@ -170,6 +182,8 @@ def test_fast_preprocess_single_norm_with_zero():
 
 
 def test_fast_preprocess_single_norm_with_ones():
+    if f is None: # Ignore if we haven't opned the files
+        return
     input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
@@ -196,6 +210,8 @@ def test_fast_preprocess_single_norm_with_ones():
 
 
 def test_fast_preprocess_single_norm_with_data():
+    if f is None: # Ignore if we haven't opned the files
+        return
     input_data = global_input_data.copy()
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
