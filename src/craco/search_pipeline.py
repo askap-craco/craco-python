@@ -658,7 +658,7 @@ class Pipeline:
             candout = self.candidates.nparr[:ncand]
 
         # TODO: think about performance here
-        return candout.copy()
+        return candout
 
     def clear_buffers(self, values):
         '''
@@ -1124,9 +1124,9 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile, self.first_tstart)
+        candout = CandidateWriter(candfile, self.first_tstart, ibeam=beamid)
         self.total_candidates = 0
-        self.candout = candout
+        self.candout = candout        
         self.iblk = 0
 
     def update_plan(self, new_data):
@@ -1147,7 +1147,7 @@ class PipelineWrapper:
         self.pipeline.update_plan(new_plan)
         return self.plan
 
-    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None):
+    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None, candout_buffer=None):
         '''
         cas, and ics if specified help with flagging
         '''
@@ -1202,8 +1202,11 @@ class PipelineWrapper:
         
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
+        out_cands = None
         if len(candidates) > 0:
-            self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.last_bc_noise_level)
+            out_cands = self.candout.interpret_cands(candidates, iblk, plan, p.last_bc_noise_level, candout_buffer)
+            t.tick('Interpret candidates')
+            self.candout.write_cands(out_cands)            
             t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1239,6 +1242,8 @@ class PipelineWrapper:
         logging.info('Write for iblk %d timer: %s', iblk, t)
 
         self.iblk += 1
+
+        return out_cands
 
     def close(self):
         candout = self.candout

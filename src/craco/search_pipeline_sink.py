@@ -18,6 +18,7 @@ from craco.timer import Timer
 from astropy import units as u
 import pyxrt
 import scipy
+from craco.candidate_writer import CandidateWriter
 
 log = logging.getLogger(__name__)
 
@@ -154,7 +155,6 @@ class SearchPipelineSink:
                 nbl = self.adapter.nbl
                 shape = (nbl, nf, nt)
                 self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
-
                 nfcas = info.nchan
                 #cas_shape = (nfcas, nt)
                 ##self.cas_data = np.zeros(cas_shape, dtype=np.float32)
@@ -238,8 +238,9 @@ class SearchPipelineSink:
         Also updates plan if necessary
         '''
 
+        out_cands = None
         if self.pipeline is None:
-            return
+            return out_cands
         
         t = Timer()
 
@@ -252,9 +253,8 @@ class SearchPipelineSink:
             pd = self._next_plan_data # comes from another MPI rank
             assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
             self.pipeline.update_plan_from_plan(pd['plan'])
-            self._next_plan_data = None # set it to None ready for the next plan
-            
-        t.tick('Update plan')
+            self._next_plan_data = None # set it to None ready for the next plan            
+            t.tick('Update plan')        
 
         try:
             vis = pipeline_data['vis']
@@ -264,7 +264,8 @@ class SearchPipelineSink:
                     abs(vis).mean(),
                      bl_weights.sum(), bl_weights.size,
                      tf_weights.sum(), tf_weights.size)
-            self.pipeline.write(vis, bl_weights, tf_weights)
+            t.tick('Summarise input data')
+            out_cands = self.pipeline.write(vis, bl_weights, tf_weights, self.candout_buffer) # out_cands is a view of candout_buffer
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error
@@ -275,7 +276,7 @@ class SearchPipelineSink:
         self.iblk += 1
         self.last_write_timer = t
 
-            
+        return out_cands            
         
     def close(self):
         '''

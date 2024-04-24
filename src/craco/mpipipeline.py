@@ -43,6 +43,7 @@ from craco.timer import Timer
 from craco.prep_scan import ScanPrep
 from craco.mpi_appinfo import MpiPipelineInfo
 from craco.visblock_accumulator import VisblockAccumulatorStruct
+from craco.candidate_writer import CandidateWriter
 
     
 log = logging.getLogger(__name__)
@@ -1006,6 +1007,12 @@ def transpose_beam_run(proc):
         vis_file.close()
         vis_accum.close()
 
+class MpiCandidateBuffer:
+    def __init__(self, max_ncand=8192):        
+        self.cands = np.zeros(max_ncand, dtype=CandidateWriter.out_dtype)
+        self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(CandidateWriter.out_dtype)
+        self.mpi_msg = [self.cands, max_ncand, self.mpi_dtype]
+
 def proc_beam_run(proc):
     #set_scheduler(BEAM_PRIORITY)
     pipe_info = proc.pipe_info
@@ -1027,6 +1034,7 @@ def proc_beam_run(proc):
 
     planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
     transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
+    candproc_rank = pipe_info.mpi_app.CANDPROC_RANK
     beam_comm = pipe_info.mpi_app.beam_chain_comm
 
     # requested block to planner to get moving
@@ -1043,6 +1051,7 @@ def proc_beam_run(proc):
     
     # warumup recv
     beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+    cand_buf = MpiCandidateBuffer()
 
     try:
         while True:
@@ -1063,11 +1072,13 @@ def proc_beam_run(proc):
                     planner_iblk += update_uv_blocks
                     t.tick('set next plan')
                     beam_comm.send(planner_iblk, dest=planner_rank)
-                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
-    
+                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)    
 
-            pipeline_sink.write_pipeline_data(pipeline_data)        
+            candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
             t.tick('pipeline')
+            if candidates is not None:
+                cand_msg = [candidates, len(candidates), cand_buf.mpi_dtype]
+                beam_comm.Send(cand_msg, dest=candproc_rank)
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -1174,33 +1185,70 @@ class PlannerProcessor(Processor):
             count += 1
 
 
+MAX_NCAND_OUT = 8
+
 class BeamCandProcessor(Processor):
     def run(self):
         app = self.pipe_info.mpi_app
         rx_comm = app.beam_chain_comm
         tx_comm = app.cand_comm
+        cand_buff = MpiCandidateBuffer()
+        out_cand_buff = MpiCandidateBuffer(MAX_NCAND_OUT)
+        iblk = 0
         while True:
             # async receive as we want to async transmit so the pipeeline
-            # isn't slowed by the beam cand processor
-            req = rx_comm.irecv(source=0)
-            data = req.wait()
-            # TODO - process this data - but failing that, just find the first one
-            if len(data) > 0:
-                dout = data[0:1]
-            else:
-                dout = []
-            # gather to everyone - synchronous
-            tx_comm.gather(dout, root=0)
-            
-        
+            # isn't slowed by the beam cand processor       
+            t = Timer()     
+            status = rx_comm.Recv(cand_buff.mpi_msg, source=app.BEAMPROC_RANK)
+            t.tick('recv')
+            ncand = status.Get_count()
+            t.tick('get_count')
+            log.info('Got %d candidates in BeamCandProc', ncand)
 
+            ncand_out = self.single_beam_process(cand_buff.cands[:ncand])
+            t.tick('process')
+
+            # gather to everyone - synchronous
+            # TODO send number of canidates first, then actually gather then with GatherV
+            # It's kindof painful - let's just send1 candidate for now
+            
+            tx_comm.Gather([out_cand_buff.cands, out_cand_buff.max_ncand, cand_buff.mpi_dtype], root=0)
+            t.tick('gather')
+            iblk += 1
+
+    def single_beam_process(self, cands):
+        # do something more sophisticated. 
+        # for now, find the single largest S/N candidate
+        best = max(cands, lambda c:c['snr'])
+        self.out_cand_buff.cands[0] = best
+        ncand = 1
+        self.out_cand_buff.cands['snr'][ncand:] = -1
+        
+        return ncand
+            
 class CandMgrProcessor(Processor):
     def run(self):
         app = self.pipe_info.mpi_app
         tx_comm = app.cand_comm
+        nbeams = self.obs_info.nbeams
+        cands = MpiCandidateBuffer(nbeams*MAX_NCAND_OUT)
+        iblk = 0
+        self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
         while True:
-            dout = []
-            dout = tx_comm.gather(dout, root=0) # Come to me my pretties! Mwhahahahahaha!
+            t = Timer()
+            tx_comm.Gather(cands.mpi_msg, root=0) # Come to me my pretties! Mwhahahahahaha!
+            t.tick('Gather')
+            self.multi_beam_process(self.cands.cands)
+            t.tick('Multi process')
+            iblk += 1
+
+    def multi_beam_process(self, cands):
+        cands = cands[cands['snr'] > 0]
+        bestcand = max(cands, lambda c:c['snr'])
+        log.info('Best candidate from beam %d was %s', bestcand, bestcand['ibeam'])
+        self.cand_writer.update_latency(cands)
+        self.cand_writer.write_cands(cands)
+
 
 def processor_class_factory(app):                    
     if app.is_beam_transposer:
