@@ -347,7 +347,7 @@ def fast_preprocess(input_data, bl_weights, fixed_freq_weights, input_tf_weights
                         elif apply_rms and not sky_sub:
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f] * calval
                 
-@njit(parallel=True, cache=True)
+#@njit(parallel=True, cache=True)
 def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms=None, sky_sub = False):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
@@ -436,7 +436,7 @@ def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, inpu
             if fixed_freq_weights[i_f] == 0:
                 output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
                 continue
-            
+            cal_samp = cal_data[i_bl, i_f]
             for i_t in range(nt):
                 isamp = input_data[i_bl, i_f, i_t]
                 imask = input_tf_weights[i_f, i_t] == 0
@@ -447,18 +447,18 @@ def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, inpu
                 else:
                     #There is a bug in numba where I cannot set complex_var(128bit).real = real_var(64bit)
                     #See https://github.com/numba/numba/issues/3573
-                    #if N[0] == 0:
-                    #    pdb.set_trace()
-                    Qi[0] += (N[0] -1)/ N[0] * (isamp.real - Ai[0].real)**2
-                    Qi[1] += (N[0] -1)/ N[0] * (isamp.imag - Ai[0].imag)**2
-                    Ai[0] += (isamp - Ai[0])/ N[0]
+
+                    resulting_samp = isamp * cal_samp
+                    Qi[0] += (N[0] -1)/ N[0] * (resulting_samp.real - Ai[0].real)**2
+                    Qi[1] += (N[0] -1)/ N[0] * (resulting_samp.imag - Ai[0].imag)**2
+                    Ai[0] += (resulting_samp - Ai[0])/ N[0]
                     N[0] += 1
 
                     #pdb.set_trace()
                     if not apply_rms and not sky_sub:
                         #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
                         #print(f"shapes of output_buf = {output_buf.shape}, cal_data = {cal_data.shape}")
-                        output_buf[i_bl, i_f, isubblock*nt + i_t] = isamp * cal_data[i_bl, i_f]
+                        output_buf[i_bl, i_f, isubblock*nt + i_t] = resulting_samp
 
     if apply_rms or sky_sub:
 
@@ -492,8 +492,9 @@ def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, inpu
                     continue            
 
                 calval = cal_data[i_bl, i_f]
-                multiplier = calval * target_rms_value  / (rms_val * np.abs(calval))
-                #pdb.set_trace()
+                #multiplier = calval * target_rms_value  / (rms_val)# * np.abs(calval))
+                multiplier = target_rms_value  / (rms_val)# * np.abs(calval))
+                pdb.set_trace()
                 #Loop through the data again and apply the various rescale factors and the cal soln
                 for i_t in range(nt):
                     isamp = input_data[i_bl, i_f, i_t]
@@ -505,14 +506,192 @@ def fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, inpu
                         pass
                     else:
                         if sky_sub and not apply_rms:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp -  Ai[0]) * calval
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval -  Ai[0])
 
                         elif sky_sub and apply_rms:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[0]) * multiplier
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - Ai[0]) * multiplier
 
                         elif apply_rms and not sky_sub:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp - Ai[0]) * multiplier + Ai[0] * calval
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - Ai[0]) * multiplier + Ai[0] / calval
                 
+
+#@njit(parallel=True, cache=True)
+def fast_preprocess_multi_mean_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, global_mean, global_Q, N, global_N, calsoln_data, target_input_rms=None, sky_sub = False):
+    '''
+    Loops over all dimensions of the input_block. Applies the calibration soln,
+    Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
+
+    Ideally, one should just measure the cas and crs in the first pass.
+    Then get new masks and use them to mask bad data in the 2nd pass, while accumulating the rms statistics.
+    And then apply the measured rms values in the normalisation pass (3rd).
+    
+    But if you assume that the data would be flagged for the entire block at a time, then one can calculate the RFI masks after normalisation 
+    This is because data for which improper rms values would have been computed due to RFI will eventually get masked, so we don't care.
+    This allows us to process the data in just 2 passes.
+
+    you would want to just measure the statistics and cas/crs through this function.
+    Then you should get the masks using the cas and crs. Then re-apply the 
+
+    
+    input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
+    bl_weights: Input weights for baselines - (nbl) ndarray - boolean; 0 means bad, 1 means good
+    input_tf_weights: Input weights for tf - (nf, nt) [For example due to dropped packets] ndarray - boolean; 0 means bad, 1 means good
+    fixed_freq_weights: Fixed - (nf). np.ndarray - boolean; 0 for bad, 1 for good
+    output_buf: Output data array - (nbl, nf, nt*nsubblock). Won't be a masked array - complex64
+    isubblock: integer - output_buf can hold mulitple input_blocks - isubblock is the counter
+    Ai: (nbl, nf) shaped array - complex64
+    global_mean: 1 element array - complex64
+    global_Q: 2 element array - float32
+    N: (nbl, nf) - int32
+    global_N: const - int32
+        These need to be initialised with ones at the very beginning, otherwise bad things will happen
+    calsoln_data: numpy array containing the calibration solution (nbl, nf) - complex64
+    calsoln_mask: numpy array containing the calibration masks (nbl, nf) - boolean
+    cas: Sum of amplitude of all baselines - unmasked numpy array (nf, nt) - float
+    crs: Sum of real part of all baselines - unmasked numpy array (nf, nt) - float
+    cas_N: numpy array to keep track of the numbers added into cas and crs arrays so far (nf, nt) - int16 (must be initialed to 0s)
+    target_input_rms: float, the rms value which needs to be set. If None, data will not be rescaled
+    sky_sub: bool, Whether to do mean subtraction or not.
+    reset_scales: bool, whether to keep on accumulating Ai and Qi values across blocks, or reset to zero at the start of this block
+                    Note -- reset_scales flag should set to true when this function is called for the first time, or we need to ensure that
+                    Ai, Qi and N are initialised properly outside this function.
+    '''
+    #TODO -- think about whether changing the order of the input_block could speed things up a bit more
+    #TODO -- include the computation of CAS and the masks inside this function's first pass over the data
+    #        Right now it is a bit too complicated to allow for a different nt for the flagger
+    nbl, nf, nt = input_data.shape
+    '''
+    if input_mask is None:
+        #assert type(input_block)==np.ma.core.MaskedArray, f"Given - {type(input_block)}"
+        input_data = input_block.data
+        #input_mask = np.any(input_block.mask, axis=0)   #We take the OR of all mask values along the Basline axis given that Keith says that if a packet is dropped, all baselines are gauranteed to be flagged for that time-freq spaxel
+        input_mask = input_block.mask
+
+    else:
+        input_mask = input_mask
+        #assert input_mask.shape == input_block.shape, f"Shape of the input masks should match that of input_block - Input_block.shape = {input_block.shape}, Given shape = {input_mask.shape}"
+
+        if type(input_block) == np.ma.core.MaskedArray:
+            input_data = input_block.data
+        elif type(input_block) == np.ndarray:
+            input_data = input_block
+        else:
+            #raise ValueError(f"dtype of input block should be np.ma.core.MaskedArray, or nd.ndarray, found = {type(input_block)}")
+            return 1
+    '''
+    input_data = input_data
+    reset_scales = isubblock == 0
+    if reset_scales:
+        global_mean = 0j
+        global_Q[0] = 0
+        global_Q[1] = 0
+        global_N = 1
+ 
+    cal_data = calsoln_data
+
+    if target_input_rms is None:
+        target_rms_value = 0
+        apply_rms = False
+    else:
+        target_rms_value = target_input_rms     #I am copying the value in a new variable because numba doesn't like if a variable which can be None, has a multiplication statement within a conditional block.
+        apply_rms = True
+
+    for i_bl in range(nbl):
+
+        if bl_weights[i_bl] == 0:
+            if reset_scales:
+                Ai[i_bl] = 0j
+                N[i_bl] = 1
+
+            output_buf[i_bl, :, isubblock*nt:(isubblock+1)*nt] = 0
+            continue
+                
+        for i_f in range(nf):
+
+            if reset_scales:
+                Ai[i_bl, i_f] = 0j
+                N[i_bl, i_f] = 1
+
+            if fixed_freq_weights[i_f] == 0:
+                output_buf[i_bl, i_f, isubblock*nt:(isubblock+1)*nt] = 0
+                continue
+
+            cal_samp = cal_data[i_bl, i_f]
+            for i_t in range(nt):
+                isamp = input_data[i_bl, i_f, i_t]
+                imask = input_tf_weights[i_f, i_t] == 0
+
+                if imask:
+                    output_buf[i_bl, i_f, isubblock*nt + i_t] = 0
+
+                else:
+                    #There is a bug in numba where I cannot set complex_var(128bit).real = real_var(64bit)
+                    #See https://github.com/numba/numba/issues/3573
+
+                    resulting_samp = isamp * cal_samp
+                    global_Q[0] += (global_N[0] -1)/ global_N[0] * (resulting_samp.real - global_mean[0].real)**2
+                    global_Q[1] += (global_N[0] -1)/ global_N[0] * (resulting_samp.imag - global_mean[0].imag)**2
+                    global_mean[0] += (resulting_samp - global_mean[0])/ global_N[0]
+                    global_N[0] += 1
+
+                    Ai[i_bl, i_f] += (resulting_samp - Ai[i_bl, i_f])/ N[i_bl, i_f]
+                    N[i_bl, i_f] += 1
+
+                    #pdb.set_trace()
+                    if not apply_rms and not sky_sub:
+                        #We don't need to apply any kind of normalisation, so we can apply the cal right inside the first loop
+                        #print(f"shapes of output_buf = {output_buf.shape}, cal_data = {cal_data.shape}")
+                        output_buf[i_bl, i_f, isubblock*nt + i_t] = resulting_samp
+
+    if apply_rms or sky_sub:
+
+        #pdb.set_trace()
+        '''
+        rms_val_real = np.sqrt(Qi[i_bl, i_f].real / N[i_bl, i_f])
+        rms_val_imag = np.sqrt(Qi[i_bl, i_f].imag / N[i_bl, i_f])
+        rms_val = np.sqrt(rms_val_real**2 + rms_val_imag**2) / np.sqrt(2)
+        '''
+
+        if global_N[0] == 1:
+            return  #All data must have been flagged. If I don't return here, then we get a division by zero error in the line below
+        
+        rms_val = np.sqrt( (global_Q[0] + global_Q[1]) / (2 * (global_N[0]-1)) )
+
+        if rms_val == 0:
+            return
+        
+        for i_bl in range(nbl):
+            if bl_weights[i_bl] == 0:
+                continue
+            for i_f in range(nf):    
+                if fixed_freq_weights[i_f] == 0:
+                    continue            
+
+                calval = cal_data[i_bl, i_f]
+                #multiplier = calval * target_rms_value  / (rms_val)# * np.abs(calval))
+                multiplier = target_rms_value  / (rms_val)# * np.abs(calval))
+                pdb.set_trace()
+                #Loop through the data again and apply the various rescale factors and the cal soln
+                for i_t in range(nt):
+                    isamp = input_data[i_bl, i_f, i_t]
+                    imask = input_tf_weights[i_f, i_t] == 0
+
+                    if imask:
+                        #Output has already been set to zero in the first loop. 
+                        #We don't need to do anything here
+                        pass
+                    else:
+                        if sky_sub and not apply_rms:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval -  Ai[i_bl, i_f])
+
+                        elif sky_sub and apply_rms:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - Ai[i_bl, i_f]) * multiplier
+
+                        elif apply_rms and not sky_sub:
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - Ai[i_bl, i_f]) * multiplier + Ai[i_bl, i_f] / calval
+                
+
+
 
 
 class FastPreprocess:
