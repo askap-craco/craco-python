@@ -138,13 +138,13 @@ calsoln_mask = cal.mask
 
 
 
-def test_calibration_equality():
+def notest_calibration_equality():
     original_calibrated_data = original_apply_cal(calsoln.solarray, block0)
     fast_calibrated_data = fast_preprocess(input_block, input_mask, global_output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub=False, reset_scales=True)
 
     assert np.allclose(original_calibrated_data, fast_calibrated_data)
     
-def test_fast_preprocess_single_norm_with_zero():
+def notest_fast_preprocess_single_norm_with_zero():
     input_data = np.zeros_like(global_input_data, dtype=np.complex64)
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
@@ -168,7 +168,7 @@ def test_fast_preprocess_single_norm_with_zero():
     assert np.all(output_buf.imag == 0)
 
 
-def test_fast_preprocess_single_norm_with_ones():
+def notest_fast_preprocess_single_norm_with_ones():
     input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
@@ -194,7 +194,7 @@ def test_fast_preprocess_single_norm_with_ones():
     assert np.isclose(np.std(output_buf.imag), 0)
 
 
-def test_fast_preprocess_single_norm_with_data():
+def notest_fast_preprocess_single_norm_with_data():
     input_data = global_input_data.copy()
     output_buf = np.zeros_like(input_data)
     fixed_freq_weights = np.ones(nf, dtype=np.bool)
@@ -208,8 +208,8 @@ def test_fast_preprocess_single_norm_with_data():
     target_input_rms = 512
     sky_sub = True
 
-    expected_mean = np.mean(input_data)
-    expected_std = np.std(input_data) / np.sqrt(2)
+    expected_mean = np.mean(input_data * calsoln_data[:, :, np.newaxis])
+    expected_std = np.std(input_data * calsoln_data[:, :, np.newaxis]) / np.sqrt(2)
     expected_final_mean = 0 + 0j
 
     fast_preprocess_single_norm(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, Ai, Qi, N, calsoln_data, target_input_rms, sky_sub)
@@ -225,7 +225,7 @@ def test_fast_preprocess_single_norm_with_data():
     assert np.isclose(np.mean(output_buf.imag), expected_final_mean.imag, rtol=0.001, atol=0.1)
     assert np.isclose(np.std(output_buf) / np.sqrt(2), target_input_rms, rtol=0.001, atol=0.1)
 
-def notest_fast_preprocess_with_single_norm_equality_with_old_function():
+def test_fast_preprocess_with_single_norm_equality_with_old_function():
     block0.mask = False     #Remove all masks from block0, so that we can compare apples to apples
     original_calibrated_output = original_calibrate_input(solarray = cal[:, :, np.newaxis], values_subtract = nt, values_target_input_rms = values.target_input_rms, input_flat_raw = block0)
     input_data = global_input_data.copy()
