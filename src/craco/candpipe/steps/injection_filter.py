@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-"""
-Clusters the input
+"""Filter injections
 
 Copyright (C) CSIRO 2023
 """
