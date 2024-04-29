@@ -12,7 +12,7 @@ import os
 import sys
 import logging
 import pytest
-from craco.tracing.tracing import *
+from craco.tracing import *
 import json
 
 log = logging.getLogger(__name__)
