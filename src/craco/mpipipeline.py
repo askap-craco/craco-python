@@ -1232,10 +1232,10 @@ class CandMgrProcessor(Processor):
         app = self.pipe_info.mpi_app
         tx_comm = app.cand_comm
         nbeams = self.obs_info.nbeams
-        cands = MpiCandidateBuffer(nbeams*MAX_NCAND_OUT)
         iblk = 0
         self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
         self.cand_sender = SnoopySender()
+        cands = MpiCandidateBuffer(MAX_NCAND_OUT*nbeams)
         while True:
             t = Timer()
             tx_comm.Gather(cands.mpi_msg, root=0) # Come to me my pretties! Mwhahahahahaha!

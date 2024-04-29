@@ -14,26 +14,14 @@ import logging
 from collections import namedtuple
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
+from craco.candidate_writer import CandidateWriter
 import pandas as pd
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-dtype = np.dtype([('SNR',np.float32),
-                  ('lpix', np.uint16),
-                  ('mpix', np.uint16),
-                  ('boxc_width', np.uint8),
-                  ('time', np.int32),
-                  ('dm', np.int32),
-                  ('iblk', np.int32),
-                  ('rawsn', np.int32),
-                  ('total_sample', np.int32),
-                  ('obstime_sec', np.float32),
-                  ('mjd', np.float64),
-                  ('dm_pccm3', np.float32),
-                  ('ra_deg', np.float64),
-                  ('dec_deg', np.float64)])
+dtype = CandidateWriter.out_dtype
 
 def load_cands(fname, maxcount=None, fmt='numpy'):
     '''
@@ -42,7 +30,10 @@ def load_cands(fname, maxcount=None, fmt='numpy'):
     if fmt=='pandas' returns pandas dataframe
     '''
 
-    c = np.loadtxt(fname, dtype=dtype, max_rows=maxcount)
+    try:
+        c = np.loadtxt(fname, dtype=CandidateWriter.out_dtype, max_rows=maxcount)
+    except ValueError: # usually happens if the input file is missing the last 2 columns
+        c = np.loadtxt(fname, dtype=CandidateWriter.out_dtype_short, max_rows=maxcount)
     if fmt == 'numpy':
         if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
             c.shape = (1,)

@@ -16,6 +16,7 @@ import sys
 import logging
 import traceback
 from astropy.io import fits
+from craco.candidate_writer import CandidateWriter
 
 from . import steps
 from craco.plot_cand import load_cands
@@ -23,6 +24,15 @@ from craco.plot_cand import load_cands
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
+
+def beam_from_cand_file(candfile):
+    #beamno = int(candfile[candfile.find('b')+1 : candfile.find('b') + 3])
+    '''
+    Get beam from a file that looks like this
+    candfile = '/data/craco/craco/wan348/benchmarking/SB61584.n500.candidates.b24.txt'
+    '''
+    beamno = int(candfile.split('.')[-2][1:])
+    return beamno
 
 class ProcessingStep:
     '''
@@ -56,26 +66,35 @@ class ProcessingStep:
 
 
 class Pipeline:
-    def __init__(self, candfile, args, config):
+    def __init__(self, beamno, args, config, src_dir='.', anti_alias=False):
+        '''
+        if anti_alias is True and the PSF exists, it will do anti_aliasing.
+        Otherwise it does no anti-aliasing.
+        '''
         self.args = args
-        self.cand_fname= candfile
+        if isinstance(beamno, int):
+            self.beamno = beamno
+            assert src_dir is not None
+            self.cand_fname = 'NONE'
+        else:
+            self.cand_fname = beamno
+            assert os.path.exists(self.cand_fname), f'{self.cand_fname} does not exist'
+            self.beamno = beam_from_cand_file(self.cand_fname)
+            if src_dir is None:
+                src_dir = os.path.dirname(self.cand_fname)
+
         # self.beamno = int(candfile.replace('candidates.txtb',''))
-        self.beamno = int(candfile[candfile.find('b')+1 : candfile.find('b') + 3])
-        self.srcdir = os.path.dirname(self.cand_fname)
+        self.srcdir = src_dir
+        assert os.path.isdir(src_dir), f'{src_dir} is not a directory'
         self.uvfits_fname = self.get_file( f'b{self.beamno:02d}.uvfits')
         self.cas_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
         self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
         self.config = config
+        psf_exists = os.path.isfile(self.psf_fname)
 
-        if not os.path.exists(self.psf_fname):
-            self.steps = [
-                steps.cluster.Step(self),
-                steps.time_space_filter.Step(self), 
-                steps.catalog_cross_match.Step(self),
-            ]
-        else:
+        if anti_alias and psf_exists:
             self.psf_header = self.get_header()
             self.steps = [
                 steps.cluster.Step(self),
@@ -84,20 +103,24 @@ class Pipeline:
                 steps.alias_filter.Step(self), 
                 steps.injection_filter.Step(self), 
             ]
+        else:
+            self.steps = [
+                steps.cluster.Step(self),
+                steps.time_space_filter.Step(self), 
+                steps.catalog_cross_match.Step(self),
+            ]
 
-        # self.steps = [
-        #     steps.cluster.Step(self),
-        #     # steps.time_space_filter.Step(self),
-        #     steps.catalog_cross_match.Step(self),
-        #     steps.alias_filter.Step(self), 
-        #     steps.injection_filter.Step(self), 
-        #     # steps.check_filterbanks.Step(self),
-        #     # steps.check_visibilities.Step(self),
-        # ]
-        
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,
                   self.cas_fname, self.ics_fname, self.pcb_fname, self.args)
+
+    @staticmethod
+    def from_candfile(candfile, args, config):
+        beamno = beam_from_cand_file(candfile)
+        pipe = Pipeline(beamno, args, config, os.path.dirname(candfile))
+        pipe.cand_fname= candfile
+        return pipe
+            
         
     def get_file(self, fname):
         '''
@@ -137,7 +160,23 @@ class Pipeline:
 
         # create a directory to store output files 
         self.create_dir()
+        cand_out = self.process_block(cand_in)
+        log.info('Produced %s candidates in total', len(cand_out))
+        fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
+        log.info('Saving final candidates to %s', fout)
+        cand_out.to_csv(fout)
+        log.debug('Saved final candidates to %s', fout)
 
+        for step in self.steps:
+            step.close()
+
+        return cand_out
+    
+    def process_block(self, cand_in, wcs=None):
+        '''
+        Candidates: is assumed to be a pandas data frame
+        '''
+        self.curr_wcs = wcs
         for istep, step in enumerate(self.steps):
             cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
@@ -149,20 +188,11 @@ class Pipeline:
                 cand_out.to_csv(fout)
 
             cand_in = cand_out
-
-        log.info('Produced %s candidates in total', len(cand_out))
-        fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
-        log.info('Saving final candidates to %s', fout)
-        cand_out.to_csv(fout)
-        log.debug('Saved final candidates to %s', fout)
-
-        for step in self.steps:
-            step.close()
-
-        return cand_out
         
+        return cand_out
 
-def _main():
+
+def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
     # get parsers from every step and add it to a global parser
@@ -180,7 +210,19 @@ def _main():
     parser.add_argument('-o', '--outdir', type=str, default='.', help='output directory')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
-    
+    return parser
+
+def run_with_args(args, config):
+    for f in args.files:
+        try:
+            p = Pipeline(f, args, config)
+            p.run()
+        except:
+            log.error(traceback.format_exc())
+            log.error(f"failed to run candpipe on {f}... aborted...")
+
+def _main():
+    parser = get_parser()
     args = parser.parse_args()
     if args.verbose:
         # logging.basicConfig(level=logging.DEBUG)
@@ -201,13 +243,7 @@ def _main():
     with open(config_file, 'r') as yaml_file:
         config = yaml.safe_load(yaml_file)
 
-    for f in args.files:
-        try:
-            p = Pipeline(f, args, config)
-            p.run()
-        except:
-            log.error(traceback.format_exc())
-            log.error(f"failed to run candpipe on {f}... aborted...")
+    run_with_args(args, config)
 
     
 

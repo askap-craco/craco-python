@@ -47,6 +47,11 @@ class Step(ProcessingStep):
         '''
         super(Step, self).__init__(*args, **kwargs)
         p = self.pipeline
+        self.catalogs = {}
+        config = self.pipeline.config
+        
+        # TODO: To pre-cache catalogs we need the FOV pointing ra/dec from the WCS.
+        
         # You might want to use some of these attributes
 
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
@@ -108,6 +113,19 @@ class Step(ProcessingStep):
 
         return sep
 
+    def load_catalog(self, catpath, racol, deccol):
+        '''
+        ### load catalog here - assume it is csv
+        caches in the catalogs dictionary
+        catdf = pd.read_csv(catpath)
+        catra, catdec = np.array(catdf[racol]), np.array(catdf[deccol])
+        '''
+        catdf = pd.read_csv(catpath)
+        catra, cadec = np.array(catdf[racol]), np.array(catdf[deccol])
+        d = (catdf, catra, cadec)
+
+        return d
+
 
     def filter_cat(self, ra, dec, catpath, radius=2, racol="RA", deccol="Dec"):
         """
@@ -120,16 +138,16 @@ class Step(ProcessingStep):
         radius: float, int
             in degrees
         """
-        ### load catalog here - assume it is csv
-        catdf = pd.read_csv(catpath)
-        catra, catdec = np.array(catdf[racol]), np.array(catdf[deccol])
-
-        sep = self.angular_offset(ra, dec, catra, catdec)
-        select_bool = sep < radius
-
-        catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
-
-        return catdf.iloc[select_bool], catcoord
+        if catpath not in self.catalogs.keys():
+            catdf, catra, catdec = self.load_catalog(catpath, racol, deccol)
+            sep = self.angular_offset(ra, dec, catra, catdec)
+            select_bool = sep < radius
+            catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
+            d = catdf.iloc[select_bool], catcoord
+            self.catalogs[catpath] = d
+        
+        d = self.catalogs[catpath]
+        return d
 
 
     def cross_matching(self, candidates, catalogue, coord, 

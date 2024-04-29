@@ -30,8 +30,7 @@ class CandidateWriter:
     raw_dtype = np.dtype([('snr', '<i2'), ('loc_2dfft', '<u2'), ('boxc_width', 'u1'), ('time', 'u1'), ('dm', '<u2')])
     raw_dtype_formats = ['g', 'g', 'g', 'g', 'g']
 
-    out_dtype = np.dtype(
-        [
+    out_dtype_list = [
             ('snr', '<f4'),
             ('lpix', '<u1'),
             ('mpix', '<u1'),
@@ -49,7 +48,8 @@ class CandidateWriter:
             ('ibeam', '<u1'), # beam number
             ('latency_ms', '<f4') # latency in milliseconds. Can be update occasionally
         ]
-    )
+    out_dtype = np.dtype(out_dtype_list)
+
     out_dtype_formats = \
         [
             '.1f',  #snr
@@ -69,6 +69,9 @@ class CandidateWriter:
             'g', # ibeam
             '.1f' # latency
         ]
+
+    # dtype without beam and latency
+    out_dtype_short = np.dtype(out_dtype_list[:14])
 
     def __init__(self, outname, first_tstart, overwrite = True, delimiter = "\t", ibeam=0):
         '''

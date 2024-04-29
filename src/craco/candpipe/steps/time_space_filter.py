@@ -82,7 +82,7 @@ class Step(ProcessingStep):
         
         # apply command line argument for minimum S/N and only return those values
         if self.pipeline.args.cluster_min_sn is not None:
-            outd = outd[outd['SNR'] > self.pipeline.args.cluster_min_sn]
+            outd = outd[outd['snr'] > self.pipeline.args.cluster_min_sn]
         
         return outd
 
@@ -98,7 +98,7 @@ class Step(ProcessingStep):
         log.debug("calculate metrics for total of %s clusters", sum(idxs))
 
         # select spatial_id == -1 candidates 
-        candidates = uncluster.loc[grouped.idxmax()['SNR']][~idxs]
+        candidates = uncluster.loc[grouped.idxmax()['snr']][~idxs]
 
         # put new metrics for those clusters
         candidates['mSNR'] = 1
@@ -128,12 +128,12 @@ class Step(ProcessingStep):
             subgrouped = data.groupby('spatial_id')
 
             if (mSlope > config['threshold']['mSlope']) or (mSlope == 0):
-                spatial_idxs = list(subgrouped.max()['SNR'].nlargest(2).index)
+                spatial_idxs = list(subgrouped.max()['snr'].nlargest(2).index)
             else:
-                spatial_idxs = list(subgrouped.max()['SNR'].nlargest(1).index)
+                spatial_idxs = list(subgrouped.max()['snr'].nlargest(1).index)
 
             for spatial_id in spatial_idxs:
-                max_ind = subgrouped.idxmax()['SNR'].loc[spatial_id]
+                max_ind = subgrouped.idxmax()['snr'].loc[spatial_id]
                 candidates = pd.concat([candidates, data[ data.index == max_ind]], axis=0, ignore_index=True)
 
                 candidates.loc[j, 'lpix_rms'] = subgrouped.std()['lpix'].loc[spatial_id]
@@ -158,7 +158,7 @@ class Step(ProcessingStep):
         '''
 
         snrmax = data.groupby('spatial_id').max()
-        snrmax = snrmax['SNR'].unique()
+        snrmax = snrmax['snr'].unique()
         snrmax = np.sort(snrmax)[::-1]
 
         diff = snrmax[:-1] - snrmax[1:]
@@ -175,12 +175,12 @@ class Step(ProcessingStep):
         Original m7
         '''
 
-        count = data.groupby('spatial_id').count()['SNR']
+        count = data.groupby('spatial_id').count()['snr']
         snrmax = data.groupby('spatial_id').max()
         snrmax['count'] = count
-        snrmax = snrmax.sort_values('SNR', ascending=False)
+        snrmax = snrmax.sort_values('snr', ascending=False)
         
-        snrmax = np.array(snrmax[['SNR', 'count']].iloc[:num])
+        snrmax = np.array(snrmax[['snr', 'count']].iloc[:num])
         diff = snrmax[:-1, 0] - snrmax[1:, 0]
         count = snrmax[:-1, 1]
 
@@ -210,7 +210,7 @@ class Step(ProcessingStep):
         '''
         original m3
         '''
-        grouped_SNR = data.groupby('spatial_id').sum()['SNR']
+        grouped_SNR = data.groupby('spatial_id').sum()['snr']
 
         return grouped_SNR.max() / grouped_SNR.sum()
 
@@ -227,7 +227,7 @@ class Step(ProcessingStep):
         # potential Central ghosts
         cet_ind = (candidates['lpix'] >= 126) & (candidates['lpix'] <= 130) & (candidates['mpix'] >= 126) & (candidates['mpix'] <= 130)
         # potential super bright sources 
-        brg_ind = (candidates['SNR'] >= config['threshold']['max_snr'])
+        brg_ind = (candidates['snr'] >= config['threshold']['max_snr'])
 
         # final candidates
         cand_ind_fin = (cand_ind & (~rfi_ind) & (~cet_ind)) | brg_ind
