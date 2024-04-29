@@ -48,20 +48,21 @@ def test_candpipe_runs_noalias(config):
 
 def test_candpipe_runs_anti_alias(config):
     parser = get_parser()
-    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    cand_fname = 'testdata/candpipe/alias/candidates.b25.txt'
     args = parser.parse_args([cand_fname])
     pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
     assert len(pipe.steps) == 5 #check its actually runnign the anti aliasing
     cands = pipe.run()
 
     # Yuanming writes something that in the end does
-    example_cands = pd.read_csv('testdata/candpipe/super_scattered_frb/candidates.b04.txt.uniq.csv')
-    assert check_identical(cands, example_cands) == True, f'Missing candidates'
-    assert check_identical(example_cands, cands) == True, f'Extra candidates'
+    # example_cands = pd.read_csv('testdata/candpipe/alias/SB61585.no_alias_filtering.candidates.b25.txt.uniq.csv')
+    example_cands = pd.read_csv('testdata/candpipe/alias/candidates.b25.txt.uniq.csv')
+    assert check_identical(cands, example_cands, keyname='ALIAS_name') == True, f'Missing candidates'
+    assert check_identical(example_cands, cands, keyname='ALIAS_name') == True, f'Extra candidates'
 
 
 
-def check_identical(data1, data2):
+def check_identical(data1, data2,  keyname='PSR_name'):
     '''
     # # check number of candidates in both files
     # snr = 8
@@ -90,13 +91,25 @@ def check_identical(data1, data2):
         tsamp = data1.iloc[i]['total_sample']
         dm = data1.iloc[i]['dm']
         iblk = data1.iloc[i]['iblk']
+        category = data1.iloc[i][keyname]
 
-        ind = sum( (data2['lpix'] == lpix) & (data2['mpix'] == mpix) & (data2['total_sample'] == tsamp) & (data2['dm'] == dm) )
+        if category is None or pd.isna(category):
+            print(tsamp, category, 'None or nan')
+            ind = sum( (data2['lpix'] == lpix) & \
+                        (data2['mpix'] == mpix) & \
+                        (data2['total_sample'] == tsamp) & \
+                        (data2['dm'] == dm) )
+        else:
+            ind = sum( (data2['lpix'] == lpix) & \
+                        (data2['mpix'] == mpix) & \
+                        (data2['total_sample'] == tsamp) & \
+                        (data2['dm'] == dm) & \
+                        (data2[keyname] == category) )
 
         cluster_id = data1.iloc[i]['cluster_id']
 
         if ind == 0:
-            print('cand1 is not in cand2', i, tsamp)
+            print('cand1 is not in cand2, cluster_id', cluster_id, 'total_sample', tsamp)
             return False
 
     return True 
