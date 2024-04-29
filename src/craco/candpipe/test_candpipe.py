@@ -32,12 +32,23 @@ def test_beam_from_candfile():
 
     assert beam_from_cand_file('candidates.b24.txt') == 24
 
-def test_candpipe_runs(config):
+def test_candpipe_runs_noalias(config):
     parser = get_parser()
     cand_fname = 'testdata/candpipe/pulsar/SB61584.n500.candidates.b24.txt'
 
     args = parser.parse_args([cand_fname])
     pipe = Pipeline.from_candfile(cand_fname, args, config)
+    cands = pipe.run()
+
+    # Yuanming writes something that in the end does
+    # assert check_identical(cands, other_cands) == True, f'Candi9dates not identical'
+
+def test_candpipe_runs_anti_alias(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/pulsar/SB61584.n500.candidates.b24.txt'
+
+    args = parser.parse_args([cand_fname])
+    pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
     cands = pipe.run()
 
     # Yuanming writes something that in the end does
