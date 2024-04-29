@@ -45,10 +45,10 @@ def test_candpipe_runs_noalias(config):
 
 def test_candpipe_runs_anti_alias(config):
     parser = get_parser()
-    cand_fname = 'testdata/candpipe/pulsar/SB61584.n500.candidates.b24.txt'
-
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
     args = parser.parse_args([cand_fname])
     pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
+    assert len(pipe.steps) == 5
     cands = pipe.run()
 
     # Yuanming writes something that in the end does
