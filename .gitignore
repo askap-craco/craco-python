@@ -39,7 +39,7 @@ venv*/
 mpitests/
 
 # test data - probably should check this in.
-testdata/
+# testdata/
 
 
 # Emacs and other backups
