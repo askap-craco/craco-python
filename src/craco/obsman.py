@@ -297,7 +297,7 @@ class MetadataObsmanDriver:
                 # for some reason obs variables are not updated when the thing starts. Grrr.
                 if 'schedblock.antennas' in self.obs_variables:
                     break
-                time.sleep(0.2)
+                time.sleep(0.5)
 
             self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
             self.scan_manager = ScanManager(self.ant_numbers, frac_onsource=self.obsman.values.frac_onsource )
