@@ -149,7 +149,7 @@ class SearchPipelineSink:
         if devid is not None:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
-                self.pipeline = PipelineWrapper(self.adapter, info.values, devid)
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=False)
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
@@ -264,7 +264,7 @@ class SearchPipelineSink:
                     abs(vis).mean(),
                      bl_weights.sum(), bl_weights.size,
                      tf_weights.sum(), tf_weights.size)
-            t.tick('Summarise input data')
+            t.tick('Summarise input')
             out_cands = self.pipeline.write(vis, bl_weights, tf_weights, self.candout_buffer) # out_cands is a view of candout_buffer
             t.tick('Pipeline write')
             self.t = 0

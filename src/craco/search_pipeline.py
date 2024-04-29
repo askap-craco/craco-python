@@ -821,6 +821,61 @@ class Pipeline:
             self.image_starts = self.run_image(img_tblk, values)
 
         return cand_iblk, candidates
+    
+    def copy_and_run_pipeline_serial(self, iblk, values):
+        '''
+        Runs everything in series
+        Assumes inbuf prepared with prepare_inbuf()
+        Runs FDMT first, then image pipeline on same buffer.
+        Returns cand_iblk, candidates - cand_iblk is the block relevatn to the candidates we have.
+        cand_iblk = blk - i.e. no latency.
+        
+        :iblk: = input block number. Increments by 1 for every call.
+        :returns: cand_iblk, candidates
+        '''
+
+        # Blocks are sequential
+        fdmt_tblk = iblk % NBLK
+        img_tblk = iblk % NBLK
+        cand_iblk = iblk  # candidate block coming from pipeline
+
+
+        t = Timer()
+
+        # wait for FDMT
+        if self.fdmt_starts is not None:
+            self.fdmt_starts.wait()
+            t.tick('FDMT init wait')
+
+        # copy input
+        self.inbuf.copy_to_device()
+        t.tick('Copy to device')
+
+        # run fdmt
+        self.fdmt_starts = self.run_fdmt(fdmt_tblk)
+        t.tick('FDMT run')
+        self.fdmt_starts.wait()
+        t.tick('FDMT wait')
+
+        # wait for image pipeline
+        if self.image_starts is not None:
+            self.image_starts.wait()
+            t.tick('Image init wait')
+        
+        self.image_starts = self.run_image(img_tblk, values)
+        t.tick('image run')
+        self.image_starts.wait()
+        t.tick('image wait')
+
+        # if we've waited successfuly then we can get candidates
+        if cand_iblk >= 0:
+            candidates = self.get_candidates()
+            t.tick('Get candidates')
+        else:
+            candidates = np.zeros(0, dtype=candidate_dtype)
+            
+
+        return cand_iblk, candidates
         
 def location2pix(location, npix=256):
 
@@ -1018,13 +1073,14 @@ class VisSource:
 
 
 class PipelineWrapper:
-    def __init__(self, planinfo, values, devid, startinfo=None):
+    def __init__(self, planinfo, values, devid, startinfo=None, parallel_mode=True):
         '''
         Create a pipeilne wrapper
         :planinfo: Adapter containg observation info for the plan
         :values: command line arguments
         :device id: pyxrt device ID - I don't recal why this is seaparet
         :startinfo: Info adapter for the beginning of the file - we pull the tstart 
+        :parallel_mode: True if you want to run in paralell (default). False for serial.
         from this because the planinfo might have a tstart in the future. If None then we use 
         planinfo
         '''
@@ -1036,6 +1092,8 @@ class PipelineWrapper:
 
         if startinfo is None:
             startinfo = planinfo
+
+        self.parallel_mode = parallel_mode
 
         self.startinfo = startinfo
         self.first_tstart = startinfo.tstart
@@ -1184,8 +1242,6 @@ class PipelineWrapper:
 
         if pc_filterbank is not None:
             d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
-
-
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
@@ -1197,7 +1253,10 @@ class PipelineWrapper:
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
             t.tick('dump uv')
 
-        cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
+        if self.parallel_mode:
+            cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
+        else:
+            cand_iblk, candidates = p.copy_and_run_pipeline_serial(iblk, values)
         t.tick('run')
         
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
