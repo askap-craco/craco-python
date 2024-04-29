@@ -44,6 +44,7 @@ from craco.prep_scan import ScanPrep
 from craco.mpi_appinfo import MpiPipelineInfo
 from craco.visblock_accumulator import VisblockAccumulatorStruct
 from craco.candidate_writer import CandidateWriter
+from craco.snoopy_sender import SnoopySender
 
     
 log = logging.getLogger(__name__)
@@ -1209,8 +1210,8 @@ class BeamCandProcessor(Processor):
             t.tick('process')
 
             # gather to everyone - synchronous
-            # TODO send number of canidates first, then actually gather then with GatherV
-            # It's kindof painful - let's just send1 candidate for now
+            # SEnd MAX_NCAND_OUT per process every time. 
+            # Non-existent candiates have -1 as s/n
             
             tx_comm.Gather([out_cand_buff.cands, out_cand_buff.max_ncand, cand_buff.mpi_dtype], root=0)
             t.tick('gather')
@@ -1234,6 +1235,7 @@ class CandMgrProcessor(Processor):
         cands = MpiCandidateBuffer(nbeams*MAX_NCAND_OUT)
         iblk = 0
         self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
+        self.cand_sender = SnoopySender()
         while True:
             t = Timer()
             tx_comm.Gather(cands.mpi_msg, root=0) # Come to me my pretties! Mwhahahahahaha!
@@ -1244,10 +1246,13 @@ class CandMgrProcessor(Processor):
 
     def multi_beam_process(self, cands):
         cands = cands[cands['snr'] > 0]
-        bestcand = max(cands, lambda c:c['snr'])
-        log.info('Best candidate from beam %d was %s', bestcand, bestcand['ibeam'])
+        bestcand = max(cands, lambda c:c['snr'])        
         self.cand_writer.update_latency(cands)
         self.cand_writer.write_cands(cands)
+        log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
+        if bestcand['snr'] >= self.pipe_info.values.threshold:
+            log.critical('Sending candidate %s', bestcand)
+            self.cand_sender.send(bestcand)
 
 
 def processor_class_factory(app):                    
