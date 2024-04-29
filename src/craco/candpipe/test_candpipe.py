@@ -48,7 +48,7 @@ def test_candpipe_runs_anti_alias(config):
     cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
     args = parser.parse_args([cand_fname])
     pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
-    assert len(pipe.steps) == 5
+    assert len(pipe.steps) == 5 #check its actually runnign the anti aliasing
     cands = pipe.run()
 
     # Yuanming writes something that in the end does

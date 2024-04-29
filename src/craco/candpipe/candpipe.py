@@ -68,8 +68,9 @@ class ProcessingStep:
 class Pipeline:
     def __init__(self, beamno, args, config, src_dir='.', anti_alias=False):
         '''
-        if anti_alias is True and the PSF exists, it will do anti_aliasing.
-        Otherwise it does no anti-aliasing.
+        if anti_alias is True it will try anti aliasing. If the PSF doesn't exists it will error.
+        If anti_alias is False, it won't anti alias
+        if anti_alias is None, it will anti_alias if the PSF exists
         '''
         self.args = args
         if isinstance(beamno, int):
@@ -93,8 +94,11 @@ class Pipeline:
         self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
         self.config = config
         psf_exists = os.path.isfile(self.psf_fname)
+        if anti_alias is None:
+            anti_alias = psf_exists
 
-        if anti_alias and psf_exists:
+        if anti_alias:
+            assert psf_exists
             self.psf_header = self.get_header()
             self.steps = [
                 steps.cluster.Step(self),
@@ -167,10 +171,13 @@ class Pipeline:
         cand_out.to_csv(fout)
         log.debug('Saved final candidates to %s', fout)
 
-        for step in self.steps:
-            step.close()
+        self.close()
 
         return cand_out
+    
+    def close(self):
+        for step in self.steps:
+            step.close()
     
     def process_block(self, cand_in, wcs=None):
         '''
