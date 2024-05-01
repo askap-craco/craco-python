@@ -1,0 +1,91 @@
+SIMPLE  =                    T                                                  
+BITPIX  =                  -32                                                  
+NAXIS   =                    7                                                  
+NAXIS1  =                    0 / Random axis group                              
+NAXIS2  =                    3                                                  
+NAXIS3  =                    1                                                  
+NAXIS4  =                  240                                                  
+NAXIS5  =                    1                                                  
+NAXIS6  =                    1                                                  
+NAXIS7  =                    1                                                  
+EXTEND  =                    T / Tables will follow                             
+BLOCKED =                    T / File may be blocked                            
+GROUPS  =                    T / Random group UV data                           
+PCOUNT  =                    8 / Number of random parameters                    
+GCOUNT  =                    1 / Number of groups (rows) - updated when file clo
+EPOCH   =               2000.0                                                  
+BSCALE  =                  1.0                                                  
+BZERO   =                  0.0                                                  
+BUNIT   = 'UNCALIB '                                                            
+HIERARCH INCLUDE_WEIGHTS = T                                                    
+CTYPE2  = 'COMPLEX '                                                            
+CRVAL2  =                  1.0                                                  
+CDELT2  =                  1.0                                                  
+CRPIX2  =                  1.0                                                  
+CTYPE3  = 'STOKES  '                                                            
+CRVAL3  =                 -5.0                                                  
+CDELT3  =                 -1.0                                                  
+CRPIX3  =                  1.0                                                  
+CTYPE4  = 'FREQ    '                                                            
+CRVAL4  =    863490740.7407407                                                  
+CDELT4  =            1000000.0                                                  
+CRPIX4  =                120.5                                                  
+CROTA4  =                  0.0                                                  
+CTYPE5  = 'IF      '                                                            
+CRVAL5  =                  1.0                                                  
+CDELT5  =                  1.0                                                  
+CRPIX5  =                  1.0                                                  
+CROTA5  =                  0.0                                                  
+CTYPE6  = 'RA      '                                                            
+CRVAL6  =                  1.0                                                  
+CDELT6  =                  1.0                                                  
+CRPIX6  =                  1.0                                                  
+CROTA6  =                  0.0                                                  
+CTYPE7  = 'DEC     '                                                            
+CRVAL7  =                  1.0                                                  
+CDELT7  =                  1.0                                                  
+CRPIX7  =                  1.0                                                  
+CROTA7  =                  0.0                                                  
+PTYPE1  = 'UU      '                                                            
+PSCAL1  =                  1.0                                                  
+PZERO1  =                  0.0                                                  
+PTYPE2  = 'VV      '                                                            
+PSCAL2  =                  1.0                                                  
+PZERO2  =                  0.0                                                  
+PTYPE3  = 'WW      '                                                            
+PSCAL3  =                  1.0                                                  
+PZERO3  =                  0.0                                                  
+PTYPE4  = 'DATE    '           / Day number                                     
+PSCAL4  =                  1.0 / Day number                                     
+PZERO4  =    2460237.418822312 / Day number                                     
+PTYPE5  = 'BASELINE'                                                            
+PSCAL5  =                  1.0                                                  
+PZERO5  =                  0.0                                                  
+PTYPE6  = 'FREQSEL '                                                            
+PSCAL6  =                  1.0                                                  
+PZERO6  =                  0.0                                                  
+PTYPE7  = 'SOURCE  '                                                            
+PSCAL7  =                  1.0                                                  
+PZERO7  =                  0.0                                                  
+PTYPE8  = 'INTTIM  '                                                            
+PSCAL8  =                  1.0                                                  
+PZERO8  =                  0.0                                                  
+OBJECT  = 'MULTI   '                                                            
+TELESCOP= 'ASKAP   '                                                            
+INSTRUME= 'VCRAFT  '                                                            
+ORIGIN  = 'CRAFT   '                                                            
+OBSERVER= ''                                                                    
+SORTORD = 'TB      '                                                            
+SPECSYS = 'TOPOCENT'                                                            
+HISTORY Created on 2023-10-23T11:19:43.398797 by /data/seren-01/fast/wan342/soft
+HISTORY ware/conda3/envs/craco/bin/mpipipeline --mpi --devices mlx5_1 --hostfile
+HISTORY  mpi_seren.txt --cardcap-dir /data/big/craco/SB053972/scans/00/202310192
+HISTORY 20139/ --outdir /data/big/craco/SB053972/scans/00/20231019220139//result
+HISTORY s --phase-center-filterbank pc.fil --calibration /data/seren-01/big/crac
+HISTORY o/SB053972/cal --fcm /home/ban115/20220714.fcm --metadata /data/seren-01
+HISTORY /big/craco/SB053972/SB53972.json.gz --xclbin /data/seren-01/fast/ban115/
+HISTORY build/xclbin/binary_container_e76baa70a.xclbin --pol-sum --block 2-6 --c
+HISTORY ard 1-12 --max-ncards 60 --ncards-per-host 6 --ndm 160 -N 10000000000 --
+HISTORY threshold 6 --subtract 64 --flag-ants 19,24-30 --update-uv-blocks 768 --
+HISTORY dflag-fradius 120 --dflag-cas-threshold 5 --dflag-tblk 128 --search-beam
+HISTORY s 0-19 --save-uvfits-beams 0-19                                         
