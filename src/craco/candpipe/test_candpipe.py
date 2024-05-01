@@ -132,6 +132,7 @@ def test_convert_np_to_df(config):
     pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
     cands = load_cands(cand_fname)
     df = pipe.convert_np_to_df(cands)
+    assert len(df) == len(cands)
 
 
 def test_candpipe_block_by_block(config):
