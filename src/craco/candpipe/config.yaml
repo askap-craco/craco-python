@@ -53,7 +53,7 @@ inject_tol:
 dformat:
 
   colfloat:
-    SNR: 1
+    snr: 1
     obstime_sec: 4
     mjd: 9
     dc_pccm3: 3
