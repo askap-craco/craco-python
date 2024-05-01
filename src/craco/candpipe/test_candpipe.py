@@ -13,6 +13,7 @@ import logging
 import pytest
 import yaml
 from craco.candpipe.candpipe import *
+from craco.plot_cand import load_cands
 
 log = logging.getLogger(__name__)
 
@@ -54,8 +55,38 @@ def test_candpipe_runs_anti_alias(config):
     # Yuanming writes something that in the end does
     # assert check_identical(cands, other_cands) == True, f'Candi9dates not identical'
 
+def cand_blocker(cands):
+    if isinstance(cands, str):
+        cands = load_cands(cands)
+    
+    maxblk = max(cands['iblk'])
+    for iblk in range(maxblk+1):
+        yield cands[cands['iblk'] == iblk]
 
-     
+def test_convert_np_to_df(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    args = parser.parse_args([cand_fname])
+    pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
+    cands = load_cands(cand_fname)
+    df = pipe.convert_np_to_df(cands)
+
+
+def test_candpipe_block_by_block(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    args = parser.parse_args([cand_fname])
+    pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
+    cands = load_cands(cand_fname)
+
+    #all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
+    all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
+    all_clustered_cands = pd.concat(all_clustered_cands)
+    
+
+    assert len(all_clustered_cands) >= 1, 'Expected at least 1 candidate '
+    assert len(all_clustered_cands) < len(cands), 'Should have been less candidates after pipeline!'
+        
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

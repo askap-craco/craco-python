@@ -118,8 +118,7 @@ class Step(ProcessingStep):
     def get_source_coords(self, ra, dec):
         # Get FoV (in degree)
         # make it works for a list of ra and dec 
-        ra_fov = np.abs(self.pipeline.psf_header['NAXIS1'] * self.pipeline.psf_header['CDELT1'])
-        dec_fov = np.abs(self.pipeline.psf_header['NAXIS2'] * self.pipeline.psf_header['CDELT2'])
+        ra_fov, dec_fov = self.pipeline.get_current_fov()
 
         ra, dec = np.array(ra, dtype=float), np.array(dec, dtype=float)
 

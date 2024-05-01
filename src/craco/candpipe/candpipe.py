@@ -16,7 +16,9 @@ import sys
 import logging
 import traceback
 from astropy.io import fits
+from astropy.wcs import WCS
 from craco.candidate_writer import CandidateWriter
+import pandas as pd
 
 from . import steps
 from craco.plot_cand import load_cands
@@ -68,6 +70,9 @@ class ProcessingStep:
 class Pipeline:
     def __init__(self, beamno, args, config, src_dir='.', anti_alias=False):
         '''
+        If beamno is an integer, it uses that. src_dir must be specified
+        if otherwise, it derives the beamno and src_dir assuming beamno is the candidates file path
+
         if anti_alias is True it will try anti aliasing. If the PSF doesn't exists it will error.
         If anti_alias is False, it won't anti alias
         if anti_alias is None, it will anti_alias if the PSF exists
@@ -99,7 +104,7 @@ class Pipeline:
 
         if anti_alias:
             assert psf_exists
-            self.psf_header = self.get_header()
+            self.set_current_psf(0)
             self.steps = [
                 steps.cluster.Step(self),
                 steps.time_space_filter.Step(self), 
@@ -137,6 +142,14 @@ class Pipeline:
 
         return full_path
 
+    def set_current_psf(self, iblk):
+        psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk{iblk:d}.fits')
+        hdr = fits.getheader(psf_fname)
+        self.psf_header = hdr
+        self.curr_wcs = WCS(hdr)
+        self.curr_psf_file = psf_fname
+        self.curr_psf_iblk = iblk
+        return hdr
 
     def create_dir(self):
         outdir = self.args.outdir
@@ -145,22 +158,12 @@ class Pipeline:
         else:
             log.debug('Directory %s exists.', outdir)
 
-
-    def get_header(self):
-        fitsfile = self.psf_fname
-        # Open the FITS file and get the header
-        with fits.open(fitsfile) as hdul:
-            header = hdul[0].header
-
-        return header
-
     
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
 
-        if len(cand_in) == 0:
-            return None
+        
 
         # create a directory to store output files 
         self.create_dir()
@@ -174,16 +177,44 @@ class Pipeline:
         self.close()
 
         return cand_out
+
+    def get_current_fov(self):
+        '''
+        Return FoV in degrees as a tuple (ra_fov, dec_fov)
+        
+        TODO: Should proably use WCS pixel_to_world for the extremes, but Yuanming said that worked poorly.
+        '''
+        h = self.psf_header
+        ra_fov = np.abs(h['NAXIS1'] * h['CDELT1'])
+        dec_fov = np.abs(h['NAXIS2'] * h['CDELT2'])
+
+        return (ra_fov, dec_fov)
     
     def close(self):
         for step in self.steps:
             step.close()
     
-    def process_block(self, cand_in, wcs=None):
+    def convert_np_to_df(self, npin):
+        '''
+        Convert  numpy array to data frame.
+        Vivek says change this to include additional columns to ipmrove speed. FOr now it just naievely converts
+        '''
+        assert isinstance(npin, np.ndarray)
+        assert npin.dtype in (CandidateWriter.out_dtype , CandidateWriter.out_dtype_short)
+        df = pd.DataFrame(npin)
+        return df
+
+    def process_block(self, cand_in):
         '''
         Candidates: is assumed to be a pandas data frame
         '''
-        self.curr_wcs = wcs
+
+        if len(cand_in) == 0:
+            return pd.DataFrame(np.zeros(0, dtype=CandidateWriter.out_dtype))
+        
+        if isinstance(cand_in, np.ndarray):
+            cand_in = self.convert_np_to_df(cand_in)
+
         for istep, step in enumerate(self.steps):
             cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
