@@ -45,6 +45,7 @@ from craco.mpi_appinfo import MpiPipelineInfo
 from craco.visblock_accumulator import VisblockAccumulatorStruct
 from craco.candidate_writer import CandidateWriter
 from craco.snoopy_sender import SnoopySender
+from craco.mpi_candidate_buffer import MpiCandidateBuffer
 
     
 log = logging.getLogger(__name__)
@@ -1008,11 +1009,6 @@ def transpose_beam_run(proc):
         vis_file.close()
         vis_accum.close()
 
-class MpiCandidateBuffer:
-    def __init__(self, max_ncand=8192):        
-        self.cands = np.zeros(max_ncand, dtype=CandidateWriter.out_dtype)
-        self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(CandidateWriter.out_dtype)
-        self.mpi_msg = [self.cands, max_ncand, self.mpi_dtype]
 
 def proc_beam_run(proc):
     #set_scheduler(BEAM_PRIORITY)
@@ -1213,7 +1209,7 @@ class BeamCandProcessor(Processor):
             # SEnd MAX_NCAND_OUT per process every time. 
             # Non-existent candiates have -1 as s/n
             
-            tx_comm.Gather([out_cand_buff.cands, out_cand_buff.max_ncand, cand_buff.mpi_dtype], root=0)
+            tx_comm.Gather([out_cand_buff.cands, out_cand_buff.max_ncand, cand_buff.mpi_dtype], None, root=0)
             t.tick('gather')
             iblk += 1
 
@@ -1238,7 +1234,7 @@ class CandMgrProcessor(Processor):
         cands = MpiCandidateBuffer(MAX_NCAND_OUT*nbeams)
         while True:
             t = Timer()
-            tx_comm.Gather(cands.mpi_msg, root=0) # Come to me my pretties! Mwhahahahahaha!
+            tx_comm.Gather(cands.mpi_msg, None, root=0) # Come to me my pretties! Mwhahahahahaha!
             t.tick('Gather')
             self.multi_beam_process(self.cands.cands)
             t.tick('Multi process')

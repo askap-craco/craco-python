@@ -105,7 +105,7 @@ def _main():
         pol = '--dual-pol'
 
     if values.phase_center_filterbank:
-        pcb = f'--phase-center_filterbank {values.phase_center_filterbank}'
+        pcb = f'--phase-center-filterbank {values.phase_center_filterbank}'
     else:
         pcb = ''
 
