@@ -1050,7 +1050,7 @@ def proc_beam_run(proc):
     
     # warumup recv
     beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
-    cand_buf = MpiCandidateBuffer()
+    cand_buf = MpiCandidateBuffer.for_tx(beam_comm, candproc_rank)
 
     try:
         while True:
@@ -1076,8 +1076,8 @@ def proc_beam_run(proc):
             candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
             t.tick('pipeline')
             if candidates is not None:
-                cand_msg = [candidates, len(candidates), cand_buf.mpi_dtype]
-                beam_comm.Send(cand_msg, dest=candproc_rank)
+                log.info('Sending ncands %s', len(candidates))
+                cand_buf.send(len(candidates))
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -1190,7 +1190,7 @@ class BeamCandProcessor(Processor):
         app = self.pipe_info.mpi_app
         rx_comm = app.beam_chain_comm
         tx_comm = app.cand_comm
-        cand_buff = MpiCandidateBuffer()
+        cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         iblk = 0
         from craco.candpipe import candpipe
@@ -1202,25 +1202,20 @@ class BeamCandProcessor(Processor):
                                  anti_alias=False)
         
         trace_file = MpiTracefile.instance()
-        recv_status = MPI.Status()
 
         while True:
             # async receive as we want to async transmit so the pipeeline
             # isn't slowed by the beam cand processor       
             t = Timer()
-            rx_comm.Recv(cand_buff.mpi_msg, source=app.BEAMPROC_RANK, status=recv_status)
-            t.tick('recv')
-            ncand = recv_status.Get_count()
+            ncand = cand_buff.recv()            
             t.tick('get_count')
             log.info('Got %d candidates in BeamCandProc', ncand)
-            trace_file += tracing.CounterEvent('Candidates', ts=None, args={'count':ncand})
-
             #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
             short_cands = cand_buff.cands[:ncand]
 
             out_df = pipe.process_block(short_cands, out_cand_buff.cands)
-            args = {'ncands':len(out_df)}
-            trace_file += tracing.CounterEvent('Candidates', None, args)
+            maxsnr = out_cand_buff.cands['snr'].max()
+            trace_file += tracing.CounterEvent('Candidates', ts=None, args={'ncandin':ncand, 'ncandout': len(out_df), 'maxsnr':maxsnr})
 
             t.tick('process')
 
@@ -1255,14 +1250,18 @@ class CandMgrProcessor(Processor):
         :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
         cands['snr'] = -1 for no candidates
         '''
-        cands = cands[cands['snr'] > 0]
+        #cands = cands[cands['snr'] > 0]
+        valid_cands = cands[cands['snr'] > 0]
+        
         maxidx = np.argmax(cands['snr'])
         bestcand = cands[maxidx]        
-        self.cand_writer.update_latency(cands)
-        self.cand_writer.write_cands(cands)
+        self.cand_writer.update_latency(valid_cands)
+        self.cand_writer.write_cands(valid_cands)
         trace_file = MpiTracefile.instance()
         log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
-        if bestcand['snr'] >= self.pipe_info.values.threshold:
+        latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
+        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands), 'latency':latency},ts=None)
+        if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
             log.critical('Sending candidate %s', bestcand)
             self.cand_sender.send(bestcand)
             args = {k:bestcand[k] for k in bestcand.dtype.names}
@@ -1309,7 +1308,9 @@ def get_parser():
     parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
     parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
     parser.add_argument('--proc-type', help='Process type')
+    parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=10.0)
     parser.add_argument(dest='files', nargs='*')
+    
     parser.set_defaults(verbose=False)
 
     return parser

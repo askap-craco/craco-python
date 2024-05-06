@@ -4,6 +4,8 @@ Template for making scripts to run from the command line
 
 Copyright (C) CSIRO 2022
 """
+from mpi4py import MPI
+
 import pylab
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -30,6 +32,34 @@ class MpiCandidateBuffer:
     def gather(self):
         self.comm.Gatherv(self.s_msg, self.r_msg)
         return self.cands
+    
+    def send(self, ncand):
+        assert 0<= ncand <= len(self.cands)
+        mpi_msg = [self.cands, ncand, self.mpi_dtype]
+        self.comm.Send(mpi_msg, dest=self.destrank)
+
+    def recv(self):
+        status = MPI.Status()
+        self.comm.Recv(self.mpi_msg, source=self.rxrank, status=status)
+        ncand = status.Get_count(self.mpi_dtype)
+        return ncand
+    
+    @staticmethod
+    def for_tx(comm, destrank):
+        cbuf = MpiCandidateBuffer()
+        cbuf.comm = comm
+        cbuf.destrank = destrank
+        return cbuf
+
+
+    @staticmethod
+    def for_rx(comm, rxrank):
+        cbuf = MpiCandidateBuffer()
+        cbuf.comm = comm
+        cbuf.rxrank = rxrank
+        return cbuf
+
+    
 
     @staticmethod
     def for_beam_manager(comm):
