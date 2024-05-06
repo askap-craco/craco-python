@@ -37,8 +37,12 @@ class TrivialEncoder(json.JSONEncoder):
             if '_id' in d:
                 d['id'] = d['_id']
                 del d['_id']
-        elif isinstance(o, np.uint64):
-            d = int(o)
+        elif np.issubdtype(o, np.integer): #https://numpy.org/devdocs/reference/generated/numpy.issubdtype.html
+            d = int(o)            
+        elif np.issubdtype(o, np.floating):
+            d = float(o)        
+        else:
+            raise ValueError(f'Cant encode {o} {type(o)}')
 
         return d
 
@@ -117,7 +121,7 @@ class CounterEvent(Event):
 class InstantEvent(Event):
     def __init__(self, name, ts, s=None, sf=None, args=None, pid=None, tid=None, cat=None):
         '''
-        :s: Scope - must be 'g','p,'t'
+        :s: Scope - must be 'g','p,'t' = global, process or thread
         '''
         super().__init__(name, ts, sf, 'i', pid, tid, cat, args)
 

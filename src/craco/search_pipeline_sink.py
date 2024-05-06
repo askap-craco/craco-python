@@ -229,7 +229,7 @@ class SearchPipelineSink:
         self.t += vis_nt
         self.write_pipeline_data(pipeline_data)
 
-    def write_pipeline_data(self, pipeline_data):
+    def write_pipeline_data(self, pipeline_data, candidate_buffer):
         '''
         Writes already accumulated pipeline data
         Should be a masked array of dtype=compelx64 and shape
@@ -265,7 +265,7 @@ class SearchPipelineSink:
                      bl_weights.sum(), bl_weights.size,
                      tf_weights.sum(), tf_weights.size)
             t.tick('Summarise input')
-            out_cands = self.pipeline.write(vis, bl_weights, tf_weights, self.candout_buffer) # out_cands is a view of candout_buffer
+            out_cands = self.pipeline.write(vis, bl_weights, tf_weights, candidate_buffer) 
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error

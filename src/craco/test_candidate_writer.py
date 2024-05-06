@@ -19,6 +19,7 @@ from astropy.coordinates import SkyCoord, Angle
 from craft import craco_wcs
 from pytest import fixture
 from numpy.testing import assert_allclose
+from craco.tracing.tracing import *
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +111,16 @@ def test_latency(plan):
     #assert icands[0]['obstime_sec'] == 0.0
     #assert icands[0]['latency_ms'] == 0
     assert np.all(icands['latency_ms'] < 0)
+
+def test_can_trace_candidates():
+    cands = np.zeros((1), CandidateWriter.out_dtype)
+    cand = cands[0]
+    args = {k:cand[k] for k in cand.dtype.names}
+    fname = 'trace_array_with_cand_instant.json'
+    t = Tracefile(fname, type='array')
+    e = InstantEvent('Candidate', ts=None,args=args, s='g')
+    t += e
+    t.close()
     
 
 

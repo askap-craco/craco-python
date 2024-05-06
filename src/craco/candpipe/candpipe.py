@@ -36,6 +36,34 @@ def beam_from_cand_file(candfile):
     beamno = int(candfile.split('.')[-2][1:])
     return beamno
 
+def load_default_config():
+    config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(config_file, 'r') as yaml_file:
+        config = yaml.safe_load(yaml_file)
+
+    return config
+
+def copy_best_cand(cand_pd, cand_np):
+    '''
+    Copy data frame candidates to numpy candidates
+    There are more that can fit, then we take the top N sorted by snr
+    If there are less then re remaining will have snr=-1
+    Ignore missing columns
+    '''
+    #assert len(cand_pd) == len(cand_np)
+    # Copy candidates from pandas data frame to numpy array
+                
+    MAXN = len(cand_np)
+    N = len(cand_pd)
+    top_cand = cand_pd.sort_values(by='snr', ascending=False).head(MAXN)
+    cand_np[N:]['snr'] = -1
+    
+    for field in cand_np.dtype.fields.keys():
+        try:
+            cand_np[field][:N] = top_cand[field].iloc[:N]
+        except KeyError:
+            pass
+
 class ProcessingStep:
     '''
     Each processing step should inherit this class
@@ -68,19 +96,32 @@ class ProcessingStep:
 
 
 class Pipeline:
-    def __init__(self, beamno, args, config, src_dir='.', anti_alias=False):
+    def __init__(self, beamno, args, config, src_dir=None, anti_alias=False):
         '''
+        
+        
+        :param  beamno: beam number of reading/writing files. 
         If beamno is an integer, it uses that. src_dir must be specified
         if otherwise, it derives the beamno and src_dir assuming beamno is the candidates file path
 
-        if anti_alias is True it will try anti aliasing. If the PSF doesn't exists it will error.
+        :param args: Command line arguments - if None loads default arguments
+        :param config: YAML config - if None, uses load_default_config()
+        :param src_dir: root directory for input files. If None assumes '.' unles src dir is from candfile
+        :param anti_alias: if anti_alias is True it will try anti aliasing. If the PSF doesn't exists it will error.
         If anti_alias is False, it won't anti alias
         if anti_alias is None, it will anti_alias if the PSF exists
         '''
+        if args is None:
+            args = get_parser().parse_args([])
         self.args = args
+
+        if config is None:
+            config = load_default_config()
+
         if isinstance(beamno, int):
             self.beamno = beamno
-            assert src_dir is not None
+            if src_dir is None:
+                src_dir = '.'
             self.cand_fname = 'NONE'
         else:
             self.cand_fname = beamno
@@ -90,6 +131,12 @@ class Pipeline:
                 src_dir = os.path.dirname(self.cand_fname)
 
         # self.beamno = int(candfile.replace('candidates.txtb',''))
+        assert 0<= beamno < 36
+        assert args is not None
+        assert config is not None
+        self.config = config
+
+        
         self.srcdir = src_dir
         assert os.path.isdir(src_dir), f'{src_dir} is not a directory'
         self.uvfits_fname = self.get_file( f'b{self.beamno:02d}.uvfits')
@@ -97,7 +144,6 @@ class Pipeline:
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
         self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
-        self.config = config
         psf_exists = os.path.isfile(self.psf_fname)
         if anti_alias is None:
             anti_alias = psf_exists
@@ -163,8 +209,6 @@ class Pipeline:
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
 
-        
-
         # create a directory to store output files 
         self.create_dir()
         cand_out = self.process_block(cand_in)
@@ -204,28 +248,44 @@ class Pipeline:
         df = pd.DataFrame(npin)
         return df
 
-    def process_block(self, cand_in):
+    def process_block(self, cand_in, cand_out_buf=None):
         '''
-        Candidates: is assumed to be a pandas data frame
+        Candidates: is assumed to be a pandas data frame or numpy array of type out_dtype
+        cand_out_buf - if it's a np.dtype=cand_out it will put the best N candidates into that the dataframe to that cand out.
         '''
 
-        if len(cand_in) == 0:
-            return pd.DataFrame(np.zeros(0, dtype=CandidateWriter.out_dtype))
-        
+
         if isinstance(cand_in, np.ndarray):
             cand_in = self.convert_np_to_df(cand_in)
 
-        for istep, step in enumerate(self.steps):
-            cand_out = step(self, cand_in)
-            stepname = step.__module__.split('.')[-1]
-            log.debug('Step "%s" produced %d candidates', stepname, len(cand_out))
-            if self.args.save_intermediate:
-                fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
-                fout = os.path.join(self.args.outdir, fout)
-                log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
-                cand_out.to_csv(fout)
+        if len(cand_in) == 0:
+            cand_out = pd.DataFrame(np.zeros(0, dtype=CandidateWriter.out_dtype))
+        else:
+            iblk = cand_in['iblk']
+            iblk0 = iblk[0]
+            # Sometimes for testing we send through a giant batch.
+            # We'll only load the PSF frm the first candidate, if possible.
+            # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
+            try:
+                self.set_current_psf(iblk0)
+                log.info('Loaded new PSF for iblk=%d', iblk0)
+            except FileNotFoundError: # No PSF available. Oh well. maybe next year.
+                pass
 
-            cand_in = cand_out
+            for istep, step in enumerate(self.steps):
+                cand_out = step(self, cand_in)
+                stepname = step.__module__.split('.')[-1]
+                log.debug('Step "%s" produced %d candidates', stepname, len(cand_out))
+                if self.args.save_intermediate:
+                    fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
+                    fout = os.path.join(self.args.outdir, fout)
+                    log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
+                    cand_out.to_csv(fout)
+
+                cand_in = cand_out
+
+        if cand_out_buf is not None:
+            copy_best_cand(cand_out, cand_out_buf)
         
         return cand_out
 
@@ -246,7 +306,7 @@ def get_parser():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-s','--save-intermediate', action='store_true', help='Save intermediate data tables')
     parser.add_argument('-o', '--outdir', type=str, default='.', help='output directory')
-    parser.add_argument(dest='files', nargs='+')
+    parser.add_argument(dest='files', nargs='*')
     parser.set_defaults(verbose=False)
     return parser
 
@@ -277,9 +337,7 @@ def _main():
 
     log.debug("Executing candpipe...")
 
-    config_file = os.path.join(os.path.dirname(__file__), "config.yaml")
-    with open(config_file, 'r') as yaml_file:
-        config = yaml.safe_load(yaml_file)
+    config = load_default_config()
 
     run_with_args(args, config)
 

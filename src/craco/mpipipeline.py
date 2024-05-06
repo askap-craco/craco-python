@@ -46,6 +46,8 @@ from craco.visblock_accumulator import VisblockAccumulatorStruct
 from craco.candidate_writer import CandidateWriter
 from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
+from craco.mpi_tracefile import MpiTracefile
+from craco.tracing import tracing
 
     
 log = logging.getLogger(__name__)
@@ -1182,7 +1184,6 @@ class PlannerProcessor(Processor):
             count += 1
 
 
-MAX_NCAND_OUT = 8
 
 class BeamCandProcessor(Processor):
     def run(self):
@@ -1190,38 +1191,47 @@ class BeamCandProcessor(Processor):
         rx_comm = app.beam_chain_comm
         tx_comm = app.cand_comm
         cand_buff = MpiCandidateBuffer()
-        out_cand_buff = MpiCandidateBuffer(MAX_NCAND_OUT)
+        out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         iblk = 0
+        from craco.candpipe import candpipe
+        
+        pipe = candpipe.Pipeline(self.pipe_info.beamid, 
+                                 args=None,  # use defaults
+                                 config=None,  # use defaults
+                                 src_dir='.', 
+                                 anti_alias=False)
+        
+        trace_file = MpiTracefile.instance()
+        recv_status = MPI.Status()
+
         while True:
             # async receive as we want to async transmit so the pipeeline
             # isn't slowed by the beam cand processor       
-            t = Timer()     
-            status = rx_comm.Recv(cand_buff.mpi_msg, source=app.BEAMPROC_RANK)
+            t = Timer()
+            rx_comm.Recv(cand_buff.mpi_msg, source=app.BEAMPROC_RANK, status=recv_status)
             t.tick('recv')
-            ncand = status.Get_count()
+            ncand = recv_status.Get_count()
             t.tick('get_count')
             log.info('Got %d candidates in BeamCandProc', ncand)
+            trace_file += tracing.CounterEvent('Candidates', ts=None, args={'count':ncand})
 
-            ncand_out = self.single_beam_process(cand_buff.cands[:ncand])
+            #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
+            short_cands = cand_buff.cands[:ncand]
+
+            out_df = pipe.process_block(short_cands, out_cand_buff.cands)
+            args = {'ncands':len(out_df)}
+            trace_file += tracing.CounterEvent('Candidates', None, args)
+
             t.tick('process')
 
             # gather to everyone - synchronous
             # SEnd MAX_NCAND_OUT per process every time. 
             # Non-existent candiates have -1 as s/n
             
-            tx_comm.Gather([out_cand_buff.cands, out_cand_buff.max_ncand, cand_buff.mpi_dtype], None, root=0)
+            out_cand_buff.gather()
             t.tick('gather')
             iblk += 1
 
-    def single_beam_process(self, cands):
-        # do something more sophisticated. 
-        # for now, find the single largest S/N candidate
-        best = max(cands, lambda c:c['snr'])
-        self.out_cand_buff.cands[0] = best
-        ncand = 1
-        self.out_cand_buff.cands['snr'][ncand:] = -1
-        
-        return ncand
             
 class CandMgrProcessor(Processor):
     def run(self):
@@ -1231,24 +1241,33 @@ class CandMgrProcessor(Processor):
         iblk = 0
         self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
         self.cand_sender = SnoopySender()
-        cands = MpiCandidateBuffer(MAX_NCAND_OUT*nbeams)
+        cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
         while True:
             t = Timer()
-            tx_comm.Gather(cands.mpi_msg, None, root=0) # Come to me my pretties! Mwhahahahahaha!
+            cands.gather()
             t.tick('Gather')
-            self.multi_beam_process(self.cands.cands)
+            self.multi_beam_process(cands.cands)
             t.tick('Multi process')
             iblk += 1
 
     def multi_beam_process(self, cands):
+        '''
+        :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
+        cands['snr'] = -1 for no candidates
+        '''
         cands = cands[cands['snr'] > 0]
-        bestcand = max(cands, lambda c:c['snr'])        
+        maxidx = np.argmax(cands['snr'])
+        bestcand = cands[maxidx]        
         self.cand_writer.update_latency(cands)
         self.cand_writer.write_cands(cands)
+        trace_file = MpiTracefile.instance()
         log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
         if bestcand['snr'] >= self.pipe_info.values.threshold:
             log.critical('Sending candidate %s', bestcand)
             self.cand_sender.send(bestcand)
+            args = {k:bestcand[k] for k in bestcand.dtype.names}
+            trace_file += tracing.InstantEvent('CandidateTrigger', args=args, ts=None, s='g')
+
 
 
 def processor_class_factory(app):                    

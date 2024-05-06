@@ -134,21 +134,89 @@ def test_convert_np_to_df(config):
     df = pipe.convert_np_to_df(cands)
     assert len(df) == len(cands)
 
+def test_load_default_config():
+    assert load_default_config() != None
+
 
 def test_candpipe_block_by_block(config):
     parser = get_parser()
     cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
-    args = parser.parse_args([cand_fname])
-    pipe = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
+    args = parser.parse_args([])
+    beamno = 4
+    pipe = Pipeline(beamno, None, config, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=True)
     cands = load_cands(cand_fname)
 
     #all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
     all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
+    for c in all_clustered_cands:
+        assert isinstance(c, pd.DataFrame)
+
     all_clustered_cands = pd.concat(all_clustered_cands)
     
 
     assert len(all_clustered_cands) >= 1, 'Expected at least 1 candidate '
     assert len(all_clustered_cands) < len(cands), 'Should have been less candidates after pipeline!'
+
+def test_copy_best_cand():
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    cands_np = load_cands(cand_fname)
+    cands_idx = np.argsort(cands_np, order='snr')
+    cands_np_sorted = cands_np[cands_idx[::-1]]
+    N = len(cands_np)
+    beamno = 4
+    pipe = Pipeline(beamno, None, None, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=False)
+    cands_df = pipe.convert_np_to_df(cands_np)
+    cands_df_sorted = cands_df.sort_values(by='snr', ascending=False)
+    NMAX = 8
+    cands_np2 = np.zeros(NMAX, dtype=cands_np.dtype)
+
+    # check if there's more candidates than NMAX it fills everythign
+    assert len(cands_df) > NMAX
+    copy_best_cand(cands_df, cands_np2)
+
+    # because sorting isn't stable, you can't compare them exactly if the SNRs are equal
+    # so we just assert that we got the SNRs right
+    assert np.all(cands_np2['snr'] == cands_np_sorted[:NMAX]['snr'])
+
+    # check if there's less candidates than NMAX it puts -1 in the remainder
+    short_df = cands_df.iloc[:3]
+    copy_best_cand(short_df, cands_np2)
+    assert np.all(cands_np2['snr'][:3] == short_df.sort_values(by='snr', ascending=False)['snr'])
+    assert np.all(cands_np2['snr'][3:] == -1)
+
+    # check if there's none, everything is -1
+    copy_best_cand(short_df.head(0), cands_np2)
+    assert np.all(cands_np2['snr'][3:] == -1)
+
+
+def test_candpipe_block_by_block_np(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    args = parser.parse_args([])
+    beamno = 4
+    pipe = Pipeline(beamno, None, config, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=True)
+    cands = load_cands(cand_fname)
+
+    dout = np.zeros(8, dtype=CandidateWriter.out_dtype)
+
+    #all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
+    all_clustered_cands = [pipe.process_block(cblk, dout) for cblk in cand_blocker(cands)]
+    for iblk, cblk in enumerate(cand_blocker(cands)):
+        cands_df = pipe.process_block(cblk, dout)
+        n = len(cands_df)
+        nout = min(n, len(dout))
+        best_df = cands_df.sort_values(by='snr', ascending=False)
+        if n > 0:
+            print('hello', n)
+        assert np.all(best_df.iloc[:n]['snr'] == dout[:n]['snr'])
+
+        print(iblk, n, dout['snr'])
+        if not np.all(dout[n:]['snr'] == -1):
+            print(iblk, n, dout[n:]['snr'])
+
+        assert np.all(dout[n:]['snr'] == -1)
+
+
         
 
 def _main():

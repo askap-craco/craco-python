@@ -19,7 +19,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class MpiTracefile:
     '''
-    Singletone class that creates a tracefile named by the MPI rank.
+    Singleton class that creates a tracefile named by the MPI rank.
     This can be used to add events.
     A little tricky to work out how to close it, but we'll work that out.
     This is a singleton, so you can log to it from anywhere.
