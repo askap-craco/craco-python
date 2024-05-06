@@ -100,9 +100,9 @@ class CracoSchedBlock:
         for scan in self.craco_scans:
             try:
                 scandir = ScanDir(sbid=self.sbid, scan=scan)
-            except NotImplementedError:
+                uvfits_exists = scandir.uvfits_paths_exists
+            except:
                 continue # no rank file found... aborted
-            uvfits_exists = scandir.uvfits_paths_exists
             if len(uvfits_exists) == 0: continue
             size += os.path.getsize(uvfits_exists[0]) / 1024 / 1024 / 1024
         return size
@@ -842,6 +842,7 @@ def get_db_max_sbid(conn=None, cur=None):
 
     return maxsbid
 
+# for real time, we need to rewrite the following function without metaflag
 def run_observation_update(
     latestsbid, defaultsbid=None, waittime=60, 
     maxtry=3
