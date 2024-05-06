@@ -694,7 +694,7 @@ def fast_preprocess_multi_mean_single_norm(input_data, bl_weights, fixed_freq_we
 
 
 @njit(parallel=True, cache=True)
-def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms=None, sky_sub = False):
+def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms=None, sky_sub = False, global_norm = True):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
     Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
@@ -730,6 +730,7 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
     reset_scales: bool, whether to keep on accumulating Ai and Qi values across blocks, or reset to zero at the start of this block
                     Note -- reset_scales flag should set to true when this function is called for the first time, or we need to ensure that
                     Ai, Qi and N are initialised properly outside this function.
+    global_norm: bool, whether to compute the rms normalisation factor per baseline-channel, or per block globally. True means globally.
     '''
     #TODO -- think about whether changing the order of the input_block could speed things up a bit more
     #TODO -- include the computation of CAS and the masks inside this function's first pass over the data
@@ -821,25 +822,37 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
             return
     
         means = s1 / N
-        global_N = N.sum()
-        global_s2_real = s2[0].sum() + (N * means.real**2).sum() - 2 * (means.real * s1.real).sum()
-        global_s2_imag = s2[1].sum() + (N * means.imag**2).sum() - 2 * (means.imag * s1.imag).sum()
+        if global_norm:
+            global_N = N.sum()
+            global_s2_real = s2[0].sum() + (N * means.real**2).sum() - 2 * (means.real * s1.real).sum()
+            global_s2_imag = s2[1].sum() + (N * means.imag**2).sum() - 2 * (means.imag * s1.imag).sum()
 
-        rms_real = np.sqrt(global_N * global_s2_real) / global_N
-        rms_imag = np.sqrt(global_N * global_s2_imag) / global_N
-        rms_val = np.sqrt(rms_real**2 + rms_imag**2) / np.sqrt(2)
+            rms_real = np.sqrt(global_N * global_s2_real) / global_N
+            rms_imag = np.sqrt(global_N * global_s2_imag) / global_N
+            rms_val = np.sqrt(rms_real**2 + rms_imag**2) / np.sqrt(2)
 
-        if rms_val == 0:
-            multiplier = 1
-        else:
-            multiplier = target_input_rms / rms_val
-    
+            if rms_val == 0:
+                multiplier = 1
+            else:
+                multiplier = target_rms_value / rms_val
+            
         for i_bl in range(nbl):
             if bl_weights[i_bl] == 0:
                 continue
             for i_f in range(nf):    
                 if fixed_freq_weights[i_f] == 0:
                     continue            
+
+                if not global_norm:
+                    rms_real = np.sqrt(N[i_bl, i_f] * s2[0, i_bl, i_f] - s1[i_bl, i_f].real**2) / N[i_bl, i_f]
+                    rms_imag = np.sqrt(N[i_bl, i_f] * s2[1, i_bl, i_f] - s1[i_bl, i_f].imag**2) / N[i_bl, i_f]
+                    rms_val = np.sqrt(rms_real**2 + rms_imag**2) / np.sqrt(2)
+
+                    if rms_val == 0:
+                        multiplier = 1
+                    else:
+                        multiplier = target_rms_value / rms_val
+            
 
                 calval = cal_data[i_bl, i_f]
                 #Loop through the data again and apply the various rescale factors and the cal soln
@@ -862,35 +875,29 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
                             output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - means[i_bl, i_f]) * multiplier + means[i_bl, i_f] / calval
                 
 
-
-
 class FastPreprocess:
 
     #TODO -- add the capacity to write filterbank out for the masked values
 
-    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, sky_sub = True, single_norm = False):
+    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, sky_sub = True, single_norm = False, global_norm = True):
         self.cal_soln_array = self.make_averaged_cal_sol(cal_soln_array)
         self.dflag_nt = values.dflag_tblk
         self.dflag_fradius = values.dflag_fradius
         self.dflag_fthreshold = values.dflag_cas_threshold
         self.fixed_freq_weights = fixed_freq_weights
         assert len(fixed_freq_weights) == blk_shape[1]
+        self.global_norm = global_norm
         self.target_input_rms = values.target_input_rms
         self.sky_sub = sky_sub
 
         self.blk_shape = blk_shape
         nbl, nf, nt = blk_shape
+        self.s1 = np.zeros((nbl, nf), dtype = np.complex128)
+        self.s2 = np.zeros((2, nbl, nf), dtype = np.float64)
+        self.N = np.zeros((nbl, nf), dtype = np.int32)
+
         self.cas_block = np.zeros((nf, nt), dtype=np.float32)
         self.crs_block = np.zeros((nf, nt), dtype=np.float32)
-        self.single_norm = single_norm
-        if single_norm:
-            self.Ai = np.zeros(1, dtype=np.complex64)
-            self.Qi = np.zeros(2, dtype=np.float64)
-            self.N = np.ones(1, dtype=np.int32)
-        else:
-            self.Ai = np.zeros((nbl, nf), dtype=np.complex64)
-            self.Qi = np.zeros((nbl, nf), dtype=np.complex128)
-            self.N = np.ones((nbl, nf), dtype=np.int16)
 
         self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
@@ -917,8 +924,6 @@ class FastPreprocess:
             return cal_soln_array.mean(axis=2).filled().squeeze()
         else:
             return cal_soln_array.filled().squeeze()
-
-
 
     def prepare_weights_and_block_from_masked_array(self, input_block):
         '''
@@ -977,32 +982,21 @@ class FastPreprocess:
                                         tf_weights=input_tf_weights,
                                         freq_radius=self.dflag_fradius,
                                         freq_threshold=self.dflag_fthreshold)
-        if not self.single_norm:
-            fast_preprocess(input_data=input_data,
+        
+        fast_preprocess_sos(input_data=input_data,
                             bl_weights=bl_weights,
                             fixed_freq_weights=self.fixed_freq_weights,
                             input_tf_weights=input_tf_weights,
                             output_buf=self.output_buf,
                             isubblock=0,
-                            Ai=self.Ai,
-                            Qi=self.Qi,
+                            s1 = self.s1,
+                            s2 = self.s2,
                             N=self.N,
                             calsoln_data=self.cal_soln_array,
                             target_input_rms=self.target_input_rms,
-                            sky_sub=self.sky_sub)
-        else:
-            fast_preprocess_single_norm(input_data=input_data,
-                            bl_weights=bl_weights,
-                            fixed_freq_weights=self.fixed_freq_weights,
-                            input_tf_weights=input_tf_weights,
-                            output_buf=self.output_buf,
-                            isubblock=0,
-                            Ai=self.Ai,
-                            Qi=self.Qi,
-                            N=self.N,
-                            calsoln_data=self.cal_soln_array,
-                            target_input_rms=self.target_input_rms,
-                            sky_sub=self.sky_sub)
+                            sky_sub=self.sky_sub,
+                            global_norm=self.global_norm)
+
 
 
 class Calibrate:

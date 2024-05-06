@@ -141,12 +141,6 @@ calsoln_data = cal.data
 calsoln_mask = cal.mask
 
 
-
-def notest_calibration_equality():
-    original_calibrated_data = original_apply_cal(calsoln.solarray, block0)
-    fast_calibrated_data = fast_preprocess(input_block, input_mask, global_output_buf, isubblock, Ai, Qi, N, calsoln_data, calsoln_mask, cas, crs, cas_N, target_input_rms=None, sky_sub=False, reset_scales=True)
-
-    assert np.allclose(original_calibrated_data, fast_calibrated_data)
     
 def notest_fast_preprocess_single_norm_with_zero():
     input_data = np.zeros_like(global_input_data, dtype=np.complex64)
