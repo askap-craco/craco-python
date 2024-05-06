@@ -32,8 +32,13 @@ import logging
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-def load_config(config="database.ini", section="postgresql"):
+def load_config(config=None, section="postgresql"):
     parser = ConfigParser()
+
+    ### check if config file exists - otherwise use the filepath in environment variable
+    if config is None:
+        config = os.environ.get("CRACO_DATABASE_CONFIG_FILE")
+        if config is None: config = "database.ini"
     parser.read(config)
 
     if not parser.has_section(section):
