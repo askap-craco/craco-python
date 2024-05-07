@@ -61,6 +61,43 @@ def test_candpipe_runs_anti_alias(config):
     assert check_identical(cands, example_cands, keyname='ALIAS_name') == True, f'Missing candidates'
     assert check_identical(example_cands, cands, keyname='ALIAS_name') == True, f'Extra candidates'
 
+def test_candpipe_runs_anti_alias_nofile(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/alias/candidates.b25.txt'
+    args = parser.parse_args([cand_fname, '--verbose'])
+    beam=25
+    pipe = Pipeline(beam, args, config, src_dir=None, anti_alias=True)
+    pipe2 = Pipeline(cand_fname, args, config, src_dir=None, anti_alias=True)
+
+    hdr = fits.getheader('testdata/candpipe/alias/psf.beam25.iblk0.fits')
+    pipe.set_current_psf(0,hdr)
+    assert pipe.psf_header == pipe2.psf_header
+    assert pipe.get_current_fov() == pipe2.get_current_fov()
+    assert len(pipe.steps) == 5 #check its actually runnign the anti aliasing
+    input_cands = load_cands(cand_fname, fmt='pandas')
+    cands = pipe.process_block(input_cands)
+
+    check_steps_identical(pipe, pipe2, input_cands)
+    # Yuanming writes something that in the end does
+    # example_cands = pd.read_csv('testdata/candpipe/alias/SB61585.no_alias_filtering.candidates.b25.txt.uniq.csv')
+    example_cands = pd.read_csv('testdata/candpipe/alias/candidates.b25.txt.uniq.csv')
+    assert check_identical(cands, example_cands, keyname='ALIAS_name') == True, f'Missing candidates'
+    assert check_identical(example_cands, cands, keyname='ALIAS_name') == True, f'Extra candidates'
+
+def check_steps_identical(pipe, pipe2, input_cands):
+    din1 = input_cands
+    din2 = input_cands
+
+    # Check steps identical. For debugging.
+    for s1,s2 in zip(pipe.steps, pipe2.steps):
+        dout1 = s1(pipe, din1)
+        dout2 = s2(pipe2, din2)
+        assert len(dout1) == len(dout2)
+        assert dout1.equals(dout2)
+        din1 = dout1
+        din2 = dout2
+
+
 
 
 def check_identical(data1, data2,  keyname='PSR_name'):

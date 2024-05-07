@@ -101,7 +101,7 @@ class Step(ProcessingStep):
         ### reset the index just in case...
         data = data.reset_index(drop=True)
 
-        if os.path.exists(self.pipeline.psf_fname):
+        if self.pipeline.anti_alias:
 
             #>>>>>>
             # test for time-dependent cluster
@@ -129,11 +129,9 @@ class Step(ProcessingStep):
         rescaled_data, reference_eps_param = self.rescale_data(data, self.pipeline.config['eps'])
 
 
-        if os.path.exists(self.pipeline.psf_fname):
-            #>>>>>>>
+        if self.pipeline.anti_alias:
             data['total_sample_middle'] = data['total_sample'].copy()
-            data['total_sample'] = save_ts
-            #<<<<<<<
+            data['total_sample'] = save_ts            
 
         cls = DBSCAN(eps=reference_eps_param, 
                      min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
