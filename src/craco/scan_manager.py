@@ -41,18 +41,15 @@ class ScanManager:
         if ant_numbers is None:
             ant_numbers = np.arange(NANT) + 1
 
-        ant_mask = np.zeros(NANT, dtype=bool)
-        ant_mask[ant_numbers-1] = True
-        
         self.ant_numbers = ant_numbers
-        self.ant_mask = ant_mask
         self.last_meta = collections.deque(maxlen=nback)
         self.running = False
         self._start_scan_metadata = None
         self._start_scan_mfile = None
         self.nback = nback
-        self._ant_mask = np.ones(NANT, dtype=bool) if ant_mask is None else ant_mask.copy()
-        assert len(self._ant_mask) == NANT              
+        self._ant_mask = np.zeros(NANT, dtype=bool)
+        assert len(self._ant_mask) == NANT        
+        self._ant_mask[ant_numbers-1] = True # True is usable      
         self._frac_onsource = float(frac_onsource)
         assert 0 < self._frac_onsource <= 1,' Frac_onsource has to be in (0, 1.0]'
         
@@ -73,7 +70,11 @@ class ScanManager:
         sbid_unchanged = all([s['sbid'] == d['sbid'] for s in mlist])
         scan_unchanged  = all([s['scan_id'] == d['scan_id'] for s in mlist])
         mfile = MetadataFile(list(mlist))
-        flags_unchanged = np.all(mfile.anyflag[np.newaxis,:] == mfile.anyflag[-1,])
+        
+        flags_changed = mfile.anyflag[:,self._ant_mask] != mfile.anyflag[-1,self._ant_mask]
+        flagged_antennas = np.nonzero(mfile.anyflag[-1,:])[0] + 1
+        changed_antennas = np.nonzero(flags_changed == True)[0] + 1
+        flags_unchanged = np.all(mfile.anyflag[:,self._ant_mask] == mfile.anyflag[-1,self._ant_mask])
         scan_id =  mlist[-1]['scan_id']
         scan_ok = scan_id >= 0
 
@@ -100,8 +101,8 @@ class ScanManager:
             else:
                 pass # Waiting for things to stabilise
 
-        log.debug('Got %d/%d good ants. Frac OK=%0.1fflags ok? %s all_unchanged=%s ok to run? %s running? %s', \
-                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run, self.running)
+        log.debug('Got %d/%d good ants. Frac OK=%0.2f flags ok? %s all_unchanged=%s ok to run? %s running? %s changed antennas=%s bad antennas=%s', \
+                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run, self.running, changed_antennas, flagged_antennas)
         
         return self.running
 
