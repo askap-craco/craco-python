@@ -15,6 +15,7 @@ import atexit
 import re
 import datetime
 import numpy as np
+from craft.cmdline import strrange
 
 from craco.prep_scan import ScanPrep, make_scan_directories
 from craco.scan_manager import ScanManager,NANT
@@ -277,6 +278,11 @@ class MetadataObsmanDriver:
         self.obsman = obsman
         self.sbid = None
         self.scan_running = False
+
+        values = self.obsman.values        
+        self.ignore_ants_1based = np.array(values.ignore_ants)
+        self.scan_manager = None
+        
         self.sb_service = get_service_object(comm,
                     "SchedulingBlockService@DataServiceAdapter",
                     iceint.schedblock.ISchedulingBlockServicePrx)
@@ -288,24 +294,15 @@ class MetadataObsmanDriver:
         '''
         log.info('SB STATE CHANGED sbid=%s state=%s updated=%s old_state=%s', sbid, state, updated, old_state)
 
-
         if state == ObsState.EXECUTING:
             self.sbid = sbid
             # pick up antenna list from observation variables
-            for retry in range(100):               
-                self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
-                # for some reason obs variables are not updated when the thing starts. Grrr.
-                if 'schedblock.antennas' in self.obs_variables:
-                    break
-                time.sleep(0.5)
 
-            self.ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
-            self.scan_manager = ScanManager(self.ant_numbers, frac_onsource=self.obsman.values.frac_onsource )
-            log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
         elif sbid == self.sbid:
             assert state != ObsState.EXECUTING
             # It must have gone out of executing
             self.sbid = None
+            self.scan_manager = None
 
     def publish(self, pub_data, current=None):
         '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher
@@ -313,11 +310,15 @@ class MetadataObsmanDriver:
         :data: is a directionary whose contents is defined here: https://jira.csiro.au/browse/ASKAPTOS-3320
 
         '''
-        if self.sbid is None:
+        if self.sbid is None:            
             return
 
+        mgr = self.get_scan_manager()
+        if mgr is None:
+            return
+                            
         d = metadata_to_dict(pub_data, self.sbid)
-        mgr = self.scan_manager
+
         next_scan_running = mgr.push_data(d)
         self.scan_running = self.obsman.poll_process()
         if self.scan_running:
@@ -338,6 +339,32 @@ class MetadataObsmanDriver:
     def close(self):
         self.obsman.terminate_process()
 
+    def get_scan_manager(self):
+        sbid = self.sbid
+        log.info('In get scan maanger %s sbid=%d', self.scan_manager, sbid)
+        if self.scan_manager is not None:
+            return self.scan_manager
+        
+        for retry in range(3):               
+            self.obs_variables = ParameterSet(self.sb_service.getObsVariables(sbid, ''))
+            # for some reason obs variables are not updated when the thing starts. Grrr.
+            if 'schedblock.antennas' in self.obs_variables:
+                break
+            log.warning('No antennas for schedblock %d. sleeping.', sbid)
+            time.sleep(1)
+
+        if 'schedblock.antennas' in self.obs_variables:           
+            orig_ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
+            self.ant_numbers = np.setdiff1d(orig_ant_numbers, self.ignore_ants_1based)
+            
+            self.scan_manager = ScanManager(self.ant_numbers, frac_onsource=self.obsman.values.frac_onsource )
+            log.info('%d/%d active antennas %s', len(self.ant_numbers), NANT, ','.join(self.ant_numbers.astype('str')))
+        else:
+            log.warning('No antennas for schedblock %d. Waiting for next smetadata.', sbid)
+            self.scan_manager = None
+
+        log.info('END get scan maanger %s sbid=%d', self.scan_manager, sbid)
+        return self.scan_manager
 
 
 def _main():
@@ -351,6 +378,7 @@ def _main():
     parser.add_argument('--force-start', action='store_true', help='Start even if metadata says not to. Useful for testing')
     parser.add_argument('--driver', choices=('meta','epics'), default='meta', help='DRive with epics or metadata')
     parser.add_argument('--frac-onsource', default=0.9, type=float, help='Fraction of antennas that need to be on source to start a scan')
+    parser.add_argument('--ignore-ants', type=strrange, default='', help='List of antennas to remove from the list of available antenans')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
