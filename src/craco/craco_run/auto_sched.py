@@ -24,9 +24,10 @@ import re
 import os
 import pdb
 
+
 from slack_sdk import WebClient
 
-from metaflag import MetaManager
+from .metaflag import MetaManager
 
 import logging
 log = logging.getLogger(__name__)
