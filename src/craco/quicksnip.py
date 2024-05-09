@@ -35,30 +35,28 @@ def snip(infile, outfile, startidx, nblk, metadata_file=None, start_mjd = None, 
                 gcount += dout.size
                 tbytes += dout.size*dout.dtype.itemsize
         except:
-            log.exception('Error writing file')
+            log.exception('Error writing file. Attempting close')
         finally:
             hdr['GCOUNT']  = gcount
             fout.seek(0,0)
             fout.write(bytes(hdr.tostring(), 'utf-8'))
             fout.flush()
             log.debug('Finished writing %s. Gcount=%s', outfile, gcount)
-        
-    fixuvfits.fix_length(outfile)
-    inhdu = fits.open(infile)
-    outhdu = fits.open(outfile, 'append')
-    for it, table in enumerate(inhdu[1:]):
-        row = table.data[0]
-        if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UNKNOWN':
-            row['SOURCE'] = inf.target_name
-            row['RAEPO'] = inf.target_skycoord.ra.deg
-            row['DECEPO'] = inf.target_skycoord.dec.deg
-            log.info('Replaced UNKNOWN source with %s %s', inf.target_name, inf.target_skycoord.to_string('hmsdms'))
-        outhdu.append(table)
-        
-    outhdu.flush()
-
-    outhdu.close()
-    inhdu.close()
+            fixuvfits.fix_length(outfile)
+            inhdu = fits.open(infile)
+            outhdu = fits.open(outfile, 'append')
+            for it, table in enumerate(inhdu[1:]):
+                row = table.data[0]
+                if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UNKNOWN':
+                    row['SOURCE'] = inf.target_name
+                    row['RAEPO'] = inf.target_skycoord.ra.deg
+                    row['DECEPO'] = inf.target_skycoord.dec.deg
+                    log.info('Replaced UNKNOWN source with %s %s', inf.target_name, inf.target_skycoord.to_string('hmsdms'))
+                outhdu.append(table)
+                
+            outhdu.flush()
+            outhdu.close()
+            inhdu.close()
     
 
 
