@@ -45,7 +45,7 @@ class Step(ProcessingStep):
         '''
         super(Step, self).__init__(*args, **kwargs)
         p = self.pipeline
-        self.pipeline.wcs_info = self.get_wcs()
+        
         # You might want to use some of these attributes
 
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s psf=%s arguments=%s',
@@ -102,17 +102,6 @@ class Step(ProcessingStep):
         #    outd = outd[outd['snr'] > self.pipeline.args.cluster_min_sn]
         
         return outd
-
-
-    def get_wcs(self):
-        # read the wcs fitsfile 
-        fitsfile = self.pipeline.psf_fname
-
-        # Open the FITS file and get the header
-        with fits.open(fitsfile) as hdul:
-            wcs_info = WCS(hdul[0].header)
-
-        return wcs_info
 
 
     def get_source_coords(self, ra, dec):

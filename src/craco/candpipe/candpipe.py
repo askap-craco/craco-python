@@ -131,7 +131,7 @@ class Pipeline:
                 src_dir = os.path.dirname(self.cand_fname)
 
         # self.beamno = int(candfile.replace('candidates.txtb',''))
-        assert 0<= beamno < 36
+        assert 0<= self.beamno < 36
         assert args is not None
         assert config is not None
         self.config = config
@@ -148,9 +148,15 @@ class Pipeline:
         if anti_alias is None:
             anti_alias = psf_exists
 
+        self.anti_alias = anti_alias
+
         if anti_alias:
-            assert psf_exists
-            self.set_current_psf(0)
+            if psf_exists:
+                self.load_psf_from_file(0)
+            else:
+                pass
+                # hope that someone calls set_current_psf()
+
             self.steps = [
                 steps.cluster.Step(self),
                 steps.time_space_filter.Step(self), 
@@ -188,14 +194,19 @@ class Pipeline:
 
         return full_path
 
-    def set_current_psf(self, iblk):
-        psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk{iblk:d}.fits')
-        hdr = fits.getheader(psf_fname)
+    def set_current_psf(self, iblk, hdr):        
         self.psf_header = hdr
         self.curr_wcs = WCS(hdr)
-        self.curr_psf_file = psf_fname
         self.curr_psf_iblk = iblk
+        
         return hdr
+
+    def load_psf_from_file(self, iblk):
+        psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk{iblk:d}.fits')
+        hdr = fits.getheader(psf_fname)
+        self.curr_psf_file = psf_fname
+        self.set_current_psf(iblk, hdr)
+
 
     def create_dir(self):
         outdir = self.args.outdir
@@ -267,7 +278,7 @@ class Pipeline:
             # We'll only load the PSF frm the first candidate, if possible.
             # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
             try:
-                self.set_current_psf(iblk0)
+                self.load_psf_from_file(iblk0)
                 log.info('Loaded new PSF for iblk=%d', iblk0)
             except FileNotFoundError: # No PSF available. Oh well. maybe next year.
                 pass
@@ -313,7 +324,7 @@ def get_parser():
 def run_with_args(args, config):
     for f in args.files:
         try:
-            p = Pipeline(f, args, config)
+            p = Pipeline(f, args, config, anti_alias=None)
             p.run()
         except:
             log.error(traceback.format_exc())

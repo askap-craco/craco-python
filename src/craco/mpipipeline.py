@@ -1179,6 +1179,8 @@ class PlannerProcessor(Processor):
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
             # To not just fill buffers for ever, we'll need to wait for an ack from the beam
             comm.send(data, dest=0)
+            wcs_data = {'count':count, 'iblk':iblk, 'hdr':plan.wcs.to_header()}
+            comm.send(wcs_data, dest=self.pipe_info.mpi_app.CANDPROC_RANK)
             log.info('Plan sent count=%d iblk=%d', count, iblk)
 
             count += 1
@@ -1187,32 +1189,51 @@ class PlannerProcessor(Processor):
 
 class BeamCandProcessor(Processor):
     def run(self):
+        t = Timer()
         app = self.pipe_info.mpi_app
         rx_comm = app.beam_chain_comm
         tx_comm = app.cand_comm
         cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
-        iblk = 0
         from craco.candpipe import candpipe
         
         pipe = candpipe.Pipeline(self.pipe_info.beamid, 
                                  args=None,  # use defaults
                                  config=None,  # use defaults
                                  src_dir='.', 
-                                 anti_alias=False)
+                                 anti_alias=True)
+        t.tick('Make pipeline')
+        self.pipe = pipe
         
         trace_file = MpiTracefile.instance()
+        # blocking wait for wcs data
+        wcs_data = rx_comm.recv(source=app.PLANNER_RANK)
+        self.iblk = 0
+        t.tick('RX first WCS')
+        self.new_wcs = wcs_data
+        self.check_wcs()
+        
+        # make request for next wcs data
+        wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
+        
 
         while True:
             # async receive as we want to async transmit so the pipeeline
             # isn't slowed by the beam cand processor       
             t = Timer()
-            ncand = cand_buff.recv()            
+            wcs_received, new_wcs = wcs_req.test()
+            if wcs_received:
+                self.new_wcs = new_wcs
+                wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
+                t.tick('RX wcs')
+            
+            ncand = cand_buff.recv()
             t.tick('get_count')
             log.info('Got %d candidates in BeamCandProc', ncand)
             #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
             short_cands = cand_buff.cands[:ncand]
 
+            self.check_wcs()
             out_df = pipe.process_block(short_cands, out_cand_buff.cands)
             maxsnr = out_cand_buff.cands['snr'].max()
             trace_file += tracing.CounterEvent('Candidates', ts=None, args={'ncandin':ncand, 'ncandout': len(out_df), 'maxsnr':maxsnr})
@@ -1225,7 +1246,17 @@ class BeamCandProcessor(Processor):
             
             out_cand_buff.gather()
             t.tick('gather')
-            iblk += 1
+            self.iblk += 1
+
+    def set_wcs(self, wcs_data):        
+        hdr = wcs_data['hdr']
+        iblk = wcs_data['iblk']
+        self.pipe.set_current_psf(iblk,hdr)
+
+    def check_wcs(self):
+        if self.iblk == self.new_wcs['iblk']:
+            self.set_wcs(self.new_wcs)
+        
 
             
 class CandMgrProcessor(Processor):
@@ -1260,7 +1291,8 @@ class CandMgrProcessor(Processor):
         trace_file = MpiTracefile.instance()
         log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
         latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
-        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands), 'latency':latency},ts=None)
+        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
+        trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
         if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
             log.critical('Sending candidate %s', bestcand)
             self.cand_sender.send(bestcand)
