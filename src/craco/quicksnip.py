@@ -28,18 +28,20 @@ def snip(infile, outfile, startidx, nblk, metadata_file=None, start_mjd = None, 
         gcount = 0
         tbytes = len(hdrb)
         assert len(hdrb) % 2880 == 0
-        log.debug('Opened %s to %s start=%s nblk=%s hdr=%s vissize=%s nsamp=%s', infile, outfile, startidx, nblk, len(hdrb), inf.vis.size, inf.nsamps)
-        for iblk, dout in enumerate(inf.fast_raw_blocks(istart=startidx, nsamp=nblk, nt=1, raw_date=True)):
-            dout.tofile(fout)
-            gcount += dout.size
-            tbytes += dout.size*dout.dtype.itemsize
-
-
-        hdr['GCOUNT']  = gcount
-        fout.seek(0,0)
-        fout.write(bytes(hdr.tostring(), 'utf-8'))
-        fout.flush()
-        log.debug('Finished writing %s. Gcount=%s', outfile, gcount)
+        try:
+            log.debug('Opened %s to %s start=%s nblk=%s hdr=%s vissize=%s nsamp=%s', infile, outfile, startidx, nblk, len(hdrb), inf.vis.size, inf.nsamps)
+            for iblk, dout in enumerate(inf.fast_raw_blocks(istart=startidx, nsamp=nblk, nt=1, raw_date=True)):
+                dout.tofile(fout)
+                gcount += dout.size
+                tbytes += dout.size*dout.dtype.itemsize
+        except:
+            log.exception('Error writing file')
+        finally:
+            hdr['GCOUNT']  = gcount
+            fout.seek(0,0)
+            fout.write(bytes(hdr.tostring(), 'utf-8'))
+            fout.flush()
+            log.debug('Finished writing %s. Gcount=%s', outfile, gcount)
         
     fixuvfits.fix_length(outfile)
     inhdu = fits.open(infile)
