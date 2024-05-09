@@ -716,7 +716,15 @@ class CalFinder:
         self.cur = self.conn.cursor()
         self.engine = get_psql_engine()
 
+        self.__update_database()
         self.__get_sbid_property()
+
+    def __update_database(self):
+        self.cur.execute(f"""select sbid where sbid={self.sbid}""")
+        res = self.cur.fetchall()
+        if len(res) == 0:
+            log.info(f"no sbid information found for sbid{self.sbid}... will query the aces survey to update...")
+            push_sbid_observation(self.sbid)
 
     def __get_sbid_property(self):
         self.cur.execute(f"""select central_freq,footprint,weightsched,start_time,flagant from observation
@@ -768,6 +776,13 @@ ORDER BY calib_rank DESC, SBID DESC
             if flagcheck: return calsbid
         return None
 
+    def get_cal_path(self, timethreshold=1.5):
+        calsbid, calstatus = self.query_calib_table(timethreshold=timethreshold)
+        calpath = None
+        if calsbid is not None and calstatus == 0: #status 0 means there is calibration
+            # calsbid is a 5 digit sbid
+            calpath = f"/CRACO/DATA_00/craco/calibration/SB{calsbid:0>6}"
+        return calpath
 
 ######## initial update to the observation database #######
 def _update_craco_sched_status(craco_sched_info, conn=None, cur=None):
@@ -1216,3 +1231,126 @@ def get_recent_finish_sbid(service=None):
     except Exception as error:
         log.error(f"cannot load maxsbid - error message {error}")
         return None
+
+
+### for realtime operation
+class CalJob:
+
+    CAL_TS_ONFINISH = "/CRACO/SOFTWARE/craco/craftop/softwares/craco_run/ts_calibration_call.py"
+    CAL_RUN_TS_SOCKET = "/data/craco/craco/tmpdir/queues/cal"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    def __init__(self, scandir):
+        # database related
+        self.conn = get_psql_connect()
+        self.cur = self.conn.cursor()
+        self.engine = get_psql_engine()
+
+        self.__parse_scan(scandir)
+        self.scandir = scandir
+
+    def __parse_scan(self, scandir):
+        # this is an example of scandir
+        # /data/craco/craco/SB062220/scans/00/20240506160118/
+        scanlst = scandir.strip("/").split("/")
+        self.sbid = int(scanlst[3][2:]) # 62220
+        self.scan = "/".join(scanlst[-2:]) # 00/20240506160118
+
+    @property
+    def _calib_is_running(self):
+        """
+        query the database to check if there is a calibration run running
+        """
+        self.cur.execute(f"""select sbid, status from calibration where sbid={self.sbid}""")
+        query_result = self.cur.fetchall()
+
+        if len(query_result) == 0: 
+            running = False # nothing in the database... nothing has been ran...
+        else:
+            _, status = query_result[0]
+            if status == 1: running = True
+            else: running = False
+        return running
+
+    @property
+    def _calib_is_done(self):
+        """
+        query the database to check if the calibration has finished...
+        theoretically, we will not use this one
+        """
+        self.cur.execute(f"""select sbid, status from calibration where sbid={self.sbid}""")
+        query_result = self.cur.fetchall()
+
+        if len(query_result) == 0: 
+            done = False # nothing in the database... nothing has been ran...
+        else:
+            _, status = query_result[0]
+            if status == 0: done = True
+            else: done = False
+        return done
+
+    def tsp_calib(self):
+        log.info(f"queuing up calibration solution for {self.scandir}")
+        environment = {
+            "TS_SOCKET": self.CAL_RUN_TS_SOCKET,
+            "TS_ONFINISH": self.CAL_TS_ONFINISH,
+            "TMPDIR": self.TMPDIR,
+        }
+        ecopy = os.environ.copy()
+        ecopy.update(environment)
+
+        cmd = f"""mpi_run_beam.sh {self.scandir} `which mpi_do_calibrate_rt.sh`"""
+
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+
+    def copy_sol(self):
+        log.info(f"copying calibration to head node...")
+        environment = {
+            "TS_SOCKET": self.CAL_RUN_TS_SOCKET,
+            "TS_ONFINISH": self.CAL_TS_ONFINISH,
+            "TMPDIR": self.TMPDIR,
+        }
+        ecopy = os.environ.copy()
+        ecopy.update(environment)
+
+        copycal_path = "/CRACO/SOFTWARE/craco/craftop/softwares/craco_run/copycal.py"
+        cpcmd = f"{copycal_path} -cal {self.sbid}"
+
+        subprocess.run(
+            [f"tsp {cpcmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+
+    def run(self):
+        """
+        main function to queue everything
+        """
+        if self._calib_is_running:
+            log.info("there is currently a calibration process running for this sbid...")
+            return
+        
+        if self._calib_is_done:
+            log.info("there is already a good calibration for this sbid...")
+            return
+
+        # in this case, we need to create a calibration
+        self.tsp_calib()
+        self.copy_sol()
+
+# note - for calibration
+# mpi_run_beam.sh /data/craco/craco/SB062220/scans/00/20240506172535 /CRACO/SOFTWARE/craco/craftop/softwares/miniconda3/envs/craco/bin/mpi_do_calibrate.sh --start-mjd 0
+# next step have a new mpi_do_calibrate_rt.sh
+
+def queue_calibration(scandir):
+    """
+    queue the calibration as a tsp job
+    the whole structure is similar to what we have in run_calib.py previously
+    """
+    caljob = CalJob(scandir)
+    caljob.run()
+
+
+    
