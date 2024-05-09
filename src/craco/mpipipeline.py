@@ -1291,7 +1291,8 @@ class CandMgrProcessor(Processor):
         trace_file = MpiTracefile.instance()
         log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
         latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
-        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands), 'latency':latency},ts=None)
+        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
+        trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
         if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
             log.critical('Sending candidate %s', bestcand)
             self.cand_sender.send(bestcand)
