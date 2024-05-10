@@ -1238,7 +1238,7 @@ class PipelineWrapper:
         self.iblk += 1
 
     def close(self):
-        candout = self.candoutc
+        candout = self.candout
         pc_filterbank = self.pc_filterbank
         mask_fil_writer = self.mask_fil_writer
         cas_fil_writer = self.cas_fil_writer
