@@ -81,11 +81,12 @@ def frame_id_iter(i, fid0):
             nlost_curr = curr_frameid - expected_frame_id
             log.info(f'MISS expected frame_id={expected_frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={nlost_frames} curr-expected={nlost_curr} BAT curr-last={curr_bat - last_bat} fid0={fid0}')
             ts = trace_file.now_ts()
-            args = {'lost_frames':nlost_frames, 
-                    'curr_minus_expected':nlost_curr, 
-                    'expected_frame_id':expected_frame_id, 
-                    'current_frameid':curr_frameid,
-                    'last_frameid':last_frameid}
+            #args = {'lost_frames':nlost_frames, 
+            #        'curr_minus_expected':nlost_curr, 
+             #       'expected_frame_id':expected_frame_id, 
+             #       'current_frameid':curr_frameid,
+              #      'last_frameid':last_frameid}
+            args = {'lost_frames':nlost_frames}
             trace_file += tracing.InstantEvent('PacketLoss', ts)
             trace_file += tracing.CounterEvent('PacketLoss', ts, args)
             b = None
