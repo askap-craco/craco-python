@@ -695,7 +695,7 @@ def fast_preprocess_multi_mean_single_norm(input_data, bl_weights, fixed_freq_we
 
 
 @njit(parallel=False, cache=True)
-def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms=None, sky_sub = False, global_norm = True):
+def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, means, s1, s2, N, calsoln_data, target_input_rms=None, sky_sub = False, global_norm = True):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
     Measures the input levels, calculates cas/crs and optionally rescales and does the sky subtraction.
@@ -822,7 +822,9 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
         if np.all(s2 == 0):
             return
     
-        means = s1 / N
+        nonzeros = N > 0
+        means[nonzeros] = s1[nonzeros] / N[nonzeros]
+
         if global_norm:
             global_N = N.sum()
             global_s2_real = s2[0].sum() + (N * means.real**2).sum() - 2 * (means.real * s1.real).sum()
@@ -887,7 +889,7 @@ def create_tabs(vis_array, phasor_array, tab_array):
 
     tab_array[:] = np.sum((vis_array[None, ...] * phasor_array[..., None]).real, axis=1)
 
-@njit(parallel=True, cache=True)
+@njit(parallel=False, cache=True)
 def create_tabs_numba(vis_array, phasor_array, tab_array):
     '''
     vis_array - (nbl, nf, nt), Input visibilities
@@ -997,6 +999,7 @@ class FastPreprocess:
 
         self.blk_shape = blk_shape
         nbl, nf, nt = blk_shape
+        self.interim_means = np.zeros((nbl, nf), dtype=np.complex128)
         self.s1 = np.zeros((nbl, nf), dtype = np.complex128)
         self.s2 = np.zeros((2, nbl, nf), dtype = np.float64)
         self.N = np.zeros((nbl, nf), dtype = np.int32)
@@ -1122,6 +1125,7 @@ class FastPreprocess:
                             input_tf_weights=input_tf_weights,
                             output_buf=self.output_buf,
                             isubblock=0,
+                            means=self.interim_means,
                             s1 = self.s1,
                             s2 = self.s2,
                             N=self.N,
