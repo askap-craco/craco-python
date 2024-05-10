@@ -1,8 +1,9 @@
 from . import calibration
 from iqrm import iqrm_mask
 import numpy as np
-import warnings, pdb
+import warnings, pdb, os
 from craft.craco import bl2ant, bl2array
+from craft import craco, sigproc
 from numba import njit, jit, prange
 
 def get_isMasked_nPol(block):
@@ -114,7 +115,7 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
-@njit
+@njit(parallel=True, cache=True)
 def fast_cas_crs(input_data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs):
     '''
     input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
@@ -836,10 +837,10 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
             else:
                 multiplier = target_rms_value / rms_val
             
-        for i_bl in range(nbl):
+        for i_bl in prange(nbl):
             if bl_weights[i_bl] == 0:
                 continue
-            for i_f in range(nf):    
+            for i_f in prange(nf):    
                 if fixed_freq_weights[i_f] == 0:
                     continue            
 
@@ -856,9 +857,11 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
 
                 calval = cal_data[i_bl, i_f]
                 #Loop through the data again and apply the various rescale factors and the cal soln
-                for i_t in range(nt):
+                for i_t in prange(nt):
                     isamp = input_data[i_bl, i_f, i_t]
                     imask = input_tf_weights[i_f, i_t] == 0
+
+                    calibrated_samp = isamp * calval
 
                     if imask:
                         #Output has already been set to zero in the first loop. 
@@ -866,20 +869,122 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
                         pass
                     else:
                         if sky_sub and not apply_rms:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval -  means[i_bl, i_f])
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (calibrated_samp -  means[i_bl, i_f])
 
                         elif sky_sub and apply_rms:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - means[i_bl, i_f]) * multiplier
+                            #output_buf[i_bl, i_f, isubblock*nt + i_t] = calibrated_samp
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (calibrated_samp - means[i_bl, i_f]) * multiplier
 
                         elif apply_rms and not sky_sub:
-                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (isamp * calval - means[i_bl, i_f]) * multiplier + means[i_bl, i_f] / calval
+                            output_buf[i_bl, i_f, isubblock*nt + i_t] = (calibrated_samp - means[i_bl, i_f]) * multiplier + means[i_bl, i_f] / calval
                 
+def create_tabs(vis_array, phasor_array, tab_array):
+    '''
+    vis_array - (nbl, nf, nt), Input visibilities
+    phasor_array - (nsrc, nbl, nf), the phasor array to multiply with
+    tab_array - (nsrc, nf, nt), the array that stores the output
+    '''
+
+    tab_array[:] = np.sum((vis_array[None, ...] * phasor_array[..., None]).real, axis=1)
+
+@njit(parallel=True, cache=True)
+def create_tabs_numba(vis_array, phasor_array, tab_array):
+    '''
+    vis_array - (nbl, nf, nt), Input visibilities
+    phasor_array - (nsrc, nbl, nf), the phasor array to multiply with
+    tab_array - (nsrc, nf, nt), the array that stores the output
+    '''
+    nbl, nf, nt = vis_array.shape
+    nsrc, nbl, nf = phasor_array.shape
+
+    for i_t in prange(nt):
+        for isrc in prange(nsrc):
+            for i_f in prange(nf):
+                for i_bl in range(nbl):
+                    tab_array[isrc, i_f, i_t] += (vis_array[i_bl, i_f, i_t] * phasor_array[isrc, i_bl, i_f]).real
+
+class TAB_handler:
+    
+    def __init__(self, target_coords, plan, outdir):
+        '''
+        target_coords: np.ndarray/list - 1D (nsrc), contains a list of desired (RA, DEC) as astropy.SkyCoord objects
+        plan: craco.pipeline_plan.PipelanPlan object
+        outdir: str, path to the output directory where the tab filterbanks need to be saved
+        '''
+        self.target_coords = target_coords
+        self.nsrc = len(self.target_coords)
+        self.plan = plan
+        self.outdir = outdir
+        self.tab_array = np.zeros((self.nsrc, plan.nf, plan.nt), dtype=np.float32)
+        self.initialise_filterbanks()
+        #return self.fouts
+
+    def create_phasors(self, phase_center_coord, uvws, freqs):
+        '''
+        Creates the phasors needed to phase up to a point source at a given coordinate
+        Implements the np.exp(2*pi*j * f / c * blvec . dircos) component.
+
+        Input
+        -----
+        phase_center_coord: astropy.SkyCoord, the coordinate of the phase center as astropy.skycoord object
+        uvws: np.ndarray - 2D (nbl, 3), contains a list of UVW values (in seconds) for all baselines
+        freqs: np.ndarray - 1D (nf), contains a list of all frequencies (in Hertz) for all channels 
+        
+        Returns
+        -------
+        phasor_array: np.ndarray - complex64 - 3D (nsrc, nbl, nf) - contains the phasors that can be multiplied directly with the visibilities
+        '''
+
+        nsrc = self.nsrc
+        nbl = len(uvws)
+        nf = len(freqs)
+        fake_baseline_order = np.arange(nbl)
+        phasor_array = np.zeros((nsrc, nbl, nf), dtype=np.complex64)
+
+        for isrc, src_coord in enumerate(self.target_coords):
+            lm = craco.coord2lm(src_coord, phase_center_coord)
+            phasor_array[isrc] = craco.pointsource(1, lm, freqs, fake_baseline_order, uvws)
+
+        self.phasor_array = phasor_array
+        return self.phasor_array
+    
+    def initialise_filterbanks(self):
+        common_hdr = {
+                        'nbits':32,
+                        'nchans': self.plan.nf,
+                        'nifs': 1,
+                        'tstart': self.plan.tstart.utc.mjd,
+                        'tsamp': self.plan.tsamp_s.value,
+                        'fch1': self.plan.fmin/1e6,
+                        'foff': self.plan.foff/1e6,
+        }
+        self.fouts = []
+        for isrc in range(self.nsrc):
+            fname = os.path.join(self.outdir, f"tab_{isrc:02g}.fil")
+            hdr = common_hdr.copy()
+            hdr['src_raj_deg'] = self.target_coords[isrc].ra.deg
+            hdr['src_dej_deg'] = self.target_coords[isrc].dec.deg
+            self.fouts.append(sigproc.SigprocFile(fname, 'wb', hdr))
+
+    def dump_to_fil(self):
+        for isrc in range(self.nsrc):
+             self.tab_array[isrc].T.tofile(self.fouts[isrc].fin)
+
+    def __call__(self, vis_array):
+        self.tab_array[:] = 0
+        create_tabs_numba(vis_array, self.phasor_array, self.tab_array)
+        self.dump_to_fil()
+            
+    def close(self):
+        for isrc in range(self.nsrc):
+            self.fouts[isrc].fin.close()
+
 
 class FastPreprocess:
 
     #TODO -- add the capacity to write filterbank out for the masked values
 
-    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, sky_sub = True, single_norm = False, global_norm = True):
+    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, sky_sub = True, global_norm = True):
         self.cal_soln_array = self.make_averaged_cal_sol(cal_soln_array)
         self.dflag_nt = values.dflag_tblk
         self.dflag_fradius = values.dflag_fradius
@@ -896,12 +1001,40 @@ class FastPreprocess:
         self.s2 = np.zeros((2, nbl, nf), dtype = np.float64)
         self.N = np.zeros((nbl, nf), dtype = np.int32)
 
-        self.cas_block = np.zeros((nf, nt), dtype=np.float32)
-        self.crs_block = np.zeros((nf, nt), dtype=np.float32)
+        self.cas_block = np.zeros((nf, nt), dtype=np.float64)
+        self.crs_block = np.zeros((nf, nt), dtype=np.float64)
 
         self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
+
+    @property
+    def means(self):
+        return self.s1 / self.N
+    
+    @property
+    def stds(self):
+        std_real_sq = (self.N * self.s2[0] - self.s1.real) 
+        std_imag_sq = (self.N * self.s2[1] - self.s1.imag) 
+        std = np.sqrt( (std_real_sq + std_imag_sq) / 2 ) / self.N
+        return std
+    
+    @property
+    def global_mean(self):
+        return self.s1.sum() / self.N.sum()
+    
+    @property
+    def global_std(self):
+        global_N = self.N.sum()
+        global_s2_real = self.s2[0].sum() + (self.N * self.means.real**2).sum() - 2 * (self.means.real * self.s1.real).sum()
+        global_s2_imag = self.s2[1].sum() + (self.N * self.means.imag**2).sum() - 2 * (self.means.imag * self.s1.imag).sum()
+
+        std_real_sq = global_N * global_s2_real
+        std_imag_sq = global_N * global_s2_imag 
+        std_val = np.sqrt( (std_real_sq + std_imag_sq) / 2 ) / global_N
+
+        return std_val
+
 
     def make_averaged_cal_sol(self, cal_soln_array):
         '''
