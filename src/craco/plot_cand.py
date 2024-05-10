@@ -53,7 +53,7 @@ def cand2str(c):
     coords = coord.to_string('hmsdms')
     t = Time(c['mjd'], scale='utc', format='mjd')
     
-    s =  f"SNR={c['SNR']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot}"
+    s =  f"snr={c['snr']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot}"
     
     return s
 
@@ -98,7 +98,7 @@ def _main():
         print(f'Loaded {len(c)} candidates from {f}')
         
         if values.threshold is not None:
-            c = c[c['SNR'] >= values.threshold]
+            c = c[c['snr'] >= values.threshold]
 
         if values.pixel is not None:
             lpix, mpix = map(int, values.pixel.split(','))
@@ -116,7 +116,7 @@ def _main():
         candvt = ax[1,0]
         candimg = ax[1,1]
 
-        snhist.hist(c['SNR'], histtype='step', bins=50)
+        snhist.hist(c['snr'], histtype='step', bins=50)
         snhist.set_xlabel('S/N')
         snhist.set_ylabel('count')
 
@@ -124,7 +124,7 @@ def _main():
         dmhist.set_xlabel('DM (pc/cm3)')
         dmhist.set_ylabel('count')
 
-        ms = c['SNR']**2 * values.sn_gain
+        ms = c['snr']**2 * values.sn_gain
 
         points1 = candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms, picker=tolerance)
         all_artists.append(CandfileArtist(candfile, points1))
