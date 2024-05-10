@@ -1171,6 +1171,7 @@ class PipelineWrapper:
             p.flag_frequencies_from_file(values.flag_frequency_file, True)
 
         self.fixed_freq_weights = ~p.cal_solution.solarray.mask[0, :, 0, 0]
+        log.info('Fixed freq weights: %s/%d', self.fixed_freq_weights.sum(), self.fixed_freq_weights.size)
 
         blk_shape = (plan.nbl, plan.nf, plan.nt)
         self.fast_preprocessor = FastPreprocess(blk_shape, 

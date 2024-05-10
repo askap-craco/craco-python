@@ -271,7 +271,15 @@ class SearchPipelineSink:
         except RuntimeError: # usuall XRT error
             log.exception('Error sending data to pipeline. Disabling this pipeline')
             self.pipeline.close()
-            self.pipeline = None        
+            self.pipeline = None
+        except:
+            dumpfile = os.path.abspath(f'pipeline_sink_dump.npz')
+            log.exception('Some error. saving data to %s', dumpfile)
+            np.save(dumpfile, pipeline_data)
+            sz = os.getsize(dumpfile)
+            log.info('Saved %d bytes to %s', sz, dumpfile)
+            raise
+
 
         self.iblk += 1
         self.last_write_timer = t
