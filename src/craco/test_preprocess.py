@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from craco.preprocess import fast_preprocess, fast_preprocess_single_norm, fast_preprocess_multi_mean_single_norm, fast_preprocess_sos
+from craco.preprocess import fast_preprocess, fast_preprocess_single_norm, fast_preprocess_multi_mean_single_norm, fast_preprocess_sos, fast_cas_crs
 from craco.vis_subtractor import VisSubtractor
 from craco.timer import Timer
 from craft import uvfits, craco_plan
@@ -325,3 +325,32 @@ def test_fast_preprocess_sos_with_old_function():
     fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
     
     assert np.all(np.isclose(output_buf, original_calibrated_output.data, atol = 0.01, rtol = 0.001))
+
+
+def test_fast_cas_crs():
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    cas = np.zeros((nf, nt), dtype=np.float64)
+    crs = np.zeros((nf, nt), dtype=np.float64)
+    fast_cas_crs(block0.data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs)
+
+    actual_cas = (block0.data.real**2 + block0.data.imag**2).sum(axis=0)
+    actual_crs = (block0.data.real**2).sum(axis=0)
+    np.allclose(actual_cas, cas)
+    np.allclose(actual_crs, crs)
+
+def test_fast_cas_crs_with_zeros():
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    cas = np.zeros((nf, nt), dtype=np.float64)
+    crs = np.zeros((nf, nt), dtype=np.float64)
+    fast_cas_crs(block0.data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs)
+
+
+    input_data = np.zeros_like(block0.data)
+    actual_cas = (input_data.real**2 + input_data.imag**2).sum(axis=0)
+    actual_crs = (input_data.real**2).sum(axis=0)
+    np.allclose(actual_cas, cas)
+    np.allclose(actual_crs, crs)
