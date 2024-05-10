@@ -1173,7 +1173,11 @@ class PipelineWrapper:
         self.fixed_freq_weights = ~p.cal_solution.solarray.mask[0, :, 0, 0]
 
         blk_shape = (plan.nbl, plan.nf, plan.nt)
-        self.fast_preprocessor = FastPreprocess(blk_shape, p.cal_solution.solarray, values, self.fixed_freq_weights, sky_sub = True, single_norm = True)
+        self.fast_preprocessor = FastPreprocess(blk_shape, 
+                                                p.cal_solution.solarray, 
+                                                values, 
+                                                self.fixed_freq_weights, 
+                                                sky_sub = True, global_norm = True)
 
         self.pipeline = p
         p.clear_buffers(values)
