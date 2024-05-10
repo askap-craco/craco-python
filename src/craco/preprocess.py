@@ -819,12 +819,14 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
 
         #pdb.set_trace()
 
-        if np.all(s2 == 0):
+        if np.all(N == 0):
             return
     
-        nonzeros = N > 0
-        means[nonzeros] = s1[nonzeros] / N[nonzeros]
-
+        for i_bl in range(nbl):
+            for i_f in range(nf):
+                if N[i_bl, i_f] > 0:
+                    means[i_bl, i_f] = s1[i_bl, i_f] / N[i_bl, i_f]
+        
         if global_norm:
             global_N = N.sum()
             global_s2_real = s2[0].sum() + (N * means.real**2).sum() - 2 * (means.real * s1.real).sum()
