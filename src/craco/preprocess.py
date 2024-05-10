@@ -819,7 +819,7 @@ def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_wei
 
         #pdb.set_trace()
 
-        if np.all(s2 == 0):
+        if np.all(N == 0):
             return
     
         for i_bl in range(nbl):
