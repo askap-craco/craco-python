@@ -146,6 +146,7 @@ class CandidateWriter:
         else:
             hdr_str = self.delimiter.join(i for i in self.out_dtype.names)
             self.fout.write("# " + hdr_str + "\n")
+            self.fout.flush()
                 
     def interpret_cands(self, rawcands, iblk, plan, raw_noise_level, candbuf=None):
         ncands = len(rawcands)

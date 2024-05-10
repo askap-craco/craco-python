@@ -721,7 +721,7 @@ class CalFinder:
         self.__get_sbid_property()
 
     def __update_database(self):
-        self.cur.execute(f"""select sbid where sbid={self.sbid}""")
+        self.cur.execute(f"""select sbid from observation where sbid={self.sbid}""")
         res = self.cur.fetchall()
         if len(res) == 0:
             log.info(f"no sbid information found for sbid{self.sbid}... will query the aces survey to update...")

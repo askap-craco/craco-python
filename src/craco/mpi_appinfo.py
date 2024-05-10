@@ -342,7 +342,7 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
     devices = (0,1)
     host_cards = parse_host_devices(hosts, values.dead_cards, devices)
 
-    pipe_info.add_rank(CandMgrRankInfo(rank, host, slot, core))
+    pipe_info.add_rank(CandMgrRankInfo(rank, 'skadi-00', slot, core))
     rank += 1
     
     for beam in range(nbeams):

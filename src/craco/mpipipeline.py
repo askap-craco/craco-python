@@ -1039,6 +1039,7 @@ def proc_beam_run(proc):
     # requested block to planner to get moving
     update_uv_blocks = pipe_info.values.update_uv_blocks
     planner_iblk = update_uv_blocks # start at this iblk
+    log.info('Requesting iblk %d from planner %d', planner_iblk, planner_rank)
     beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
     req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
 
@@ -1156,7 +1157,10 @@ class BeamProcessor(Processor):
 class PlannerProcessor(Processor):
     def run(self):
         count = 0
+        app = self.pipe_info.mpi_app
+        self.app = app
         comm = self.pipe_info.mpi_app.beam_chain_comm
+        self.comm = comm
         fid0 = self.obs_info.fid0
         start_fid = self.obs_info.fid_of_block(1)
         log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
@@ -1164,26 +1168,35 @@ class PlannerProcessor(Processor):
         iblk = 0
         adapter = VisInfoAdapter(self.obs_info, iblk)
         plan = PipelinePlan(adapter, self.obs_info.values) # don't send this one. It was made once already when the beam processor made the pipeline
-        
+        log.info('Completed initial plan')
+        # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
+        # YUK this smells.
+        self.send_to_candproc(iblk, plan)
+
         while True:     
             iblk += update_uv_blocks
 
-            req_iblk = comm.recv(source=0)
+            log.info('Waiting for request from %d. Expect iblk=%d', app.BEAMPROC_RANK, iblk)
+            req_iblk = comm.recv(source=app.BEAMPROC_RANK)
             log.info('Got request to make plan for iblk=%d. My count=%d', req_iblk, iblk)
             assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
             adapter = VisInfoAdapter(self.obs_info, iblk)
             plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
             plan.fdmt_plan # lazy evaluate fdmt_plan
-            data = {'count':count, 'iblk': iblk, 'plan':plan}
+            plan_data = {'count':count, 'iblk': iblk, 'plan':plan}
 
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
             # To not just fill buffers for ever, we'll need to wait for an ack from the beam
-            comm.send(data, dest=0)
-            wcs_data = {'count':count, 'iblk':iblk, 'hdr':plan.wcs.to_header()}
-            comm.send(wcs_data, dest=self.pipe_info.mpi_app.CANDPROC_RANK)
+            comm.send(plan_data, dest=app.BEAMPROC_RANK)            
+            self.send_to_candproc(iblk, plan)
             log.info('Plan sent count=%d iblk=%d', count, iblk)
 
             count += 1
+
+    def send_to_candproc(self, iblk, plan):
+        wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
+        self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
+
 
 
 
@@ -1192,7 +1205,6 @@ class BeamCandProcessor(Processor):
         t = Timer()
         app = self.pipe_info.mpi_app
         rx_comm = app.beam_chain_comm
-        tx_comm = app.cand_comm
         cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         from craco.candpipe import candpipe
@@ -1202,20 +1214,20 @@ class BeamCandProcessor(Processor):
                                  config=None,  # use defaults
                                  src_dir='.', 
                                  anti_alias=True)
-        t.tick('Make pipeline')
+        log.info('Made pipeline')
         self.pipe = pipe
         
         trace_file = MpiTracefile.instance()
         # blocking wait for wcs data
+        log.info('Waiting for WCS from %d', app.PLANNER_RANK)
         wcs_data = rx_comm.recv(source=app.PLANNER_RANK)
         self.iblk = 0
-        t.tick('RX first WCS')
+        log.info('Got first WCS %s', wcs_data)
         self.new_wcs = wcs_data
         self.check_wcs()
         
         # make request for next wcs data
         wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
-        
 
         while True:
             # async receive as we want to async transmit so the pipeeline

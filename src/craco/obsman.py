@@ -211,9 +211,9 @@ class Obsman:
             retcode = self.process.poll()
             now = datetime.datetime.now()
             minutes = (now - self.start_time).total_seconds()/60
-            log.debug('Process pid=%s running with return code %s for %0.1f minutes', self.process.pid, retcode, minutes)
+            log.debug('Process pid=%s running with return code %s for %0.1f minutes %s', self.process.pid, retcode, minutes, self.outdir)
             if retcode is not None or minutes > self.values.timeout:
-                log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting', retcode, minutes, self.values.timeout)
+                log.info('Process DIED UNPROVOKED with return code %s or timeout with %0.1f > %0.1f. Cleaning up and restarting %s', retcode, minutes, self.values.timeout, self.outdir)
                 #self.restart_process()
                 # were going to terminate and then get it to make a new scan
                 self.terminate_process()

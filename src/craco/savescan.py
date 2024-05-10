@@ -77,7 +77,7 @@ def _main():
 
     calfinder = auto_sched.CalFinder(sbid)
     calpath = calfinder.get_cal_path() # None if nothign available.
-    do_calibration = calpath is not None # do a calibration scan if no calibration available.
+    do_calibration = calpath is None # do a calibration scan if no calibration available.
 
     os.chdir(scandir)
     touchfile('SCAN_START', directory=scandir, check_exists=False)        
@@ -211,14 +211,15 @@ def _main():
 
 
 def exit_function():
+    global stopped
     if not stopped:
         stopped = True
         log.info('Stopping CRACO in exit_function')
         caput('ak:cracoStop', 1)
+        scandir = os.environ['SCAN_DIR']
         touchfile('SCAN_STOP', directory=scandir, check_exists=False)
         log.info('Queing calibration')
-        auto_sched.queue_calibraton(scandir)
-
+        auto_sched.queue_calibration(scandir)
 
 if __name__ == '__main__':
     _main()

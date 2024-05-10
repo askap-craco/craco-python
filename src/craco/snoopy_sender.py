@@ -17,11 +17,16 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+DEFAULT_HOST = 'tethys'
+DEFAULT_PORT = 4900
+
+
 def np_void_to_dict(din):
     d = {}
     for f in din.dtype.names:
         d[f] = din[f]
     return d
+
 
 class SnoopySender:
     '''
@@ -51,13 +56,19 @@ https://github.com/askap-craco/craft/blob/dadain/cuda-fdmt/cudafdmt/src/Candidat
                 idt = npdata[:, 4]
                 dm = npdata[:, 5]
                 beamno = npdata[:, 6]
+                mjd = npdata[:,7]
     '''
 
-    CAND_FORMAT = '{snr:0.2f} {total_sample:d} {obstime_sec:0.3f} {boxc_width:d} {dm:d} {dm_pccm3:0.1f} {ibeam:d}\n'
+    CAND_FORMAT = '{snr:0.2f} {total_sample:d} {obstime_sec:0.3f} {boxc_width:d} {dm:d} {dm_pccm3:0.1f} {ibeam:d} {mjd:0.9f}\n'
 
-    def __init__(self, host='224.1.1.1', port=4900):
+    def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT):
         self.hostport = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.setsockopt(socket.IPPROTO_IP,socket.IP_MULTICAST_TTL, 30)
+        #self.socket.setsockopt(socket.SOL_SOCKET. IN.SO_BINDTODEVICE, "eno8303")
+        # maybe bind to this address so it goes out the right one? But it listens too?
+        srcaddr = '202.9.13.200'
+        #self.socket.bind((srcaddr,port))
 
     def format_candidate(self, cand):
         '''
@@ -68,9 +79,14 @@ https://github.com/askap-craco/craft/blob/dadain/cuda-fdmt/cudafdmt/src/Candidat
         boxc_width
         dm
         dm_pccm3
-        ibeam
+        mdj
         '''
-        dcand = np_void_to_dict(cand)
+        if isinstance(cand, dict):           
+            dcand = cand            
+        else:
+            dcand = np_void_to_dict(cand)
+            
+
         s = self.CAND_FORMAT.format(**dcand)
         return s
     
@@ -84,15 +100,17 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('--snr', type=float)
-    parser.add_argument('--total_sample', type=int)
-    parser.add_argument('--obstime_sec', type=float)
-    parser.add_argument('--boxc_width', type=int)
-    parser.add_argument('--dm', type=int)
-    parser.add_argument('--ibeam', type=int)
+    parser.add_argument('--snr', type=float, default=0)
+    parser.add_argument('--total_sample', type=int, default=0)
+    parser.add_argument('--obstime_sec', type=float, default=0)
+    parser.add_argument('--boxc_width', type=int, default=0)
+    parser.add_argument('--dm_pccm3', type=int, default=0)
+    parser.add_argument('--dm', type=int,default=0)
+    parser.add_argument('--ibeam', type=int, default=0)
+    parser.add_argument('--mjd', type=float, default='123456.789456123')
 
-    parser.add_argument('--host', default='224.1.1.1')
-    parser.add_argument('--port', default=4900)
+    parser.add_argument('--host', default=DEFAULT_HOST)
+    parser.add_argument('--port', default=DEFAULT_PORT, type=int)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
@@ -102,8 +120,8 @@ def _main():
 
     sender = SnoopySender(values.host, values.port)
     cand = vars(values) # makes dictionary
-    s = sender.send_cand(cand)
-    print('Sent %s to %s', s, sender.hostport)
+    s = sender.send(cand)
+    log.info('Sent %s to %s', s, sender.hostport)
 
 
     

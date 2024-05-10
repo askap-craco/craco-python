@@ -110,6 +110,7 @@ if __name__ == '__main__':
                                 'beam_rank_file=craco.beam_rank_file:_main',
                                 'multicast_test=craco.multicast_test:_main',
                                 'merge_traces=craco.tracing.merge_traces:_main',
+                                'snoopy_sender=craco.snoopy_sender:_main',
                                 
             ],
         },
