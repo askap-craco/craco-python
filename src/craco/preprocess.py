@@ -115,7 +115,7 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
-@njit(parallel=True, cache=True)
+@njit(parallel=False, cache=True)
 def fast_cas_crs(input_data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs):
     '''
     input_block: Input data array - (nbl, nf, nt). np.ndarray - complex64
@@ -694,7 +694,7 @@ def fast_preprocess_multi_mean_single_norm(input_data, bl_weights, fixed_freq_we
                 
 
 
-@njit(parallel=True, cache=True)
+@njit(parallel=False, cache=True)
 def fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms=None, sky_sub = False, global_norm = True):
     '''
     Loops over all dimensions of the input_block. Applies the calibration soln,
