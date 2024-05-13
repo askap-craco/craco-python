@@ -107,11 +107,13 @@ def _main():
     else:
         pcb = ''
 
+    search_vis_tscrunch = '--vis-tscrunch 4' # if we're conservative
+    #search_vis_tscrunch = '--vis-tscrunch 2' # going to guns!
     # tscrunch scrunches the packets
     calibration = '' if calpath is None else f'--calibration {calpath}'
     spi = '--samples-per-integration 64' if beam == -1 else '--samples-per-integration 32' # spi64 for all beams, or spi32 for single beam
     tscrunch = '--tscrunch 32' if beam == -1 else '' # tscrunch packets for all beams. Otherwise leave them alone. But tscrunc is only for non transposing
-    vis_tscrunch = '--vis-tscrunch 32' if do_calibration else '--vis-tscrunch 4' # when calibrating make it 110ms in UVFITS file
+    vis_tscrunch = '--vis-tscrunch 32' if do_calibration else search_vis_tscrunch # when calibrating make it 110ms in UVFITS file
 
     card  = f'--card {values.card}'
     block = f'--block {values.block}'
@@ -133,7 +135,8 @@ def _main():
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     fcm = '--fcm /home/ban115/20220714.fcm'
-    metafile = '--metadata {values.metadata}' if values.metadata else ''    
+    metafile = '--metadata {values.metadata}' if values.metadata else ''
+    ndm = '--ndm 256'
 
     valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
 
@@ -157,7 +160,7 @@ def _main():
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 
