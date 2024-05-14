@@ -475,7 +475,7 @@ class CracoCalSol:
         log.info(f"loading flagant of {self.sbid} from database...")
 
         engine = get_psql_engine()
-        sql_df = pd.read_sql(f"SELECT flagant FROM observation WHERE sbid={sbid}", engine)
+        sql_df = pd.read_sql(f"SELECT flagant FROM observation WHERE sbid={self.sbid}", engine)
 
         assert len(sql_df) == 1, "no sbid found in observation table..."
         flagant = sql_df["flagant"][0]
