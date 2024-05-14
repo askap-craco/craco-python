@@ -48,6 +48,7 @@ from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
 from craco.tracing import tracing
+from craco.craco_run.auto_sched import SlackPostManager
 
     
 log = logging.getLogger(__name__)
@@ -1280,6 +1281,7 @@ class CandMgrProcessor(Processor):
         self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
         self.cand_sender = SnoopySender()
         cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
+        self.slack_poster = SlackPostManager(test=False)
         while True:
             t = Timer()
             cands.gather()
@@ -1305,11 +1307,14 @@ class CandMgrProcessor(Processor):
         latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
         trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
         trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
+        outdir = self.pipe_info.values.outdir
+        
         if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
             log.critical('Sending candidate %s', bestcand)
             self.cand_sender.send(bestcand)
             args = {k:bestcand[k] for k in bestcand.dtype.names}
             trace_file += tracing.InstantEvent('CandidateTrigger', args=args, ts=None, s='g')
+            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand} during scan {outdir}')
 
 
 
