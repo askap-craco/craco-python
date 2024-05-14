@@ -265,7 +265,8 @@ class SearchPipelineSink:
                      bl_weights.sum(), bl_weights.size,
                      tf_weights.sum(), tf_weights.size)
             t.tick('Summarise input')
-            out_cands = self.pipeline.write(vis, bl_weights, tf_weights, candidate_buffer) 
+
+            out_cands = self.pipeline.write(vis, bl_weights=bl_weights, input_tf_weights=tf_weights, candout_buffer=candidate_buffer) 
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error

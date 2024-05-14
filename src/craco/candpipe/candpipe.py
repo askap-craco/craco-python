@@ -96,7 +96,7 @@ class ProcessingStep:
 
 
 class Pipeline:
-    def __init__(self, beamno, args, config, src_dir=None, anti_alias=False):
+    def __init__(self, beamno, args, config, src_dir='.', anti_alias=False):
         '''
         
         
@@ -286,7 +286,7 @@ class Pipeline:
             for istep, step in enumerate(self.steps):
                 cand_out = step(self, cand_in)
                 stepname = step.__module__.split('.')[-1]
-                log.debug('Step "%s" produced %d candidates', stepname, len(cand_out))
+                log.info('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
                 if self.args.save_intermediate:
                     fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
                     fout = os.path.join(self.args.outdir, fout)

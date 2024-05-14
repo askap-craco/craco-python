@@ -54,7 +54,8 @@ def _main():
     parser.add_argument('--metadata', help='Prep scan with this metadata file')
     parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
     parser.add_argument('--search-beams', help='Beams to search')
-    parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')    
+    parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
+    parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -138,6 +139,12 @@ def _main():
     metafile = '--metadata {values.metadata}' if values.metadata else ''
     ndm = '--ndm 256'
 
+    if values.search_beams and not do_calibration:
+        search_beams = f'--search-beams {values.search_beams}'
+    else:
+        search_beams = ''   
+
+
     valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
 
     # Antenna handling for 36 antennas is a whole massive issue. WE're not going to handle that now. 
@@ -147,11 +154,7 @@ def _main():
     flagged_ants = flagged_ants.union(set(values.flag_ants)) # also flag antennas from the cmdline
     flagged_ants = flagged_ants - set(np.arange(6) + 31)
     flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
-
-    if values.search_beams and not do_calibration:
-        search_beams = f'--search-beams {values.search_beams}'
-    else:
-        search_beams = ''    
+ 
 
     if flag_ant_str:
         antflag = f'--flag-ants {flag_ant_str}'
@@ -160,7 +163,7 @@ def _main():
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 

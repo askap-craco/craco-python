@@ -48,7 +48,6 @@ from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
 from craco.tracing import tracing
-from craco.craco_run.auto_sched import SlackPostManager
 
     
 log = logging.getLogger(__name__)
@@ -1078,7 +1077,7 @@ def proc_beam_run(proc):
             candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
             t.tick('pipeline')
             if candidates is not None:
-                log.info('Sending ncands %s', len(candidates))
+                log.info('Sending ncands %s maxsnr=%0.2f', len(candidates), cand_buf.cands['snr'].max())
                 cand_buf.send(len(candidates))
 
             if beamid == 0 and False:
@@ -1241,16 +1240,17 @@ class BeamCandProcessor(Processor):
                 t.tick('RX wcs')
             
             ncand = cand_buff.recv()
-            t.tick('get_count')
-            log.info('Got %d candidates in BeamCandProc', ncand)
+            t.tick('recv')
+            maxsnr_in = cand_buff.cands['snr'].max()
+            log.info('Got %d candidates in BeamCandProc maxsnr=%0.2f', ncand, maxsnr_in)
             #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
             short_cands = cand_buff.cands[:ncand]
 
             self.check_wcs()
             out_df = pipe.process_block(short_cands, out_cand_buff.cands)
             maxsnr = out_cand_buff.cands['snr'].max()
+            log.info('Candidates nin=%d nout=%d maxsn_df=%f maxsn_cands=%f', ncand, len(out_df), out_df['snr'].max(), maxsnr)
             trace_file += tracing.CounterEvent('Candidates', ts=None, args={'ncandin':ncand, 'ncandout': len(out_df), 'maxsnr':maxsnr})
-
             t.tick('process')
 
             # gather to everyone - synchronous
@@ -1281,6 +1281,10 @@ class CandMgrProcessor(Processor):
         self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
         self.cand_sender = SnoopySender()
         cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
+        # libpq.so.5 is only installed on root node. This way it only runs on the root node.
+        # SHoud make slackpostmanager not reference psycopg2
+        from craco.craco_run.auto_sched import SlackPostManager
+
         self.slack_poster = SlackPostManager(test=False)
         while True:
             t = Timer()
@@ -1308,13 +1312,13 @@ class CandMgrProcessor(Processor):
         trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
         trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
         outdir = self.pipe_info.values.outdir
-        
+        bestcand_dict = {k:bestcand[k] for k in bestcand.dtype.names}
+
         if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
-            log.critical('Sending candidate %s', bestcand)
+            log.critical('Sending candidate %s', bestcand_dict)
             self.cand_sender.send(bestcand)
-            args = {k:bestcand[k] for k in bestcand.dtype.names}
-            trace_file += tracing.InstantEvent('CandidateTrigger', args=args, ts=None, s='g')
-            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand} during scan {outdir}')
+            trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
+            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}')
 
 
 

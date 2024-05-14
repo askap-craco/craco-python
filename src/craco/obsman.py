@@ -341,7 +341,7 @@ class MetadataObsmanDriver:
 
     def get_scan_manager(self):
         sbid = self.sbid
-        log.info('In get scan maanger %s sbid=%d', self.scan_manager, sbid)
+        log.debug('In get scan maanger %s sbid=%d', self.scan_manager, sbid)
         if self.scan_manager is not None:
             return self.scan_manager
         

@@ -28,7 +28,7 @@ threshold:
 filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius 
 
 # location for pulsar/RACS/new sources catalogue csv
-catpath: ['/CRACO/DATA_00/craco/wan348/catalogues/atnf_psrcat_localized.csv', 
+catpath: ['/CRACO/SOFTWARE/ban115/catalogues/atnf_psrcat_localized_no0837.csv', 
           '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv', 
           '/CRACO/DATA_00/craco/wan348/catalogues/craco_updated.csv']
 catcols: 
