@@ -78,6 +78,7 @@ def _main():
 
     calfinder = auto_sched.CalFinder(sbid)
     calpath = calfinder.get_cal_path() # None if nothign available.
+    global do_calibration
     do_calibration = calpath is None # do a calibration scan if no calibration available.
 
     # make soft link to calibration path for andy
@@ -226,12 +227,12 @@ def exit_function():
     global do_calibration
     if not stopped:
         stopped = True
-        log.info('Stopping CRACO in exit_function')
+        log.info('Stopping CRACO in exit_function. Do cal? %s', do_calibration)
         caput('ak:cracoStop', 1)
         scandir = os.environ['SCAN_DIR']
         touchfile('SCAN_STOP', directory=scandir, check_exists=False)
-        log.info('Queing calibration')
         if do_calibration:
+            log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
 
 if __name__ == '__main__':
