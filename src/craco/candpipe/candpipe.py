@@ -135,8 +135,8 @@ class Pipeline:
         assert args is not None
         assert config is not None
         self.config = config
+        self.output_npy_dtype = None
 
-        
         self.srcdir = src_dir
         assert os.path.isdir(src_dir), f'{src_dir} is not a directory'
         self.uvfits_fname = self.get_file( f'b{self.beamno:02d}.uvfits')
@@ -252,12 +252,27 @@ class Pipeline:
     def convert_np_to_df(self, npin):
         '''
         Convert  numpy array to data frame.
-        Vivek says change this to include additional columns to ipmrove speed. FOr now it just naievely converts
+        Vivek says change this to include additional columns (that will be inevitably created by the candpipe during processing steps) to ipmrove speed. FOr now it just naievely converts
         '''
         assert isinstance(npin, np.ndarray)
         assert npin.dtype in (CandidateWriter.out_dtype , CandidateWriter.out_dtype_short)
         df = pd.DataFrame(npin)
         return df
+    
+    def convert_df_to_np(self, dfin):
+        '''
+        Converts pandas dataframe to a numpy recordarray
+        '''
+        if self.output_npy_dtype is None:
+            dtype_list = []
+            for item in dfin.dtypes.items():
+                dtype_list.append(item)
+
+            self.output_npy_dtype = np.dtype(dtype_list)
+        
+        cands_npy_array = dfin.to_numpy()
+        cands_npy_array = np.array(np.rec.fromarrays(cands_npy_array.transpose(), names = self.output_npy_dtype.names).astype(dtype=self.output_npy_dtype).tolist(), dtype=self.output_npy_dtype)
+        return cands_npy_array
 
     def process_block(self, cand_in, cand_out_buf=None):
         '''
