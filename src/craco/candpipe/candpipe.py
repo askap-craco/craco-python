@@ -135,7 +135,7 @@ class Pipeline:
         assert args is not None
         assert config is not None
         self.config = config
-        self.output_npy_dtype = None
+        
 
         self.srcdir = src_dir
         assert os.path.isdir(src_dir), f'{src_dir} is not a directory'
@@ -170,6 +170,9 @@ class Pipeline:
                 steps.time_space_filter.Step(self), 
                 steps.catalog_cross_match.Step(self),
             ]
+
+        self.output_npy_dtype = None
+        self.uniq_cands_fout = CandidateWriter(outname = os.path.join(args.outdir, f"candidates.b{self.beamno:02d}.uniq.npy"))
 
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,
@@ -248,6 +251,8 @@ class Pipeline:
     def close(self):
         for step in self.steps:
             step.close()
+        if hasattr(self, 'uniq_cands_fout'):
+            self.uniq_cands_fout.close()
     
     def convert_np_to_df(self, npin):
         '''
@@ -312,6 +317,8 @@ class Pipeline:
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)
+        if hasattr(self, 'uniq_cands_fout'):
+            self.uniq_cands_fout.append(cand_out)
         
         return cand_out
 
