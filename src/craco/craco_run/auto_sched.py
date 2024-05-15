@@ -1043,13 +1043,14 @@ ORDER BY sbid ASC
 
 ### slack posting
 class SlackPostManager:
-    def __init__(self, test=True, ):
-        self.__load_webclient(test=test)
+    def __init__(self, test=True, channel=None):
+        self.__load_webclient(test=test, channel=channel)
 
-    def __load_webclient(self, test):
+    def __load_webclient(self, test, channel=None):
         slack_config = load_config(section="slack")
         self.client = WebClient(slack_config["slacktoken"])
-        if test: self.channel = slack_config["testchannel"]
+        if channel is not None: self.channel = channel
+        elif test: self.channel = slack_config["testchannel"]
         else: self.channel = slack_config["channel"]
 
         _oplst = load_config(section="slack_notification")

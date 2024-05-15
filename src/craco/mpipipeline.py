@@ -1301,7 +1301,7 @@ class CandMgrProcessor(Processor):
         # SHoud make slackpostmanager not reference psycopg2
         from craco.craco_run.auto_sched import SlackPostManager
 
-        self.slack_poster = SlackPostManager(test=False)
+        self.slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
         while True:
             t = Timer(args={'iblk':iblk})
             valid_cands = cands.gather()
@@ -1329,7 +1329,19 @@ class CandMgrProcessor(Processor):
             log.critical('Sending candidate %s', bestcand_dict)
             self.cand_sender.send(bestcand)
             trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
-            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}')
+            #################### this part of code is for shitty posting for now for testing ######################
+            # get sbid and scanpath from outdir
+            outdir_split = outdir.split("/")
+            sbid = int(outdir_split[4][2:])
+            scan = outdir_split[-2]; tstart = outdir_split[-1]
+
+            url = f"""http://localhost:8024/candidate?sbid={sbid}&beam={bestcand_dict["ibeam"]}&scan={scan}&tstart={tstart}&runname=results"""
+            url += f"""&dm={bestcand_dict["dm_pccm3"]}&boxcwidth={bestcand_dict["boxc_width"]}&lpix={bestcand_dict["lpix"]}&mpix={bestcand_dict["mpix"]}"""
+            url += f"""&totalsample={bestcand_dict["total_sample"]}&ra={bestcand_dict["ra_deg"]}&dec={bestcand_dict["dec_deg"]}"""
+
+            #######################################################################################################
+
+            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}\n Click the link - {url}')
 
 
 
