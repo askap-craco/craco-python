@@ -80,6 +80,13 @@ def _main():
     calpath = calfinder.get_cal_path() # None if nothign available.
     do_calibration = calpath is None # do a calibration scan if no calibration available.
 
+    # make soft link to calibration path for andy
+    if calpath is not None:
+        cal_link = os.path.join(scandir,'../../../cal')
+        if not os.path.exists(cal_link):
+            os.symlink(calpath, cal_link)
+
+
     os.chdir(scandir)
     touchfile('SCAN_START', directory=scandir, check_exists=False)        
     target_file = os.path.join(scandir, 'ccap.fits')
