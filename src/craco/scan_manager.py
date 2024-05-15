@@ -69,6 +69,7 @@ class ScanManager:
         mlist = self.last_meta
         sbid_unchanged = all([s['sbid'] == d['sbid'] for s in mlist])
         scan_unchanged  = all([s['scan_id'] == d['scan_id'] for s in mlist])
+        assert len(mlist) > 0
         mfile = MetadataFile(list(mlist))
         
         flags_changed = mfile.anyflag[:,self._ant_mask] != mfile.anyflag[-1,self._ant_mask]
