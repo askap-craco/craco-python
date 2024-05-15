@@ -122,16 +122,14 @@ def _main():
     # 30 cards is about the limit for cardcap
     max_ncards = f'--max-ncards {values.max_ncards}'
 
-    if values.scan_minutes is not None:
-        if do_calibration:
-            scan_nminutes = 2
-        else:
-            scan_nminutes = values.scan_minutes
 
-        nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
-        num_msgs = f'-N {nmsg}'
+    if do_calibration:
+        scan_nminutes = 2
     else:
-        num_msgs = ''
+        scan_nminutes = values.scan_minutes
+
+    nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
+    num_msgs = f'-N {nmsg}'
         
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
