@@ -1021,8 +1021,8 @@ class FastPreprocess:
     def _send_dummy_block(self):
         nbl, nf, nt = self.blk_shape
         dummy_block = np.zeros(self.blk_shape, dtype=np.complex64)
-        dummy_input_tf_weights = np.ones((nf, nt), dtype=np.bool)
-        dummy_bl_weights = np.ones(nbl, dtype=np.bool)
+        dummy_input_tf_weights = np.ones((nf, nt), dtype=bool)
+        dummy_bl_weights = np.ones(nbl, dtype=bool)
         self.__call__(dummy_block, dummy_bl_weights, dummy_input_tf_weights)
 
 

@@ -171,6 +171,7 @@ class MetadataFile:
         if self.data[-1]['timestamp'] == 0:
             self.data = self.data[:-1]
 
+        assert len(self.data) > 0, 'Data is empty'
         d0 = self.data[0]
         self.d0 = d0
         antnames = sorted(d0['antennas'])
