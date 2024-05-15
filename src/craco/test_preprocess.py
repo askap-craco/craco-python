@@ -1,6 +1,6 @@
 import logging
 import numpy as np
-from craco.preprocess import fast_preprocess, fast_preprocess_single_norm, fast_preprocess_multi_mean_single_norm, fast_preprocess_sos, fast_cas_crs
+from craco.preprocess import FastPreprocess, fast_preprocess_single_norm, fast_preprocess_multi_mean_single_norm, fast_preprocess_sos, fast_cas_crs
 from craco.vis_subtractor import VisSubtractor
 from craco.timer import Timer
 from craft import uvfits, craco_plan
@@ -135,6 +135,10 @@ if os.path.exists(fname):
     global_output_buf = np.zeros_like(global_input_data)
     #output_mask = np.zeros_like(input_mask)
 
+values.dflag_tblk = 256
+values.dflag_fradius = 128
+values.dflag_cas_threshold = 5
+
 '''
 Ai = np.zeros((nbl, nf), dtype=np.complex64)
 Qi = np.zeros((nbl, nf), dtype=np.complex64)
@@ -268,6 +272,7 @@ def test_fast_preprocess_sos_with_zero():
     bl_weights = np.ones(nbl, dtype=np.bool)
     input_tf_weights = np.ones((nf, nt), dtype=np.bool)
     isubblock = 0
+    interrim_means = np.zeros((nbl, nf), dtype=np.complex128)
     s1 = np.zeros((nbl, nf), dtype=np.complex128)
     s2 = np.zeros((2, nbl, nf), dtype=np.float64)
     N = np.ones((nbl, nf), dtype=np.int32)
@@ -275,7 +280,7 @@ def test_fast_preprocess_sos_with_zero():
     target_input_rms = 512
     sky_sub = True
 
-    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
+    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, interrim_means, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
     assert np.all(np.isclose(s1.real, 0))
     assert np.all(np.isclose(s1.imag, 0))
     assert np.all(np.isclose(s2[0], 0))
@@ -291,6 +296,7 @@ def test_fast_preprocess_sos_with_ones():
     bl_weights = np.ones(nbl, dtype=np.bool)
     input_tf_weights = np.ones((nf, nt), dtype=np.bool)
     isubblock = 0
+    interrim_means = np.zeros((nbl, nf), dtype=np.complex128)
     s1 = np.zeros((nbl, nf), dtype=np.complex128)
     s2 = np.zeros((2, nbl, nf), dtype=np.float64)
     N = np.ones((nbl, nf), dtype=np.int32)
@@ -298,7 +304,7 @@ def test_fast_preprocess_sos_with_ones():
     target_input_rms = 512
     sky_sub = True
 
-    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
+    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, interrim_means, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
     assert np.all(np.isclose(s1.real, nt))
     assert np.all(np.isclose(s1.imag, nt))
     assert np.all(np.isclose(s2[0], nt))
@@ -320,6 +326,7 @@ def test_fast_preprocess_sos_with_old_function():
     bl_weights = np.ones(nbl, dtype=np.bool)
     input_tf_weights = np.ones((nf, nt), dtype=np.bool)
     isubblock = 0
+    interrim_means = np.zeros((nbl, nf), dtype=np.complex128)
     s1 = np.zeros((nbl, nf), dtype=np.complex128)
     s2 = np.zeros((2, nbl, nf), dtype=np.float64)
     N = np.ones((nbl, nf), dtype=np.int32)
@@ -330,7 +337,7 @@ def test_fast_preprocess_sos_with_old_function():
     expected_mean = np.mean(input_data)
     expected_std = np.std(input_data) / np.sqrt(2)
     expected_final_mean = 0 + 0j
-    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
+    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, interrim_means, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
     
     assert np.all(np.isclose(output_buf, original_calibrated_output.data, atol = 0.01, rtol = 0.001))
 
@@ -362,3 +369,15 @@ def test_fast_cas_crs_with_zeros():
     actual_crs = (input_data.real**2).sum(axis=0)
     np.allclose(actual_cas, cas)
     np.allclose(actual_crs, crs)
+
+def test_fast_preprocess_init():
+    nbl, nf, nt = block0.shape
+    fp = FastPreprocess(block0.shape, calsoln.solarray, values, np.ones(nf, dtype=np.bool), True, True)
+    np.all(fp.output_buf == 0)
+    np.all(fp.s1 == 0)
+    np.all(fp.s2 == 0)
+    np.all(fp.N == 0)
+    np.all(fp.cas_block == 0)
+    np.all(fp.crs_block == 0)
+    np.all(fp.interim_means == 0)
+

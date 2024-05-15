@@ -1000,7 +1000,12 @@ class FastPreprocess:
         self.sky_sub = sky_sub
 
         self.blk_shape = blk_shape
-        nbl, nf, nt = blk_shape
+        self._initialise_internal_buffers()
+        self._send_dummy_block()
+        self._initialise_internal_buffers()
+
+    def _initialise_internal_buffers(self):
+        nbl, nf, nt = self.blk_shape
         self.interim_means = np.zeros((nbl, nf), dtype=np.complex128)
         self.s1 = np.zeros((nbl, nf), dtype = np.complex128)
         self.s2 = np.zeros((2, nbl, nf), dtype = np.float64)
@@ -1009,9 +1014,17 @@ class FastPreprocess:
         self.cas_block = np.zeros((nf, nt), dtype=np.float64)
         self.crs_block = np.zeros((nf, nt), dtype=np.float64)
 
-        self.output_buf = np.zeros(blk_shape, dtype=np.complex64)
+        self.output_buf = np.zeros(self.blk_shape, dtype=np.complex64)
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
+
+    def _send_dummy_block(self):
+        nbl, nf, nt = self.blk_shape
+        dummy_block = np.zeros(self.blk_shape, dtype=np.complex64)
+        dummy_input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+        dummy_bl_weights = np.ones(nbl, dtype=np.bool)
+        self.__call__(dummy_block, dummy_bl_weights, dummy_input_tf_weights)
+
 
     @property
     def means(self):
