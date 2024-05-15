@@ -63,13 +63,16 @@ class Bandpass:
         self.nant = headerValues[3]
         self.nchan = headerValues[4]
         self.npol = headerValues[5]
-        self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=np.complex)
+        try:
+            self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=np.complex)
+        except:
+            self.bandpass = np.zeros((self.nsol, self.nant, self.nchan, self.npol), dtype=complex)
         dtc = np.dtype('<c16')
         self.bandpass = np.array(np.fromfile(fp, dtype=dtc, count=self.nsol * self.nant * self.nchan * self.npol))
         self.bandpass = self.bandpass.reshape((self.nsol, self.nant, self.nchan, self.npol))
         self.bandpass = np.sqrt(2.0) / self.bandpass
         fp.close()
-        print("Read bandpass: %d solutions, %d antennas, %d channels, %d polarisations" %(self.nsol, self.nant, self.nchan, self.npol))
+        # print("Read bandpass: %d solutions, %d antennas, %d channels, %d polarisations" %(self.nsol, self.nant, self.nchan, self.npol))
         return self
 
     def plotGains(self, sol, ref_ant = 0, out_file = None):

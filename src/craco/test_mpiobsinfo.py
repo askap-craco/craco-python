@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-TestPipeInfo = namedtuple("TestPipeInfo", "is_beam_processor rx_processor_rank0 beamid values")
+ExamplePipeInfo = namedtuple("ExamplePipeInfo", "is_beam_processor rx_processor_rank0 beamid values")
 
 def test_obs_info_with_card_disabled():
     '''
@@ -47,7 +47,7 @@ def test_obs_info_with_card_disabled():
 
     values = get_parser().parse_args(['--pol-sum'])
     
-    pipe_info = TestPipeInfo(False, 0, 0, values)
+    pipe_info = ExamplePipeInfo(False, 0, 0, values)
     obs_info = MpiObsInfo(all_hdrs, pipe_info)
 
                        

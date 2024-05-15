@@ -1098,7 +1098,7 @@ class FastPreprocess:
                     The fixed frequency weights array of shape (nf)
         '''
         masks = input_block.mask
-        bl_weights = np.empty(masks.shape[0],dtype=np.bool)
+        bl_weights = np.empty(masks.shape[0],dtype=bool)
         for ii, bl in enumerate(masks):
             bl_weights[ii] = ~np.all(bl)
 
@@ -1508,10 +1508,10 @@ class Dedisp:
         self.dm_history = None
 
     def dedisperse(self, iblock, inblock):
-        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:
+        if type(inblock) in [np.ndarray, np.ma.core.MaskedArray]:       #I removed the support for numpy.maksed_array on 12 Feb 2024, but I should add it back"
             block = inblock
         else:
-            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(block)}")
+            raise TypeError(f"Expected either np.ndarray or np.ma.core.MaskedArray, but got {type(inblock)}")
 
         if iblock == 0:
             history_shape = list(block.shape)
@@ -1519,6 +1519,9 @@ class Dedisp:
             history_shape = tuple(history_shape)
 
             self.dm_history = np.zeros(history_shape, dtype=block.dtype)
+       
+        if self.dm == 0:
+            return inblock
 
         attached_block = np.concatenate([self.dm_history, block], axis=-1)
         rolled_block = np.zeros_like(attached_block)

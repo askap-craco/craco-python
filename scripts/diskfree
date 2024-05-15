@@ -2,8 +2,6 @@
 
 # shows disk free for CRACO disks
 # sometimes du can't see them because they're not mounted
-ls /data/seren*/big/ > /dev/null
-df -h /data/seren*/big
+refresh 2>&1 > /dev/null
+df -h /CRACO/DATA*
 
-ls /data/seren*/fast/ > /dev/null
-df -h /data/seren*/fast

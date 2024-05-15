@@ -12,4 +12,8 @@ for line in `env | grep UCX` ; do
     echo `hostname` PID $$ $@ $line
 done
 
+for line in `env | grep TS_` ; do
+    echo `hostname` PID $$ $@ $line
+done
+
 

@@ -5,6 +5,8 @@ from craco.vis_subtractor import VisSubtractor
 from craco.timer import Timer
 from craft import uvfits, craco_plan
 from craco import uvfits_meta, calibration
+from pytest import fixture
+import os
 
 log = logging.getLogger(__name__)
 
@@ -105,27 +107,33 @@ fname = "/data/craco/gup037/DATA/SB057841/DATA/DATA_01/craco/SB057841/scans/00/2
 meta_name = "/data/craco/gup037/DATA/SB057841/SB057841/SB57841.json.gz"
 calname = "/data/craco/gup037/DATA/SB057841/SB057841/cal/00/b00.aver.4pol.smooth.npy"
 
+# add this so pytest actually detects the tests without breaking. 
+# this is dangeours but otherwise we can't run detect tests in VSCODE
+# TODO: Use pytest.fixture properly
+# ALSO TODO: FInd a way of storing test data properly.
+f = None
+if os.path.exists(fname): 
+    values = craco_plan.get_parser().parse_args(["--flag-ants", "12,15,20,30", "--calibration", calname])
 
-values = craco_plan.get_parser().parse_args(["--flag-ants", "12,15,20,30", "--calibration", calname])
-f = uvfits_meta.open(fname, metadata_file = meta_name)
-f.set_flagants(values.flag_ants)
+    f = uvfits_meta.open(fname, metadata_file = meta_name)
+    f.set_flagants(values.flag_ants)
 
-plan = craco_plan.PipelinePlan(f, values)
-calsoln = calibration.CalibrationSolution(plan)
+    plan = craco_plan.PipelinePlan(f, values)
+    calsoln = calibration.CalibrationSolution(plan)
 
-block0, uvws0 = next(f.fast_time_blocks(nt = 256))
-block0 = block0.squeeze()
+    block0, uvws0 = next(f.fast_time_blocks(nt = 256))
+    block0 = block0.squeeze()
 
 
-#variables needed for fast_preprocess
-input_block = block0.copy()
-global_input_data = input_block.data
-input_mask = input_block.mask
+    #variables needed for fast_preprocess
+    input_block = block0.copy()
+    global_input_data = input_block.data
+    input_mask = input_block.mask
 
-nbl, nf, nt = input_block.shape
-isubblock = 0
-global_output_buf = np.zeros_like(global_input_data)
-#output_mask = np.zeros_like(input_mask)
+    nbl, nf, nt = input_block.shape
+    isubblock = 0
+    global_output_buf = np.zeros_like(global_input_data)
+    #output_mask = np.zeros_like(input_mask)
 
 values.dflag_tblk = 256
 values.dflag_fradius = 128

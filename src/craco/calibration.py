@@ -286,7 +286,7 @@ class CalibrationSolution:
             assert 1 <= self.solarray.shape[2] <= 2
             single_sol_array = self.solarray[:,:,0,:] # single pol solution array
             nsum = single_sol_array.size - single_sol_array.mask.sum() # number of unmasked values
-            assert nsum > 0, f'Invalid number of input cells: {nsum}={single_sol_array.siz}e - {sum(single_sol_array.mask)}'
+            assert nsum > 0, f'Invalid number of input cells: {nsum}={single_sol_array.size} - {sum(single_sol_array.mask)}'
 
         return nsum
     

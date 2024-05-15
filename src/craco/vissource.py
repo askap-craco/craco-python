@@ -94,6 +94,7 @@ class CardCapNetworkSource:
         cardno = 0
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
+        self.skip_frames = 10*40 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
         for blk in values.block:
@@ -103,6 +104,8 @@ class CardCapNetworkSource:
                 procid += 1
                 if procid > numprocs:
                     break
+
+        log.debug('numprocs %s block_cards %s', numprocs, block_cards)
 
         self.ctrl = cardcap.MpiCardcapController(pipe_info.rx_comm,
                                                   pipe_info.values,
@@ -129,19 +132,27 @@ class CardCapNetworkSource:
         # This will start a few seconds into the future. We'd better get our skates on
         start_bat = self.ctrl.configure_and_start()
         self.start_bat = start_bat # BAT for when CRACO Go event happens. Data starts on the next BF frame boundary (i.e. 2048 FIDs)
-        self.fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
+        self.init_fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
+        self.fid0 = self.init_fid0 + np.uint64(self.skip_frames*NSAMP_PER_FRAME) # the frame ID iterator will skip this many frameids before starting
+        log.debug('Start bat was 0x%x init_fid=%d skipping %d frames. new FID0=%d',
+                self.start_bat, start_bat, self.init_fid0, self.skip_frames, self.fid0)
         
         return self.fid0
 
     def packet_iter(self):
         assert self.fid0 is not None, 'Havent called start'
-        iters = [frame_id_iter(cap.packet_iterator(), self.fid0) for cap in self.ctrl.ccap.fpga_cap]
+        iters = [frame_id_iter(cap.packet_iterator(), self.init_fid0) for cap in self.ctrl.ccap.fpga_cap]
+        # We need to keep looping over all FPGAs otehrwise we just get stuck on one.
+        # so all FPGAs start at the original planned start bat.
+        # we loop through and only yield when all FPGAs have an FID >= the origianllly specified fid0
         while True:
             try:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
-                yield (packets, fids)
+                fid = fids[0]
+                if fid >= self.fid0:
+                    yield (packets, fids)
             except StopIteration:
                 break
 

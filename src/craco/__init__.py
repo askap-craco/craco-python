@@ -4,7 +4,3 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 # if we dont import it - Im not sure what happens
 
 
-#try:
-#    from . import candpipe
-#except ModuleNotFoundError:
-#    pass

@@ -276,8 +276,8 @@ class FpgaCapturer:
         hdr.setup2(src_mac, dst_mac, src_gid.tobytes(), dst_gid.tobytes(), qpn, psn)
         hbytes = bytes(hdr.to_array(True))
         hstring = ' '.join('0x{:02x}'.format(x) for x in hbytes)
-        with open(f'header_fpga{fpga}.txt', 'w') as fout:
-            fout.write(hstring)
+        #with open(f'header_fpga{fpga}.txt', 'w') as fout:
+        #    fout.write(hstring)
         
         #with open(f'header_{fpga}.bin','wb') as fout:
         #    fout.write(hbytes)
@@ -401,6 +401,7 @@ class FpgaCapturer:
             if immediate != expected_immediate:
                 self.total_missing += diff
                 log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} MISSED PACKET imm={immediate}={hex(immediate)} expected={expected_immediate} Diff={diff} fid={fid}={hex(fid)} fid_diff={fid_diff}   nmiss={self.total_missing} nbytes={nbytes} qloading={rx.currentQueueLoading}')
+                
             
 
             self.curr_imm = immediate
@@ -472,7 +473,7 @@ class FpgaCapturer:
             d['bat'][0] = fid
             d['frame_id'][0][0] = fid
             d = self.post_process(d)
-            fid += 2048
+            fid += NSAMP_PER_FRAME
             
             yield fid, d
 
@@ -511,7 +512,7 @@ class CardCapturer:
             nchan_per_msg = NCHAN
         
 
-        nsamp_per_frame = 2048
+        nsamp_per_frame = NSAMP_PER_FRAME
         nsamp_per_integration = values.samples_per_integration
         nint_per_frame = nsamp_per_frame // nsamp_per_integration
         tsamp = nsamp_per_integration * FINE_TSAMP # microsec

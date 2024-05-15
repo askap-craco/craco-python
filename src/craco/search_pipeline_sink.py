@@ -18,6 +18,7 @@ from craco.timer import Timer
 from astropy import units as u
 import pyxrt
 import scipy
+from craco.candidate_writer import CandidateWriter
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class VisInfoAdapter:
         self.flag_ants = []
         self.iblk = iblk
         assert iblk >= 0
+        self._baselines = None
 
     def set_flagants(self, flag_ants):
         '''
@@ -53,6 +55,8 @@ class VisInfoAdapter:
         Returns dictionary by blid of baselines, containing UU,VV,WW in seconds
         Like a uv fits file
         '''
+        if self._baselines is not None:
+            return self._baselines
         # oooh, gee, this is going to be a headache if we get it wrong.
         # how does flagants work?
         # bleach. Gross. This requires much thinking
@@ -73,8 +77,8 @@ class VisInfoAdapter:
                  self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
 
         
-        bluvws = self.info.baselines_at_time(mjd_mid)
-        return bluvws
+        self._baselines = self.info.baselines_at_time(mjd_mid)
+        return self._baselines
 
     @property
     def nbl(self):
@@ -141,26 +145,40 @@ class SearchPipelineSink:
 
         devid = info.xrt_device_id
         self.pipeline = None
+        self._next_plan_data = None
         if devid is not None:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
-                self.pipeline = PipelineWrapper(self.adapter, info.values, devid)
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=False)
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
                 shape = (nbl, nf, nt)
                 self.pipeline_data = np.ma.masked_array(np.zeros(shape, dtype=np.complex64), mask=np.zeros(shape, dtype=bool))
-
                 nfcas = info.nchan
-                cas_shape = (nfcas, nt)
-                self.cas_data = np.zeros(cas_shape, dtype=np.float32)
-                self.ics_data = self.cas_data.copy()
+                #cas_shape = (nfcas, nt)
+                ##self.cas_data = np.zeros(cas_shape, dtype=np.float32)
+                #self.ics_data = self.cas_data.copy()
                 
                 self.t = 0
             except RuntimeError: # usually XRT error
                 log.exception(f'Failed to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
-            
+
+    def set_next_plan(self, next_plan_data):
+        '''
+        Update the value of the next plan. It might not necssarily be used immediately, but
+        we'll have it in hand just in case. The plan is a craco-plan that was made in a separate process
+        '''
+        log.info('Got next plan %s', next_plan_data)
+        self._next_plan_data = next_plan_data
+
+    @property
+    def ready_for_next_plan(self):
+        '''
+        Returns True if we're ready to accept the next plan
+        '''
+        return self._next_plan_data is None
 
     def write(self, vis_block):
         '''
@@ -168,11 +186,12 @@ class SearchPipelineSink:
         vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
         or 
         vishape = (nbl, vis_nc, vis_nt) if np.complex64
+        
         '''
         if self.pipeline is None:
             return
 
-        t = Timer()
+        assert False, 'Do not use. Were now accumulating blocks in another MPI process'
         vis_data = vis_block.data
         
         # TODO: convert input beam data to whatever search_pipeline wants
@@ -180,16 +199,14 @@ class SearchPipelineSink:
         # Don't forget, the data itself might need to be blocked into nt=256 which is what the pipeline wants
         # copy data into local buffer
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
-        assert vis_data.dtype == np.complex64, 'I think we can only handle complex data in this function'
+        assert vis_data.dtype == np.complex64, f'I think we can only handle complex data in this function. Vis data type was {vis_data.dtype} {vis_data.shape}'
         output_nt = self.pipeline_data.shape[2]
         
         assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
         assert vis_nc*nrx == self.pipeline_data.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
         assert self.pipeline_data.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
 
-        info = self.info
         blflags = vis_block.baseline_flags[:,np.newaxis,np.newaxis]
-
         tstart = self.t
         tend = tstart + vis_nt
 
@@ -204,13 +221,28 @@ class SearchPipelineSink:
 
 
             cas_fslice = slice(fstart*6,fend*6)
-            self.cas_data[cas_fslice, tstart:tend] = vis_block.cas[irx,...].T
-            self.ics_data[cas_fslice, tstart:tend] = vis_block.ics[irx,...].T
+            # # need to fix shapes - but viveks' new prepare pipeline does it anyway
+            #self.cas_data[cas_fslice, tstart:tend] = vis_block.cas[irx,...].T 
+            #self.ics_data[cas_fslice, tstart:tend] = vis_block.ics[irx,...].T
 
 
         self.t += vis_nt
+        self.write_pipeline_data(pipeline_data)
 
-        t.tick('Copy')
+    def write_pipeline_data(self, pipeline_data, candidate_buffer):
+        '''
+        Writes already accumulated pipeline data
+        Should be a masked array of dtype=compelx64 and shape
+        (nbl, nf, nt=256)
+
+        Also updates plan if necessary
+        '''
+
+        out_cands = None
+        if self.pipeline is None:
+            return out_cands
+        
+        t = Timer()
 
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
@@ -218,24 +250,42 @@ class SearchPipelineSink:
         update_uv_blocks = self.info.values.update_uv_blocks
         update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
         if update_now:
-            self.adapter = VisInfoAdapter(self.info, self.iblk)
-            self.pipeline.update_plan(self.adapter)
-            
-        t.tick('Update plan')
+            pd = self._next_plan_data # comes from another MPI rank
+            assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
+            self.pipeline.update_plan_from_plan(pd['plan'])
+            self._next_plan_data = None # set it to None ready for the next plan            
+            t.tick('Update plan')        
 
-        if self.t == output_nt:
-            try:
-                self.pipeline.write(self.pipeline_data, self.cas_data, self.ics_data)
-                t.tick('Pipeline write')
-                self.t = 0
-            except RuntimeError: # usuall XRT error
-                log.exception('Error sending data to pipeline. Disabling this pipeline')
-                self.pipeline.close()
-                self.pipeline = None
+        try:
+            vis = pipeline_data['vis']
+            bl_weights = pipeline_data['bl_weights']
+            tf_weights = pipeline_data['tf_weights']
+            log.info('Pipeline data abs(vis).mean=%0.1e bl_weights=%s/%s tf_weights=%s/%s',
+                    abs(vis).mean(),
+                     bl_weights.sum(), bl_weights.size,
+                     tf_weights.sum(), tf_weights.size)
+            t.tick('Summarise input')
+
+            out_cands = self.pipeline.write(vis, bl_weights=bl_weights, input_tf_weights=tf_weights, candout_buffer=candidate_buffer) 
+            t.tick('Pipeline write')
+            self.t = 0
+        except RuntimeError: # usuall XRT error
+            log.exception('Error sending data to pipeline. Disabling this pipeline')
+            self.pipeline.close()
+            self.pipeline = None
+        except:
+            dumpfile = os.path.abspath(f'pipeline_sink_dump.npz')
+            log.exception('Some error. saving data to %s', dumpfile)
+            np.save(dumpfile, pipeline_data)
+            sz = os.getsize(dumpfile)
+            log.info('Saved %d bytes to %s', sz, dumpfile)
+            raise
+
 
         self.iblk += 1
         self.last_write_timer = t
-            
+
+        return out_cands            
         
     def close(self):
         '''
@@ -246,6 +296,7 @@ class SearchPipelineSink:
         
 
 def _main():
+
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')

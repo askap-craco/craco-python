@@ -33,7 +33,7 @@ from craco import write_psf as PSF
 from Visibility_injector.inject_in_fake_data import FakeVisibility
 
 from collections import OrderedDict
-from trace_event_handler import TraceEventHandler
+#from trace_event_handler import TraceEventHandler
 from astropy import units
 
 import logging
@@ -41,8 +41,8 @@ import warnings
 
 DM_CONSTANT = 4.15 # milliseconds and GHz- Shri Kulkarni will kill me
 
-handler = TraceEventHandler()
-logging.basicConfig(handlers=[logging.StreamHandler(None), handler], level=logging.INFO)
+#handler = TraceEventHandler()
+#logging.basicConfig(handlers=[logging.StreamHandler(None), handler], level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
@@ -386,7 +386,6 @@ class Pipeline:
                                   values.dflag_cas_threshold,
                                   values.dflag_ics_threshold,
                                   values.dflag_tblk)
-        self.first_tstart = plan.tstart
         self.update_plan(plan)
         self.image_starts = None
         self.fdmt_starts = None
@@ -659,7 +658,7 @@ class Pipeline:
             candout = self.candidates.nparr[:ncand]
 
         # TODO: think about performance here
-        return candout.copy()
+        return candout
 
     def clear_buffers(self, values):
         '''
@@ -770,11 +769,7 @@ class Pipeline:
 
         '''
 
-
-        self.fast_baseline2uv(input_flat, self.uv_out)
-        nuvwide = self.uv_out.shape[0]
-        self.inbuf.nparr[:nuvwide,:,:,:,0] = np.round(self.uv_out.real*(values.input_scale))
-        self.inbuf.nparr[:nuvwide,:,:,:,1] = np.round(self.uv_out.imag*(values.input_scale))
+        self.fast_baseline2uv(input_flat, self.inbuf.nparr, values.input_scale)
         return self
 
     def copy_input(self, input_flat, values):
@@ -824,6 +819,61 @@ class Pipeline:
         # only start running once we've run an FDMT
         if iblk >= 1:
             self.image_starts = self.run_image(img_tblk, values)
+
+        return cand_iblk, candidates
+    
+    def copy_and_run_pipeline_serial(self, iblk, values):
+        '''
+        Runs everything in series
+        Assumes inbuf prepared with prepare_inbuf()
+        Runs FDMT first, then image pipeline on same buffer.
+        Returns cand_iblk, candidates - cand_iblk is the block relevatn to the candidates we have.
+        cand_iblk = blk - i.e. no latency.
+        
+        :iblk: = input block number. Increments by 1 for every call.
+        :returns: cand_iblk, candidates
+        '''
+
+        # Blocks are sequential
+        fdmt_tblk = iblk % NBLK
+        img_tblk = iblk % NBLK
+        cand_iblk = iblk  # candidate block coming from pipeline
+
+
+        t = Timer()
+
+        # wait for FDMT
+        if self.fdmt_starts is not None:
+            self.fdmt_starts.wait()
+            t.tick('FDMT init wait')
+
+        # copy input
+        self.inbuf.copy_to_device()
+        t.tick('Copy to device')
+
+        # run fdmt
+        self.fdmt_starts = self.run_fdmt(fdmt_tblk)
+        t.tick('FDMT run')
+        self.fdmt_starts.wait()
+        t.tick('FDMT wait')
+
+        # wait for image pipeline
+        if self.image_starts is not None:
+            self.image_starts.wait()
+            t.tick('Image init wait')
+        
+        self.image_starts = self.run_image(img_tblk, values)
+        t.tick('image run')
+        self.image_starts.wait()
+        t.tick('image wait')
+
+        # if we've waited successfuly then we can get candidates
+        if cand_iblk >= 0:
+            candidates = self.get_candidates()
+            t.tick('Get candidates')
+        else:
+            candidates = np.zeros(0, dtype=candidate_dtype)
+            
 
         return cand_iblk, candidates
         
@@ -944,11 +994,11 @@ def get_parser():
     parser.add_argument('--flag-ants', type=strrange, help='Ignore these 1-based antenna numbers', default=[])
     parser.add_argument('--flag-chans', help='Flag these channel numbers (strrange)', type=strrange)
     parser.add_argument('--flag-frequency-file', help='Flag channels based on frequency ranges in this file in MHz. One range per line')
-    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable frequency flagging', default=0, type=float)
-    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable time flagging', default=0, type=float)
-    parser.add_argument('--dflag-cas-threshold', help='Dynamic flagging threshold for CAS. >0 to enable CAS flagging', default=0, type=float)
-    parser.add_argument('--dflag-ics-threshold', help='Dynamic flagging threshold for ICS. >0 to enable ICS flagging', default=0, type=float)
-    parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=None, type=int)
+    parser.add_argument('--dflag-fradius', help='Dynamic flagging frequency radius. >0 to enable frequency flagging', default=100, type=float)
+    parser.add_argument('--dflag-tradius', help='Dynamic flagging time radius. >0 to enable time flagging', default=100, type=float)
+    parser.add_argument('--dflag-cas-threshold', help='Dynamic flagging threshold for CAS. >0 to enable CAS flagging', default=5, type=float)
+    parser.add_argument('--dflag-ics-threshold', help='Dynamic flagging threshold for ICS. >0 to enable ICS flagging', default=5, type=float)
+    parser.add_argument('--dflag-tblk', help='Dynamic flagging block size. Must divide evenly into the block size (256 usually)', default=256, type=int)
     parser.add_argument('--cas-fil', action='store_true', help="Enable saving of the CAS as a filterbank", default=False)
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
@@ -975,7 +1025,7 @@ def get_parser():
     parser.set_defaults(fft_scale  =10.0)
     
     parser.set_defaults(os        = "2.1,2.1")
-    parser.set_defaults(xclbin    = "binary_container_1.xclbin.golden")
+    parser.set_defaults(xclbin    = os.environ.get('XCLBIN'))
     #parser.set_defaults(uv        = "frb_d0_lm0_nt16_nant24.fits")
     #parser.set_defaults(uv        = "frb_d0_t0_a1_sninf_lm00.fits")
 
@@ -1023,12 +1073,34 @@ class VisSource:
 
 
 class PipelineWrapper:
-    def __init__(self, f, values, devid):
-        self.plan = PipelinePlan(f, values)
+    def __init__(self, planinfo, values, devid, startinfo=None, parallel_mode=True):
+        '''
+        Create a pipeilne wrapper
+        :planinfo: Adapter containg observation info for the plan
+        :values: command line arguments
+        :device id: pyxrt device ID - I don't recal why this is seaparet
+        :startinfo: Info adapter for the beginning of the file - we pull the tstart 
+        :parallel_mode: True if you want to run in paralell (default). False for serial.
+        from this because the planinfo might have a tstart in the future. If None then we use 
+        planinfo
+        '''
+        self.plan = PipelinePlan(planinfo, values)
         self.device = pyxrt.device(devid)
         self.xbin = pyxrt.xclbin(values.xclbin)
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values
+
+        if startinfo is None:
+            startinfo = planinfo
+
+        self.parallel_mode = parallel_mode
+
+        self.startinfo = startinfo
+        self.first_tstart = startinfo.tstart
+
+        requested_start_mjd = startinfo.tstart if values.start_mjd is None else values.start_mjd
+        log.info('Making pipeline wrapper. first_tstart=%s plan_tstart=%s requirested mjd=%s diff=%s', self.first_tstart.tai.mjd,
+                 planinfo.tstart.tai.mjd, requested_start_mjd.tai.mjd, (requested_start_mjd - self.first_tstart).to(units.millisecond) )
 
         # New XRT versions return 'None' for IPs and return kernels instead
         iplist = self.xbin.get_ips()
@@ -1050,7 +1122,7 @@ class PipelineWrapper:
                'nifs':1,
                'src_raj_deg':plan.phase_center.ra.deg,
                'src_dej_deg':plan.phase_center.dec.deg,
-               'tstart':plan.tstart.utc.mjd,
+               'tstart':self.first_tstart.utc.mjd,
                'tsamp':plan.tsamp_s.value,
                'fch1':plan.fmin/1e6,
                'foff':plan.foff/1e6,
@@ -1086,10 +1158,9 @@ class PipelineWrapper:
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
-        #TODO - VG - cleanup this mess below where we deal with multiple ways of getting the flag values, and set them inside the pipeline object.. Eww!
-        if f.freq_config.nmasked_channels > 0:
-            log.info('Flagging channels from input: %d', f.freq_config.nmasked_channels)
-            p.set_channel_flags(f.freq_config.channel_mask, True)
+        if planinfo.freq_config.nmasked_channels > 0:
+            log.info('Flagging channels from input: %d', planinfo.freq_config.nmasked_channels)
+            p.set_channel_flags(planinfo.freq_config.channel_mask, True)
             
         if values.flag_chans:
             log.info('Flagging %d channels %s from command line', len(values.flag_chans), values.flag_chans)
@@ -1100,9 +1171,14 @@ class PipelineWrapper:
             p.flag_frequencies_from_file(values.flag_frequency_file, True)
 
         self.fixed_freq_weights = ~p.cal_solution.solarray.mask[0, :, 0, 0]
+        log.info('Fixed freq weights: %s/%d', self.fixed_freq_weights.sum(), self.fixed_freq_weights.size)
 
         blk_shape = (plan.nbl, plan.nf, plan.nt)
-        self.fast_preprocessor = FastPreprocess(blk_shape, p.cal_solution.solarray, values, self.fixed_freq_weights, sky_sub = True, single_norm = True)
+        self.fast_preprocessor = FastPreprocess(blk_shape, 
+                                                p.cal_solution.solarray, 
+                                                values, 
+                                                self.fixed_freq_weights, 
+                                                sky_sub = True, global_norm = True)
 
         self.pipeline = p
         p.clear_buffers(values)
@@ -1111,24 +1187,30 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile)
+        candout = CandidateWriter(candfile, self.first_tstart, ibeam=beamid)
         self.total_candidates = 0
-        self.candout = candout
+        self.candout = candout        
         self.iblk = 0
 
     def update_plan(self, new_data):
         '''
-        Literally make an entire new plan out of the data, and shove int ehlookup tables
+        Literally make an entire new plan out of the plan info data, and shove int ehlookup tables
         Completley inelegant, but better htan nothing for now
         '''
-        log.info('Updating plan')
+        log.info('Updating from data')
         old_plan = self.plan
         assert old_plan is not None
         self.plan = PipelinePlan(new_data, self.values, prev_plan=old_plan)
         self.pipeline.update_plan(self.plan)
         return self.plan
+    
+    def update_plan_from_plan(self, new_plan):
+        log.info('Updating plan from plan')
+        self.plan = new_plan
+        self.pipeline.update_plan(new_plan)
+        return self.plan
 
-    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None):
+    def write(self, input_flat, bl_weights=None, input_tf_weights=None, cas=None, ics=None, candout_buffer=None):
         '''
         cas, and ics if specified help with flagging
         '''
@@ -1165,8 +1247,6 @@ class PipelineWrapper:
 
         if pc_filterbank is not None:
             d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
-
-
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
@@ -1178,13 +1258,19 @@ class PipelineWrapper:
             p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
             t.tick('dump uv')
 
-        cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
+        if self.parallel_mode:
+            cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
+        else:
+            cand_iblk, candidates = p.copy_and_run_pipeline_serial(iblk, values)
         t.tick('run')
         
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
+        out_cands = None
         if len(candidates) > 0:
-            self.candout.interpret_and_write_candidates(candidates, cand_iblk, plan, p.first_tstart, p.last_bc_noise_level)
+            out_cands = self.candout.interpret_cands(candidates, iblk, plan, p.last_bc_noise_level, candout_buffer)
+            t.tick('Interpret candidates')
+            self.candout.write_cands(out_cands)            
             t.tick('Write candidates')
 
         if values.print_dm0_stats:
@@ -1220,6 +1306,8 @@ class PipelineWrapper:
         logging.info('Write for iblk %d timer: %s', iblk, t)
 
         self.iblk += 1
+
+        return out_cands
 
     def close(self):
         candout = self.candout
@@ -1269,9 +1357,10 @@ def _main():
         isamp_update = update_uv_blocks * nt // 2
 
     log.info('Creating UVW data for isamp=%d will update every %d samples', isamp_update, update_uv_blocks*nt)
-    adapter = f.vis_metadata(isamp_update)
+    plan_info = f.vis_metadata(isamp_update)
+    start_info = f.vis_metadata(0)
         
-    pipeline_wrapper = PipelineWrapper(adapter, values, values.device)
+    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
@@ -1296,10 +1385,10 @@ def _main():
             
             if update_now:
                 isamp_update += update_uv_blocks*nt
-                adapter = f.vis_metadata(isamp_update)
+                plan_info = f.vis_metadata(isamp_update)
                 t.tick('get_adapter')
-                log.info('Updating plan iblk=%d isamp=%d adapter=%s', iblk, isamp_update, adapter)
-                latest_plan = pipeline_wrapper.update_plan(adapter)
+                log.info('Updating plan iblk=%d isamp=%d plan_info=%s', iblk, isamp_update, plan_info)
+                latest_plan = pipeline_wrapper.update_plan(plan_info)
                 if values.save_psf:
                     psf_name = os.path.join(values.outdir, f"psf.beam{latest_plan.beamid:02g}.iblk{iblk}.fits")
                     log.info("Saving the psf to disk with name=%s", psf_name)
@@ -1316,7 +1405,6 @@ def _main():
     finally:
         f.close()
         pipeline_wrapper.close()
-        handler.dump()
                      
 if __name__ == '__main__':
     _main()

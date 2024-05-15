@@ -56,7 +56,7 @@ class Step(ProcessingStep):
         
         # apply command line argument for minimum S/N and only return those values
         #if self.pipeline.args.cluster_min_sn is not None:
-        #    outd = outd[outd['SNR'] > self.pipeline.args.cluster_min_sn]
+        #    outd = outd[outd['snr'] > self.pipeline.args.cluster_min_sn]
         
 
         return outd

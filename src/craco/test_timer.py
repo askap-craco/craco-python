@@ -29,7 +29,9 @@ def test_timer():
         np.arange(1000000)
     t.tick('proc and sleep')
     print(str(t))
-    
+    print('total perf', t.total.perf)
+
+    assert t.total.perf > 2.0
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

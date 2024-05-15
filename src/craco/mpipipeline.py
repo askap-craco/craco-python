@@ -16,6 +16,8 @@ import os
 import sys
 import logging
 from array import array
+from craft.craco_plan import PipelinePlan
+
 from craco import cardcap
 from craco.cardcap import NCHAN, NFPGA, NSAMP_PER_FRAME
 import craco.card_averager
@@ -30,7 +32,7 @@ import numba
 import glob
 import craft.sigproc as sigproc
 from craft.parset import Parset
-from craco.search_pipeline_sink import SearchPipelineSink
+from craco.search_pipeline_sink import SearchPipelineSink, VisInfoAdapter
 from craco.metadatafile import MetadataFile,MetadataDummy
 from scipy import constants
 from collections import namedtuple
@@ -38,6 +40,14 @@ from craft.craco import ant2bl, baseline_iter
 from craco import mpiutil
 from craft.cmdline import strrange
 from craco.timer import Timer
+from craco.prep_scan import ScanPrep
+from craco.mpi_appinfo import MpiPipelineInfo
+from craco.visblock_accumulator import VisblockAccumulatorStruct
+from craco.candidate_writer import CandidateWriter
+from craco.snoopy_sender import SnoopySender
+from craco.mpi_candidate_buffer import MpiCandidateBuffer
+from craco.mpi_tracefile import MpiTracefile
+from craco.tracing import tracing
 
     
 log = logging.getLogger(__name__)
@@ -45,9 +55,9 @@ log = logging.getLogger(__name__)
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-numprocs = comm.Get_size()
+#comm = MPI.COMM_WORLD
+#rank = comm.Get_rank()
+#numprocs = comm.Get_size()
 
 # realtime SCHED_FIFO priorities
 BEAM_PRIORITY = 90
@@ -66,7 +76,7 @@ def set_scheduler(priority:int, policy=None):
         policy = os.SCHED_RR
         
     prio_max = os.sched_get_priority_max(policy)
-    assert priority <= prio_max, f'Requested priority {prority} greater than max {prio_max} for policy {policy}'
+    assert priority <= prio_max, f'Requested priority {priority} greater than max {prio_max} for policy {policy}'
     
     param = os.sched_param(priority)
     pid = 0 # means current process
@@ -81,96 +91,14 @@ def set_scheduler(priority:int, policy=None):
         log.info('Set nice level from %d to %d', old_nicelevel, nicelevel)
 
     except PermissionError:
-        log.info('Did not have permission to set scheduler.')
+        log.debug('Did not have permission to set scheduler.')
 
         
 
 REAL_DTYPE = np.float32 # Transpose/averaging type for real types
-CPLX_DTYPE = np.float32 # Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension
-
-class BeamRankInfo(namedtuple('BeamProcInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
-    @property
-    def rank_file_str(self):
-        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} xrtdevid={self.xrt_device_id}'
-        return s
-
-class ReceiverRankInfo(namedtuple('ReceiverInfo', ['rxid','rank','host','slot','core','block','card','fpga'])):
-    @property
-    def rank_file_str(self):
-        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
-        return s
-
-
-class MpiPipelineInfo:
-    def __init__(self, values):
-        '''
-        TODO - integrate this in with a nice way of doing dump hostfile
-        '''
-        self.hosts = mpiutil.parse_hostfile(values.hostfile)
-        self.beam_ranks = []
-        self.receiver_ranks = []
-
-        if values.max_ncards is None:
-            ncards = len(values.block)*len(values.card)
-        else:
-            ncards = values.max_ncards
-
-        nrx = ncards*len(values.fpga)//values.nfpga_per_rx
-        self.nrx = nrx
-        self.ncards = ncards
-
-        # yuck. This is just yuk.
-        if values.beam is None:
-            values.nbeams = 36
-        else:
-            assert 0<= values.beam < 36, f'Invalid beam {values.beam}'
-            values.nbeams = 1
-
-        
-        self.nbeams = values.nbeams
-        self.world_comm = MPI.COMM_WORLD
-        self.world_rank = comm.Get_rank()
-        self.values = values
-        color = 1 if self.is_rx_processor else 0
-        # a communicator that splits by rx and everything else
-        self.rx_comm = comm.Split(color)
-
-    @property
-    def is_beam_processor(self):
-        ''' 
-        First nbeams ranks are beam processors
-        Send nrx ranks are RX processor
-        '''
-        bproc = self.world_rank < self.nbeams
-        return bproc
-
-    @property
-    def rx_processor_rank0(self):
-        return self.nbeams # Rank0 for rx processor is
-
-    @property
-    def beamid(self):
-        assert self.is_beam_processor, 'Requested beam ID of non beam processor'
-        return self.world_rank
-
-    def beam_rank_info(self, beamid):
-        '''
-        Returns the rank info for the given beam
-        '''
-        
-        rank_info = next(filter(lambda info: info.beamid == beamid, self.beam_ranks))
-        return rank_info
-
-    @property
-    def is_rx_processor(self):
-        return not self.is_beam_processor
-
-    @property
-    def cardid(self):
-        values = self.values
-        assert self.is_rx_processor, 'Requested cardID of non-card processor'
-        theid = self.world_rank - self.nbeams
-        return theid
+# Tranaspose/averagign dtype for complex types  can also be a real type, like np.int16 and somethign willl add an extra dimension.
+# But fast card_averager doesn't support it for now.
+CPLX_DTYPE = np.float32 
 
 
 class MpiObsInfo:
@@ -207,15 +135,29 @@ class MpiObsInfo:
 
         self.__fid0 = None # this gets sent with some transposes later
 
-        if self.pipe_info.is_beam_processor and values.metadata is not None:
-            # TODO: implement calc11 and getting sources from .... elsewhere
+        outdir = pipe_info.values.outdir
+        indir = outdir.replace('/data/craco/','/CRACO/DATA_00/') # yuck, yuck, yuck - but I don't have time for this right now
+        log.info('Loading scan prep from %s', indir)
+        self._prep = ScanPrep.load(indir)
+        
+        if values.metadata is not None:
             self.md = MetadataFile(values.metadata)
+            valid_ants_0based = np.arange(self.nant)
         else:
-            self.md = MetadataDummy()
+            if self.pipe_info.mpi_app.is_in_beam_chain: # beamid only defined for beam processors
+                self.md = self._prep.calc_meta_file(self.beamid)
+            else:
+                self.md = None
 
-        self.valid_ants_0based = np.array([ia for ia in range(self.nant) if ia+1 not in self.values.flag_ants])
-        assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
+            valid_ants_0based = np.array(self._prep.valid_ant_numbers) - 1
+            #self.md = MetadataDummy()
 
+        assert np.all(valid_ants_0based >= 0)
+        flag_ants_0based = set(np.array(self.values.flag_ants) - 1)
+        # Make sure we remove antenans 31-36 (1 based) = 30-35 (00based)
+        self.valid_ants_0based = np.array(sorted(list(set(valid_ants_0based) - set(flag_ants_0based) - set(np.arange(6) + 30))))
+        log.info('Valid ants: %s', self.valid_ants_0based+1)
+        #assert len(self.valid_ants_0based) == self.nant - len(self.values.flag_ants), 'Invalid antenna accounting'
   
     def sources(self):
         '''
@@ -239,7 +181,7 @@ class MpiObsInfo:
         '''
         Returns np array (nant, 3) UVW values in seconds at the given time
         '''
-        uvw = self.md.uvw_at_time(mjd)[self.valid_ants_0based, self.beamid, :]  /constants.c #convert to seconds
+        uvw = self.md.uvw_at_time(mjd, self.beamid)[self.valid_ants_0based, :]  /constants.c #convert to seconds
 
         return uvw
 
@@ -334,6 +276,11 @@ class MpiObsInfo:
         Set frame iD of first data value
         '''
         self.__fid0 = np.uint64(fid)
+        tnow = Time.now()
+        tstart = self.tstart
+        diff = (tstart.tai - tnow.tai)
+        diffsec = diff.to(u.second)
+        log.info('Set FID0=%d. Tstart=%s = %s = %0.1f seconds from now', self.__fid0, tstart, tstart.iso, diffsec.value)
 
     @property
     def tstart(self):
@@ -430,6 +377,11 @@ class MpiObsInfo:
 
     @property
     def nant(self):
+        '''
+        Returns the number of antennas in teh source data.
+        Not necessarily the number of antennas that are valid or that will be transposed
+        '''
+        #log.info('Nant is %d nant_valid is %d valid ants: %s', self.main_merger.nant, self.nant_valid, self.valid_ants_0based)
         return self.main_merger.nant
 
     @property
@@ -454,7 +406,7 @@ class MpiObsInfo:
         return s
 
 
-def get_transpose_dtype(values):
+def get_transpose_dtype(values, real_dtype=REAL_DTYPE, cplx_dtype=CPLX_DTYPE):
     nbeam = values.nbeams
     nt = values.nt
     nant = values.nant_valid
@@ -462,26 +414,25 @@ def get_transpose_dtype(values):
     vis_fscrunch = values.vis_fscrunch
     vis_tscrunch = values.vis_tscrunch
     npol = 1 # card averager always averagers pol
-    dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, REAL_DTYPE, CPLX_DTYPE)
+    dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, real_dtype, cplx_dtype)
     return dt
 
 ## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
 
 class DtypeTransposer:
-    def __init__(self, cardidx, vis_source, values):
+    def __init__(self, info):
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
-        self.nbeam = values.nbeams
-        self.nrx = values.nrx
-        self.dtype = get_transpose_dtype(values)
+        self.nbeam = info.nbeams
+        self.nrx = info.nrx
+        self.dtype = get_transpose_dtype(info)
+        self.dtype_complex = get_transpose_dtype(info, cplx_dtype=np.complex64) # the guaranteed compelx version. SearchPipeline needs it
         self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(self.dtype)
         self.msgsize = self.dtype.itemsize
         self.nmsgs = 1
-        log.info('Transposing %s with type=%s  size=%s NMSG=%s', self.dtype, self.mpi_dtype, self.msgsize, self.nmsgs)
         
-        self.cardidx = cardidx
-        self.vis_source = vis_source
-        self.values = values
-        
+        self.comm = info.pipe_info.mpi_app.rx_beam_comm
+
+        numprocs = self.comm.Get_size()
         self.tx_counts = np.zeros(numprocs, np.int32)
         self.tx_displacements = np.zeros(numprocs, np.int32)
         self.rx_counts = np.zeros(numprocs, np.int32)
@@ -491,6 +442,7 @@ class DtypeTransposer:
         t_barrier = MPI.Wtime()
         #comm.Barrier()
         t_start = MPI.Wtime()
+
         s_msg = [dtx,
                  (np2array(self.tx_counts),
                   np2array(self.tx_displacements)),
@@ -500,7 +452,13 @@ class DtypeTransposer:
                  (np2array(self.rx_counts),
                   np2array(self.rx_displacements)),
                  self.mpi_dtype]
-        comm.Alltoallv(s_msg, r_msg)
+        
+        self.comm.Barrier()
+        log.debug('Alltoallv dtype=%s Tx: %s %s %s Rx: %s %s %s', self.dtype,
+                  self.tx_counts, self.tx_displacements, dtx.shape,
+                  self.rx_counts, self.rx_displacements,self.drx.shape)   
+        
+        self.comm.Alltoallv(s_msg, r_msg)
         t_end = MPI.Wtime()
         latency = (t_end - t_start)*1e3
 
@@ -518,6 +476,7 @@ class ByteTransposer:
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
         self.nbeam = info.nbeams
         self.nrx = info.nrx
+        self.dtype_complex = get_transpose_dtype(info, cplx_dtype=np.complex64) # the guaranteed compelx version. SearchPipeline needs it
         self.dtype = get_transpose_dtype(info)
         self.mpi_dtype = MPI.BYTE
         values = info.values
@@ -529,8 +488,13 @@ class ByteTransposer:
         self.displacement = self.dtype.itemsize
         self.nmsgs = values.transpose_nmsg
 
-        log.info('Transposing %s with type=%s  size=%s NMSG=%s msgsize=%s', self.dtype, self.mpi_dtype, self.dtype.itemsize, self.nmsgs, self.msgsize)
+        self.comm = info.pipe_info.mpi_app.rx_beam_comm
+        numprocs = self.comm.Get_size()
+
+        log.info('Transposing %s with type=%s  size=%s NMSG=%s msgsize=%s numprocs=%s', 
+                 self.dtype, self.mpi_dtype, self.dtype.itemsize, self.nmsgs, self.msgsize, numprocs)
         
+        assert self.nrx + self.nbeam == numprocs, f'Incorrect number of processes in rx_beam_comm. numproc={numproc} nbeams={self.nbeam} nrx={self.nrx}'
         self.values = info.values
         self.tx_counts = np.zeros(numprocs, np.int32)
         self.tx_displacements = np.zeros(numprocs, np.int32)
@@ -540,8 +504,10 @@ class ByteTransposer:
     def all2all(self, dtx):
         nmsgs = self.nmsgs
         t = Timer()
-        #comm.Barrier() # Barrier can take a super long time and slow everything to a halt. dont do it
+        log.debug('before barrier')
+        self.comm.Barrier() # Barrier can take a super long time and slow everything to a halt. dont do it
         t.tick('barrier')
+        log.debug('After barrier')
 
         assert self.nmsgs * self.msgsize == self.dtype.itemsize, 'for now we have to have whole numbers of messages. TODO: Handle final block'
         for imsg in range(nmsgs):
@@ -557,19 +523,23 @@ class ByteTransposer:
                      self.mpi_dtype]
             #print('SMSG', s_msg[1:])
             #print('RMSG', r_msg[1:])
-            comm.Alltoallv(s_msg, r_msg)
+            self.comm.Alltoallv(s_msg, r_msg)
             
         t.tick('transpose')
         self.last_timer = t
+        log.debug('After alltoall')
 
         return self.drx
 
-class TransposeSender(ByteTransposer):
+class TransposeSender(DtypeTransposer):
     def __init__(self, info):
         super().__init__(info)
         nbeam = self.nbeam
-        self.tx_counts[:nbeam] = 1
-        self.tx_displacements[:nbeam] = np.arange(nbeam, dtype=np.int32)
+        # Ranks are [RX[0], RX[1], ... RX[N-1], BEAM[0], Beam[1], ... BEAM[NBEAM-1]]
+        nrx = self.nrx
+
+        self.tx_counts[-nbeam:] = 1
+        self.tx_displacements[-nbeam:] = np.arange(nbeam, dtype=np.int32)
         self.drx = np.zeros((1), dtype=self.dtype) # Dummy for all toall make zero if possible
 
     def send(self, dtx):
@@ -577,35 +547,49 @@ class TransposeSender(ByteTransposer):
         assert dtx.dtype == self.dtype, f'Attempt to send invalid dtype. expected {self.dtype} but got {dtx.dtype}'
         return self.all2all(dtx)
 
-class TransposeReceiver(ByteTransposer):
+class TransposeReceiver(DtypeTransposer):
     def __init__(self, info):
         super().__init__(info)
         nbeam = self.nbeam
         nrx = self.nrx
-        self.rx_counts[nbeam:] = 1 # receive same amount from every tx
-        self.rx_displacements[nbeam:] = np.arange(nrx, dtype=np.int32)
+        self.rx_counts[:nrx] = 1 # receive same amount from every tx
+        self.rx_displacements[:nrx] = np.arange(nrx, dtype=np.int32)
         self.drx = np.zeros(nrx, dtype=self.dtype)
         self.dtx = np.zeros((1), dtype=self.dtype) # dummy buffer for sending TODO: make zero if possible
+        self.drx_complex = self.drx.view(dtype=self.dtype_complex) # make a complex view into the same data
 
     def recv(self):
         return self.all2all(self.dtx)
 
 
-def proc_rx(pipe_info): 
+def proc_rx_get_headers(proc): 
     '''
     Process 1 card per beam
     1 card = 6 FGPAs
     '''
+    pipe_info = proc.pipe_info
     set_scheduler(RX_PRIORITY)
     ccap = open_source(pipe_info)
     log.info('opened source')
 
     # tell all ranks about the headers
-    all_hdrs = comm.allgather(ccap.fpga_headers)
-    log.info('Got headers')
+    rx_comm = pipe_info.mpi_app.app_comm
+    all_hdrs = rx_comm.gather(ccap.fpga_headers, root=0)
+    if all_hdrs is None:
+        all_hdrs = [] # Just return Empty if we're not root
     
-    info = MpiObsInfo(all_hdrs, pipe_info)
-    log.info('got info')
+    log.info('Got headers from other RX')
+    proc.ccap = ccap
+    return all_hdrs
+
+def proc_rx_get_fid0(proc):
+    #all_hdrs = world.bcast(all_hdrs, root=0)
+    #info = MpiObsInfo(all_hdrs, pipe_info)
+    #log.info('got info')
+    pipe_info = proc.pipe_info
+    info = proc.obs_info
+    ccap = proc.ccap
+
     nbeam = pipe_info.nbeams
     cardidx = pipe_info.cardid
     values = pipe_info.values
@@ -614,7 +598,7 @@ def proc_rx(pipe_info):
     nant = info.nant
     nc = NCHAN*NFPGA
     npol_in = info.npol
-    assert numprocs == nrx + nbeam
+    assert pipe_info.mpi_app.app_comm.Get_size() == nrx
 
     dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
     log.info('made packet %s this is a thing', dummy_packet.shape)
@@ -629,26 +613,34 @@ def proc_rx(pipe_info):
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
     # Just need some types of the data so the list can be typed
     
-
     log.info('Dummy packet shape %s dtype=%s. Averager output shape:%s dtype=%s', dummy_packet.shape, dummy_packet.dtype, averager.output.shape, averager.output.dtype)
 
     # Do dummy transpose to warm up and make connections
     transposer.send(averager.output)
+
+    proc.transposer = transposer
+    proc.averager = averager
     
     fid0 = ccap.start()
-
     # send fid0 to all beams
-    fid0 = comm.bcast(fid0, root=pipe_info.rx_processor_rank0)
-
-    pktiter = ccap.packet_iter()
-    packets, fids = next(pktiter)
-
-    averaged = averager.accumulate_packets(packets)
-    averaged = averager.output
-    info.fid0 = fid0
+    #fid0 = world.bcast(fid0, root=pipe_info.rx_processor_rank0)
     
-    start_fid = info.fid_of_block(1)
-    log.info(f'rank={rank} fid0={fid0} {start_fid} {type(start_fid)}')
+    return fid0
+
+def proc_rx_run(proc):
+
+    ccap = proc.ccap
+    info = proc.obs_info
+    averager = proc.averager
+    transposer = proc.transposer
+    cardidx = proc.pipe_info.mpi_app.cardid
+    
+    pktiter = ccap.packet_iter()
+
+    # receive dummy value and discard??
+    packets, fids = next(pktiter)
+    averaged = averager.accumulate_packets(packets)
+ 
     best_avg_time = 1e6
     
     t_start = MPI.Wtime()
@@ -703,7 +695,7 @@ def proc_rx(pipe_info):
         transpose_end = MPI.Wtime()
         transpose_time = transpose_end - avg_end
         
-        if cardidx == 0:
+        if cardidx == 0 and False:
             read_size_bytes = dummy_packet.nbytes*NFPGA
             size_bytes = averaged.size * averaged.itemsize
             transpose_rate_gbps = size_bytes * 8/1e9/transpose_time
@@ -724,7 +716,11 @@ def proc_rx(pipe_info):
                      timer)
 
         t_start = MPI.Wtime()
-        timer = Timer()
+        if timer.total.perf > 0.120:
+            log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
+            
+        timer = Timer(args={'ibuf':ibuf+1})
+        values = proc.pipe_info.values
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
 
@@ -757,7 +753,7 @@ class FilterbankSink:
         data has shape (nrx, nt,  nchan_per_rx) e.g. (36, 128, 24) 
         '''
 
-        assert beam_data.dtype == np.float32, 'WE set nbits=32 for this filterbank, so if it isnt we need to do some work'
+        assert beam_data.dtype == np.float32, f'WE set nbits=32 for this filterbank, so if it isnt we need to do some work. Type was {beam_data.dtype}'
         dout = np.transpose(beam_data, [1, 0, 2])
 #        if rank == 0:
             #print(dout.shape, dout.flatten().shape, dout.size, dout.mean(), dout.std())
@@ -909,7 +905,7 @@ class UvFitsFileSink:
         self.uvout.fout.flush()
         t.tick('flush')
         if self.beamno == 0:
-            log.info(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
+            log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
         self.blockno += 1
 
 
@@ -921,10 +917,22 @@ class UvFitsFileSink:
     def __del__(self):
         self.close()
         
-def proc_beam(pipe_info):
+
+def transpose_beam_get_fid0(proc):
+    info = proc.obs_info
+
+    transposer = TransposeReceiver(info)
+    # Find first frame ID
+    log.info('Recieving dummy transpose for warmup')
+    transposer.recv()
+    proc.transposer = transposer
+
+    return 0
+
+def transpose_beam_run(proc):
     set_scheduler(BEAM_PRIORITY)
-    all_hdrs = comm.allgather([''])
-    info = MpiObsInfo(all_hdrs, pipe_info)
+    pipe_info = proc.pipe_info
+    info = proc.obs_info
 
     nbeam = pipe_info.nbeams
     values = pipe_info.values
@@ -933,163 +941,414 @@ def proc_beam(pipe_info):
     nt = info.nt
     nant = info.nant
     nc = NCHAN*NFPGA
+    numprocs = pipe_info.mpi_app.app_size
+    assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
 
-    assert numprocs == nrx + nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
-
-    # OK - I need to gather all the headers from the data recivers
-    # Beams don't kow headers, so we just send nothings
-    if rank == 0:
+    if pipe_info.mpi_app.app_rank == 0:
         print(f'ObsInfo {info}')
 
     os.makedirs(values.outdir, exist_ok=True)
 
-    transposer = TransposeReceiver(info)
-    # Find first frame ID
-    log.info('Recieving dummy transpose for warmup')
-    transposer.recv()
-
-    fid0 = 0
-    fid0 = comm.bcast(fid0, root=pipe_info.rx_processor_rank0)
-    info.fid0 = fid0
+    nf = len(info.vis_channel_frequencies)
+    nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
+    nbl = info.nbl_flagged    
     
     cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
-    pipeline_sink = SearchPipelineSink(info)
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
     iblk = 0
+
+    beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
+    beam_comm = pipe_info.mpi_app.beam_chain_comm
+
+    # requested block to planner to get moving
+    transposer = proc.transposer
+
+   # warmup send
+    beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
+
 
     try:
         while True:
-            t = Timer()
+            t = Timer(args={'iblk':iblk})
             beam_data = transposer.recv()
+            if iblk == 0:
+                log.info('got block 0')
+            beam_data_complex = transposer.drx_complex # a view into the same data.
             t.tick('transposer')
             cas_filterbank.write(beam_data['cas'])
             t.tick('cas')
             ics_filterbank.write(beam_data['ics'])
             t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+            vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
             t.tick('visblock')
-            vis_file.write(vis_block)
+            vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
             t.tick('visfile')
-            pipeline_sink.write(vis_block)
-            t.tick('pipeline')
+            vis_accum.write(vis_block_complex)
+            t.tick('accumulate')
+            if vis_accum.is_full:
+                beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
+                t.tick('Send')
+                vis_accum.reset()
+                t.tick('vis reset')
 
-            if beamid == 0:
+            if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
-            
+
+            if t.total.perf > 0.120 and iblk > 0:
+                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
+
             iblk += 1
+
+
 
     finally:
         print(f'Closing beam files for {beamid}')
         cas_filterbank.close()
         ics_filterbank.close()
         vis_file.close()
+        vis_accum.close()
+
+
+def proc_beam_run(proc):
+    #set_scheduler(BEAM_PRIORITY)
+    pipe_info = proc.pipe_info
+    info = proc.obs_info
+
+    nbeam = pipe_info.nbeams
+    values = pipe_info.values
+    beamid = pipe_info.beamid
+    nrx = info.nrx
+    numprocs = pipe_info.mpi_app.app_size
+    assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
+
+    pipeline_sink = SearchPipelineSink(info)
+    iblk = 0
+    # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
+    # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
+    # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
+    PLAN_MSG_SIZE = 32*1024*1024
+
+    planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
+    transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
+    candproc_rank = pipe_info.mpi_app.CANDPROC_RANK
+    beam_comm = pipe_info.mpi_app.beam_chain_comm
+
+    # requested block to planner to get moving
+    update_uv_blocks = pipe_info.values.update_uv_blocks
+    planner_iblk = update_uv_blocks # start at this iblk
+    log.info('Requesting iblk %d from planner %d', planner_iblk, planner_rank)
+    beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
+    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
+
+    nf = len(info.vis_channel_frequencies)
+    nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
+    nbl = info.nbl_flagged    
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
+    pipeline_data = vis_accum.pipeline_data
+    
+    # warumup recv
+    beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+    cand_buf = MpiCandidateBuffer.for_tx(beam_comm, candproc_rank)
+
+    try:
+        while True:
+            t = Timer(args={'iblk':iblk})
+            # recieve from transposer rank
+            beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+
+            t.tick('recv')
+            if iblk == 0:
+                log.info('got block 0')
+            
+            if pipeline_sink.ready_for_next_plan:
+                plan_received, plan = req.test()
+                t.tick('recv plan')
+
+                if plan_received:
+                    pipeline_sink.set_next_plan(plan)
+                    planner_iblk += update_uv_blocks
+                    t.tick('set next plan')
+                    beam_comm.send(planner_iblk, dest=planner_rank)
+                    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)    
+
+            candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
+            t.tick('pipeline')
+            if candidates is not None:
+                log.info('Sending ncands %s maxsnr=%0.2f', len(candidates), cand_buf.cands['snr'].max())
+                cand_buf.send(len(candidates))
+
+            if beamid == 0 and False:
+                log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
+
+            if t.total.perf > 0.120 and iblk > 0:
+                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
+
+            iblk += 1
+
+
+
+    finally:
+        print(f'Closing beam files for {beamid}')
         pipeline_sink.close()
 
 
-def parse_host_devices(hosts, devstr, devices):
-    '''
-    Get host devices from device string
-    :hosts: list of host names
-    :devstr: string like 'seren-01:1,seren-04:0,seren-5:0-1' of 'host:strrange' list of devices
-    :devices: Tuple of devices that are normally allowed, e.g. (0,1)
-    '''
 
-    dead_cards = [dc.split(':') for dc in devstr.split(',')]
-    host_cards = {}
-    for h in hosts:
-        my_devices = devices[:]
-        my_bad_devices = [strrange(dc[1]) for dc in dead_cards if dc[0] == h]
-        all_bad_devices = set()
-        for bd in my_bad_devices:
-            all_bad_devices.update(bd)
-
-
-        host_cards[h] = tuple(sorted(set(devices) - all_bad_devices))
+class Processor:
+    def __init__(self, pipe_info):
+        self.pipe_info = pipe_info
         
-    return host_cards
+        is_rx = pipe_info.mpi_app.is_rx_processor
+        world = self.pipe_info.mpi_app.world
+        hdrs = self.get_headers()
+        log.debug(f'Headers: Got {len(hdrs)} hdrs before bcast')
+        if len(hdrs) > 0:
+            log.debug('Headers: %s', hdrs)
+        hdrs = world.bcast(hdrs, root=0)
+        log.debug(f'Headers: Got {len(hdrs)} hdrs after bcast')
+        world.Barrier()
+        log.debug('Barrier1')
+        self.obs_info = MpiObsInfo(hdrs, pipe_info)
+        world.Barrier()
+        log.debug('Barrier2')
+        fid0 = self.get_fid0()
+        world.Barrier()
+        log.debug('Barrier3')
+        log.debug('FID0 before bcast %d', fid0)
+        fid0 = world.bcast(fid0, root=0)
+        log.debug('FID0 after bcast %d',fid0)
+        self.obs_info.fid0 = fid0            
+        start_fid = self.obs_info.fid_of_block(1)
+        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
 
-def dump_rankfile(pipe_info, fpga_per_rx=3):
-    from craco import mpiutil
-    values = pipe_info.values
-    fpga_per_rx = values.nfpga_per_rx
-    hosts = pipe_info.hosts
+    def get_headers(self):
+        return ''
     
-    log.debug("Hosts %s", hosts)
-    total_cards = len(values.block)*len(values.card)
+    def get_fid0(self):
+        return 0
     
-    if values.max_ncards is not None:
-        total_cards = min(total_cards, values.max_ncards)
-
-    nrx = total_cards*len(values.fpga) // fpga_per_rx
-    nbeams = values.nbeams
-    nranks = nrx + nbeams
-    ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts) if values.ncards_per_host is None else values.ncards_per_host
+    def run(self):
+        pass
         
-    nrx_per_host = ncards_per_host
-    nbeams_per_host = nbeams //len(hosts)
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
-    rank = 0
-    host_search_beams = {}
-    devices = (0,1)
-    host_cards = parse_host_devices(hosts, values.dead_cards, devices)
-    
-    for beam in range(nbeams):
-        hostidx = beam % len(hosts)
-        assert hostidx < len(hosts), f'Invalid hostidx beam={beam} hostidx={hostidx} lenhosts={len(hosts)}'
-        host = hosts[hostidx]
-        slot = 0 # put on the U280 slot. If you put in slot1 it runs about 20% 
-        core='0-9'
-        devices = host_cards[host]
-        this_host_search_beams = host_search_beams.get(host,[])
-        host_search_beams[host] = this_host_search_beams
-        if beam in values.search_beams:
-            this_host_search_beams.append(beam)
+class RxProcessor(Processor):
+    def get_headers(self):
+        return proc_rx_get_headers(self)
+    def get_fid0(self):
+        return proc_rx_get_fid0(self)
+    def run(self):
+        return proc_rx_run(self)
+
+class BeamTransposer(Processor):
+    def get_fid0(self):
+        # Need to run dummy tranpose before fid0 is broadcast, otehrwise we get
+        # a deadlock
+        return transpose_beam_get_fid0(self)
+
+    def run(self):
+        return transpose_beam_run(self)
+
+class BeamProcessor(Processor):
+    def run(self):
+        return proc_beam_run(self)
+
+class PlannerProcessor(Processor):
+    def run(self):
+        count = 0
+        app = self.pipe_info.mpi_app
+        self.app = app
+        comm = self.pipe_info.mpi_app.beam_chain_comm
+        self.comm = comm
+        fid0 = self.obs_info.fid0
+        start_fid = self.obs_info.fid_of_block(1)
+        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        update_uv_blocks = self.pipe_info.values.update_uv_blocks
+        iblk = 0
+        adapter = VisInfoAdapter(self.obs_info, iblk)
+        plan = PipelinePlan(adapter, self.obs_info.values) # don't send this one. It was made once already when the beam processor made the pipeline
+        log.info('Completed initial plan')
+        # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
+        # YUK this smells.
+        self.send_to_candproc(iblk, plan)
+
+        while True:     
+            iblk += update_uv_blocks
+
+            log.info('Waiting for request from %d. Expect iblk=%d', app.BEAMPROC_RANK, iblk)
+            req_iblk = comm.recv(source=app.BEAMPROC_RANK)
+            log.info('Got request to make plan for iblk=%d. My count=%d', req_iblk, iblk)
+            assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
+            adapter = VisInfoAdapter(self.obs_info, iblk)
+            plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
+            plan.fdmt_plan # lazy evaluate fdmt_plan
+            plan_data = {'count':count, 'iblk': iblk, 'plan':plan}
+
+            # blocking send - it just sends the data. It continues whether or not the beam has received it.
+            # To not just fill buffers for ever, we'll need to wait for an ack from the beam
+            comm.send(plan_data, dest=app.BEAMPROC_RANK)            
+            self.send_to_candproc(iblk, plan)
+            log.info('Plan sent count=%d iblk=%d', count, iblk)
+
+            count += 1
+
+    def send_to_candproc(self, iblk, plan):
+        wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
+        self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
+
+
+
+
+class BeamCandProcessor(Processor):
+    def run(self):
+        t = Timer()
+        app = self.pipe_info.mpi_app
+        rx_comm = app.beam_chain_comm
+        cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
+        out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
+        from craco.candpipe import candpipe
+        candout_dir = os.path.join('results/clustering_output')
+        os.makedirs(candout_dir, exist_ok=True)
+        beamid = self.pipe_info.beamid
+        candfname = f'candidates.b{beamid:02d}.txt'
+        try:
+            os.symlink(os.path.join('../', candfname), os.path.join('results', candfname))
+        except FileExistsError:
+            pass
+                
+        candpipe_args = candpipe.get_parser().parse_args([f'-o {candout_dir}'])
+        
+        pipe = candpipe.Pipeline(self.pipe_info.beamid, 
+                                 args=candpipe_args,  # use defaults
+                                 config=None,  # use defaults
+                                 src_dir='.', 
+                                 anti_alias=True)
+        log.info('Made pipeline')
+        self.pipe = pipe
+        
+        trace_file = MpiTracefile.instance()
+        # blocking wait for wcs data
+        log.info('Waiting for WCS from %d', app.PLANNER_RANK)
+        wcs_data = rx_comm.recv(source=app.PLANNER_RANK)
+        self.iblk = 0
+        log.info('Got first WCS %s', wcs_data)
+        self.new_wcs = wcs_data
+        self.check_wcs()
+        
+        # make request for next wcs data
+        wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
+
+        while True:
+            # async receive as we want to async transmit so the pipeeline
+            # isn't slowed by the beam cand processor       
+            t = Timer(args={'iblk':self.iblk})
+            wcs_received, new_wcs = wcs_req.test()
+            if wcs_received:
+                self.new_wcs = new_wcs
+                wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
+                t.tick('RX wcs')
             
-        devid = None
-        if beam in this_host_search_beams:
-            devid = this_host_search_beams.index(beam)
-            if devid not in devices:
-                devid = None
+            ncand = cand_buff.recv()
+            t.tick('recv')
+            maxsnr_in = cand_buff.cands['snr'].max()
+            log.info('Got %d candidates in BeamCandProc maxsnr=%0.2f', ncand, maxsnr_in)
+            #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
+            short_cands = cand_buff.cands[:ncand]
 
-        log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
-        rank_info = BeamRankInfo(beam, rank, host, slot, core, devid)
-        pipe_info.beam_ranks.append(rank_info)
-        rank += 1
+            self.check_wcs()
+            out_df = pipe.process_block(short_cands, out_cand_buff.cands)
+            maxsnr = out_cand_buff.cands['snr'].max()
+            log.info('Candidates nin=%d nout=%d maxsn_df=%f maxsn_cands=%f', ncand, len(out_df), out_df['snr'].max(), maxsnr)
+            trace_file += tracing.CounterEvent('Candidates', ts=None, args={'ncandin':ncand, 'ncandout': len(out_df), 'maxsnr':maxsnr})
+            t.tick('process')
 
-    rxrank = 0
-    cardno = 0
-    for block in values.block:
-        for card in values.card:
-            cardno += 1
-            if values.max_ncards is not None and cardno >= values.max_ncards + 1:
-                break
-            for fpga in values.fpga[::fpga_per_rx]:
-                hostidx = rxrank // nrx_per_host
-                hostrank = rxrank % nrx_per_host
-                host = hosts[hostidx]
-                slot = 1 # fixed because both cards are on NUMA=1
-                # Put different FPGAs on differnt cores
-                evenfpga = fpga % 2 == 0
-                ncores_per_socket = 10
-                ncores_per_proc = 1
-                icore = (hostrank*ncores_per_proc) % ncores_per_socket # use even numbered cores becase of hyperthreading
-                core='0-9'
-                core = f'{icore}-{icore+ncores_per_proc-1}'
-                slot = 1 # where the network cards are
-                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
-                pipe_info.receiver_ranks.append(rank_info)
-                rank += 1
-                rxrank += 1
+            # gather to everyone - synchronous
+            # SEnd MAX_NCAND_OUT per process every time. 
+            # Non-existent candiates have -1 as s/n
+            
+            out_cand_buff.gather()
+            t.tick('gather')
+            self.iblk += 1
 
-        if values.dump_rankfile:
-            with open(values.dump_rankfile, 'w') as fout:
-                for rank_info in pipe_info.beam_ranks:
-                    fout.write(rank_info.rank_file_str+'\n')
-                for rank_info in pipe_info.receiver_ranks:
-                    fout.write(rank_info.rank_file_str+'\n')
+    def set_wcs(self, wcs_data):        
+        hdr = wcs_data['hdr']
+        iblk = wcs_data['iblk']
+        self.pipe.set_current_psf(iblk,hdr)
 
+    def check_wcs(self):
+        if self.iblk == self.new_wcs['iblk']:
+            self.set_wcs(self.new_wcs)
+        
+
+            
+class CandMgrProcessor(Processor):
+    def run(self):
+        app = self.pipe_info.mpi_app
+        tx_comm = app.cand_comm
+        nbeams = self.obs_info.nbeams
+        iblk = 0
+        self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
+        self.cand_sender = SnoopySender()
+        cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
+        # libpq.so.5 is only installed on root node. This way it only runs on the root node.
+        # SHoud make slackpostmanager not reference psycopg2
+        from craco.craco_run.auto_sched import SlackPostManager
+
+        self.slack_poster = SlackPostManager(test=False)
+        while True:
+            t = Timer(args={'iblk':iblk})
+            cands.gather()
+            t.tick('Gather')
+            self.multi_beam_process(cands.cands)
+            t.tick('Multi process')
+            iblk += 1
+
+    def multi_beam_process(self, cands):
+        '''
+        :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
+        cands['snr'] = -1 for no candidates
+        '''
+        #cands = cands[cands['snr'] > 0]
+        valid_cands = cands[cands['snr'] > 0]
+        
+        maxidx = np.argmax(cands['snr'])
+        bestcand = cands[maxidx]        
+        self.cand_writer.update_latency(valid_cands)
+        self.cand_writer.write_cands(valid_cands)
+        trace_file = MpiTracefile.instance()
+        log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
+        latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
+        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
+        trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
+        outdir = self.pipe_info.values.outdir
+        bestcand_dict = {k:bestcand[k] for k in bestcand.dtype.names}
+
+        if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
+            log.critical('Sending candidate %s', bestcand_dict)
+            self.cand_sender.send(bestcand)
+            trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
+            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}')
+
+
+
+def processor_class_factory(app):                    
+    if app.is_beam_transposer:
+        proc_klass = BeamTransposer
+    elif app.is_beam_processor:
+        proc_klass = BeamProcessor
+    elif app.is_rx_processor:
+        proc_klass = RxProcessor
+    elif app.is_planner_processor:
+        proc_klass = PlannerProcessor
+    elif app.is_cand_processor:
+        proc_klass = BeamCandProcessor
+    elif app.is_cand_manager:
+        proc_klass = CandMgrProcessor
+    else:
+        raise ValueError(f'Case not handled {app.app_num} {app.rank_info}')
+    
+    return proc_klass
 
 def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -1111,8 +1370,10 @@ def get_parser():
     parser.add_argument('--dead-cards', help='List of dead cards to avoid. e.g.seren-01:1,seren-04:2', default='')
     parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
     parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
-    
+    parser.add_argument('--proc-type', help='Process type')
+    parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=10.0)
     parser.add_argument(dest='files', nargs='*')
+    
     parser.set_defaults(verbose=False)
 
     return parser
@@ -1122,21 +1383,20 @@ def _main():
     parser = get_parser()
     values = parser.parse_args()
     
-    mpiutil.setup_logging(comm, values.verbose)
+    mpiutil.setup_logging(MPI.COMM_WORLD, values.verbose)
 
-    try :
+    try :        
         pipe_info = MpiPipelineInfo(values)
         
-        dump_rankfile(pipe_info) # always dump the rankfile - just need to do this to setup pipe_info
         if values.dump_rankfile:
             sys.exit(0)
-            
-        if pipe_info.is_beam_processor:
-            proc_beam(pipe_info)
-        else:
-            proc_rx(pipe_info)
 
-        log.info(f'Rank {rank}/{numprocs} complete. Waiting for everything')
+        app = pipe_info.mpi_app
+        proc_klass = processor_class_factory(app)
+        processor = proc_klass(pipe_info)
+        processor.run()
+    
+        log.info(f'run() complete. Waiting for everything')
         raise StopIteration('Throwing a stop error so we can bring down the pipeline')
         #comm.Barrier()
     except:

@@ -13,6 +13,9 @@ from numba.types import List
 from craco.utils import get_target_beam
 from typing import List
 from craft.freq_config import FrequencyConfig
+from craco.mpi_tracefile import MpiTracefile
+from craco.tracing import tracing
+import time
 
 log = logging.getLogger(__name__)
 
@@ -46,15 +49,16 @@ def frame_id_iter(i, fid0):
     if no block has the given frame ID, it will yield None
     '''
 
-    frame_id = fid0
+    expected_frame_id = fid0
     fidoff = np.uint64(NSAMP_PER_FRAME)
     assert isinstance(fid0, np.uint64), f'FID0 is the wrong type {fid0} {type(fid0)}'
     currblock = None
-    last_frameid = frame_id
+    last_frameid = expected_frame_id
     last_bat = 0
     curr_frameid = np.uint64(0)
+    trace_file =  MpiTracefile.instance()
     while True:
-        if curr_frameid < frame_id:
+        if curr_frameid < expected_frame_id:
             try:
                 curr_frameid, currblock = next(i)
             except StopIteration:
@@ -62,21 +66,37 @@ def frame_id_iter(i, fid0):
 
         curr_bat = currblock['bat'][0]
 
-        #assert curr_frameid >= frame_id, f'Block should have a timestamp now or in the future. curr_frameid={curr_frameid} frame_id={frame_id}'
+        # skipping frames earlier than fid0.
+        # This lets us setup a time in advance so we can get settled before data starts
+        # crashing into us 
+        if curr_frameid < fid0:
+            continue
 
-        if curr_frameid == frame_id:
+    
+        if curr_frameid == expected_frame_id:
             b = currblock
-            log.debug('HIT frame_id=%d bat=', frame_id, curr_bat)
+            log.debug('HIT frame_id=%d bat=%d', expected_frame_id, curr_bat)
         else:
-            log.info(f'MISS expected frame_id={frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={int(curr_frameid) - int(last_frameid)} expected-curr={frame_id-curr_frameid} BAT curr-last={curr_bat - last_bat} fid0={fid0}')
+            nlost_frames = int(curr_frameid) - int(last_frameid)
+            nlost_curr = curr_frameid - expected_frame_id
+            log.info(f'MISS expected frame_id={expected_frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={nlost_frames} curr-expected={nlost_curr} BAT curr-last={curr_bat - last_bat} fid0={fid0}')
+            ts = trace_file.now_ts()
+            #args = {'lost_frames':nlost_frames, 
+            #        'curr_minus_expected':nlost_curr, 
+             #       'expected_frame_id':expected_frame_id, 
+             #       'current_frameid':curr_frameid,
+              #      'last_frameid':last_frameid}
+            args = {'lost_frames':nlost_frames}
+            trace_file += tracing.InstantEvent('PacketLoss', ts)
+            trace_file += tracing.CounterEvent('PacketLoss', ts, args)
             b = None
 
-        if curr_frameid >= fid0:
-            assert b is None or (curr_frameid == frame_id), f'Logic error. Block should be none or Frame IDs should be equal. curr_frameid={curr_frameid} frameid={frame_id} block is None?{b is None}'
-            
-            yield frame_id, b
-            frame_id += fidoff
-            
+
+        assert b is None or (curr_frameid == expected_frame_id), f'Logic error. Block should be none or Frame IDs should be equal. curr_frameid={curr_frameid} frameid={expected_frame_id} block is None?{b is None}'
+        
+        yield expected_frame_id, b
+        expected_frame_id += fidoff
+        
         last_frameid = curr_frameid
         last_bat = curr_bat
 

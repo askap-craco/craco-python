@@ -10,11 +10,17 @@ import logging
 from epics import PV,caget,caput
 import subprocess
 from subprocess import Popen, TimeoutExpired
+from astropy import units as u
 import datetime
 import shutil
 import time
 import signal
 import atexit
+import numpy as np
+from craco.prep_scan import touchfile,ScanPrep
+from craft.cmdline import strrange
+from craco.craco_run import auto_sched
+
 
 log = logging.getLogger(__name__)
 
@@ -27,23 +33,9 @@ def mycaget(s):
     
     return r
 
-def touchfile(f, directory=None, check_exists=True):
-    date = datetime.datetime.utcnow()
-    if directory is None:
-        fout = f
-    else:
-        fout = os.path.join(directory, f)
-
-    if check_exists and os.path.exists(fout):
-        raise ValueError(f'touchfile {fout} exists. Somehting bad has happend')
-    
-    with open(fout, 'w') as outfile:
-        outfile.write(date.isoformat() + '\n')
-
-    return fout
-
-
 scandir = None # Yuck. 
+stopped = False
+do_calibration = None
 
 
 def _main():
@@ -58,8 +50,12 @@ def _main():
     parser.add_argument('-a','--card', help='Cards to download', default='1-12')
     parser.add_argument('--block', help='Blocks to download', default='5-7')
     parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
-    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)
-    
+    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)    
+    parser.add_argument('--metadata', help='Prep scan with this metadata file')
+    parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
+    parser.add_argument('--search-beams', help='Beams to search')
+    parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
+    parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -73,22 +69,19 @@ def _main():
             level=logging.INFO,
             format=lformat,
             datefmt='%Y-%m-%d %H:%M:%S')
-
-    scanid = mycaget('ak:md2:scanId_O')
-    sbid = mycaget('ak:md2:schedulingblockId_O')
-    target = mycaget('ak:md2:targetName_O')
-    bigdir = os.environ['CRACO_DATA']
-    now = datetime.datetime.utcnow()
-    nowstr = now.strftime('%Y%m%d%H%M%S')
-    scandir = os.path.join(bigdir, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
-    targetdir = os.path.join(bigdir, f'SB{sbid:06}', 'targets', target.replace(' ','_'))
-    targetlink = os.path.join(targetdir, nowstr)
-    os.makedirs(scandir)
-    touchfile('SCAN_START', directory=scandir)
-    os.chdir(scandir)
-    os.makedirs(targetdir, exist_ok=True)
     
-    os.symlink(scandir, targetlink)
+    scandir = os.environ['SCAN_DIR']
+    prep = ScanPrep.load(scandir)
+    scanid = prep.scan_id
+    sbid = prep.sbid
+    target = prep.targname
+
+    calfinder = auto_sched.CalFinder(sbid)
+    calpath = calfinder.get_cal_path() # None if nothign available.
+    do_calibration = calpath is None # do a calibration scan if no calibration available.
+
+    os.chdir(scandir)
+    touchfile('SCAN_START', directory=scandir, check_exists=False)        
     target_file = os.path.join(scandir, 'ccap.fits')
     log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
 
@@ -96,56 +89,81 @@ def _main():
     #hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
     hostfile = os.environ['HOSTFILE']
     shutil.copy(hostfile, scandir)
-    #pol='--pol-sum'
+    beam = values.beam # all beams, tscrucnh
+
 
     if values.transpose:
         cmdname = 'mpipipeline.sh'
     else:
         cmdname = 'mpicardcap.sh'
 
-    beam = values.beam # all beams, tscrucnh
     #beam = 0 # given beam no tscrunch
     if values.pol_sum:
         pol = '--pol-sum'
     else:
         pol = '--dual-pol'
-    
 
-    if beam == -1: # all beams
-        beam = '' # all beams
-        tscrunch='--tscrunch 32'
-        spi='--samples-per-integration 64'
+    if values.phase_center_filterbank:
+        pcb = f'--phase-center-filterbank {values.phase_center_filterbank}'
     else:
-        beam = f'--beam {beam}' # single beam
-        tscrunch = ''
-        spi = '--samples-per-integration 32'
+        pcb = ''
+
+    search_vis_tscrunch = '--vis-tscrunch 4' # if we're conservative
+    #search_vis_tscrunch = '--vis-tscrunch 2' # going to guns!
+    # tscrunch scrunches the packets
+    calibration = '' if calpath is None else f'--calibration {calpath}'
+    spi = '--samples-per-integration 64' if beam == -1 else '--samples-per-integration 32' # spi64 for all beams, or spi32 for single beam
+    tscrunch = '--tscrunch 32' if beam == -1 else '' # tscrunch packets for all beams. Otherwise leave them alone. But tscrunc is only for non transposing
+    vis_tscrunch = '--vis-tscrunch 32' if do_calibration else search_vis_tscrunch # when calibrating make it 110ms in UVFITS file
 
     card  = f'--card {values.card}'
     block = f'--block {values.block}'
     fpga = ''
-    fpga_mask = ''
-
     # 30 cards is about the limit for cardcap
     max_ncards = f'--max-ncards {values.max_ncards}'
 
-    if values.scan_minutes is not None:
-        scan_nminutes = values.scan_minutes
-        nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
-        num_msgs = f'-N {nmsg}'
+
+    if do_calibration:
+        scan_nminutes = 2
     else:
-        num_msgs = ''
+        scan_nminutes = values.scan_minutes
+
+    nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
+    num_msgs = f'-N {nmsg}'
         
     num_cmsgs = '--num-cmsgs 1'
     num_blocks = '--num-blks 16'
     fcm = '--fcm /home/ban115/20220714.fcm'
+    metafile = '--metadata {values.metadata}' if values.metadata else ''
+    ndm = '--ndm 256'
+
+    if values.search_beams and not do_calibration:
+        search_beams = f'--search-beams {values.search_beams}'
+    else:
+        search_beams = ''   
+
+
+    valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
+
+    # Antenna handling for 36 antennas is a whole massive issue. WE're not going to handle that now. 
+    # we'll just assume we have 30 anntennas - there are all sorts of bugs in mpipipeline that cant handle sending through flagged ants 31-36
+    all_ants = set(np.arange(30) + 1)
+    flagged_ants = all_ants - valid_ants # 1 based antenna number to not include
+    flagged_ants = flagged_ants.union(set(values.flag_ants)) # also flag antennas from the cmdline
+    flagged_ants = flagged_ants - set(np.arange(6) + 31)
+    flag_ant_str = ','.join(sorted(list(map(str, flagged_ants))))
+ 
+
+    if flag_ant_str:
+        antflag = f'--flag-ants {flag_ant_str}'
+    else:
+        antflag = ''    
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 --vis-tscrunch 4'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold}'
     else:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2'
-
-    # for mpipipeline
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 
     log.info(f'Running command {cmd}')
 
@@ -156,8 +174,9 @@ def _main():
         logfile = None
     else:
         logfile = open(os.path.join(scandir, 'run.log'), 'w')
-    
-    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT)
+
+    env = os.environ.copy()
+    proc = subprocess.Popen(cmd, shell=True, stdout=logfile, stderr=subprocess.STDOUT, env=env)
     finish = False
 
     def signal_handler(sig, frame):
@@ -196,10 +215,15 @@ def _main():
 
 
 def exit_function():
-    log.info('Stopping CRACO in exit_function')
-    caput('ak:cracoStop', 1)
-    touchfile('SCAN_STOP', directory=scandir, check_exists=False)
-
+    global stopped
+    if not stopped:
+        stopped = True
+        log.info('Stopping CRACO in exit_function')
+        caput('ak:cracoStop', 1)
+        scandir = os.environ['SCAN_DIR']
+        touchfile('SCAN_STOP', directory=scandir, check_exists=False)
+        log.info('Queing calibration')
+        auto_sched.queue_calibration(scandir)
 
 if __name__ == '__main__':
     _main()
