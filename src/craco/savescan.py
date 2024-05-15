@@ -216,6 +216,7 @@ def _main():
 
 def exit_function():
     global stopped
+    global do_calibration
     if not stopped:
         stopped = True
         log.info('Stopping CRACO in exit_function')
@@ -223,7 +224,8 @@ def exit_function():
         scandir = os.environ['SCAN_DIR']
         touchfile('SCAN_STOP', directory=scandir, check_exists=False)
         log.info('Queing calibration')
-        auto_sched.queue_calibration(scandir)
+        if do_calibration:
+            auto_sched.queue_calibration(scandir)
 
 if __name__ == '__main__':
     _main()
