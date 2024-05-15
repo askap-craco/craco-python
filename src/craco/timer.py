@@ -50,23 +50,29 @@ class Timestamp:
         return s
 
 class Timer:
-    def __init__(self):
+    def __init__(self, args=None):
         self.last_ts = Timestamp.now()
         self.init_ts = self.last_ts
         self.ticks = OrderedDict()
         self.tracefile = MpiTracefile.instance()
+        self.args = {} if args is None else args
 
-    def tick(self, name):
+    def tick(self, name, args=None):
         ts = Timestamp.now()
         tdiff = ts - self.last_ts
         self.ticks[name] = tdiff
 
         # add completion event for this thing
         # timestamps are integer microseconds
+        allargs = dict(self.args)
+        if args is not None:
+            allargs.update(args)
+
         complete_event = tracing.CompleteEvent(name, 
             ts = self.last_ts.tai_ns //1e3, 
             dur=int(tdiff.perf*1e6), 
-            tdur=int(tdiff.process*1e6)) # not sure if this should be process or perf?
+            tdur=int(tdiff.process*1e6),
+            args=allargs) # not sure if this should be process or perf?
         self.tracefile.tracefile += complete_event
         
         self.last_ts = ts        

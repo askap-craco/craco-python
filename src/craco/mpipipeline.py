@@ -719,7 +719,7 @@ def proc_rx_run(proc):
         if timer.total.perf > 0.120:
             log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
             
-        timer = Timer()
+        timer = Timer(args={'ibuf':ibuf+1})
         values = proc.pipe_info.values
         if ibuf == values.num_msgs -1:
             raise ValueError('Stopped')
@@ -971,7 +971,7 @@ def transpose_beam_run(proc):
 
     try:
         while True:
-            t = Timer()
+            t = Timer(args={'iblk':iblk})
             beam_data = transposer.recv()
             if iblk == 0:
                 log.info('got block 0')
@@ -1055,7 +1055,7 @@ def proc_beam_run(proc):
 
     try:
         while True:
-            t = Timer()
+            t = Timer(args={'iblk':iblk})
             # recieve from transposer rank
             beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
 
@@ -1208,9 +1208,19 @@ class BeamCandProcessor(Processor):
         cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         from craco.candpipe import candpipe
+        candout_dir = os.path.join('results/clustering_output')
+        os.makedirs(candout_dir, exist_ok=True)
+        beamid = self.pipe_info.beamid
+        candfname = f'candidates.b{beamid:02d}.txt'
+        try:
+            os.symlink(os.path.join('../', candfname), os.path.join('results', candfname))
+        except FileExistsError:
+            pass
+                
+        candpipe_args = candpipe.get_parser().parse_args([f'-o {candout_dir}'])
         
         pipe = candpipe.Pipeline(self.pipe_info.beamid, 
-                                 args=None,  # use defaults
+                                 args=candpipe_args,  # use defaults
                                  config=None,  # use defaults
                                  src_dir='.', 
                                  anti_alias=True)
@@ -1232,7 +1242,7 @@ class BeamCandProcessor(Processor):
         while True:
             # async receive as we want to async transmit so the pipeeline
             # isn't slowed by the beam cand processor       
-            t = Timer()
+            t = Timer(args={'iblk':self.iblk})
             wcs_received, new_wcs = wcs_req.test()
             if wcs_received:
                 self.new_wcs = new_wcs
@@ -1287,7 +1297,7 @@ class CandMgrProcessor(Processor):
 
         self.slack_poster = SlackPostManager(test=False)
         while True:
-            t = Timer()
+            t = Timer(args={'iblk':iblk})
             cands.gather()
             t.tick('Gather')
             self.multi_beam_process(cands.cands)
