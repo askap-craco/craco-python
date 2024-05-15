@@ -43,18 +43,44 @@ def load_default_config():
 
     return config
 
+def make_unknown_mask(df):
+    unknown_mask = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+    return unknown_mask
+
+def filter_df_for_unknown(df):
+    '''
+    Sometimes output doesnt contain the PSR_name etc. columns
+    In which case we ust return it.
+    '''
+    try:
+        outdf = df[make_unknown_mask(df)]
+    except KeyError:
+        outdf = df
+
+    return outdf
+
+
+
 def copy_best_cand(cand_pd, cand_np):
     '''
     Copy data frame candidates to numpy candidates
     There are more that can fit, then we take the top N sorted by snr
     If there are less then re remaining will have snr=-1
     Ignore missing columns
+    Filters for only the "UNKNOWN" candidates
     '''
     #assert len(cand_pd) == len(cand_np)
     # Copy candidates from pandas data frame to numpy array
                 
     MAXN = len(cand_np)
+    # mask if possible
+    try:
+        cand_pd = cand_pd[make_unknown_mask(cand_pd)]
+    except KeyError:
+        pass
+
     N = len(cand_pd)
+    
     top_cand = cand_pd.sort_values(by='snr', ascending=False).head(MAXN)
     cand_np[N:]['snr'] = -1
     
@@ -269,31 +295,31 @@ class Pipeline:
         if isinstance(cand_in, np.ndarray):
             cand_in = self.convert_np_to_df(cand_in)
 
-        if len(cand_in) == 0:
-            cand_out = pd.DataFrame(np.zeros(0, dtype=CandidateWriter.out_dtype))
-        else:
+
+
+        # Sometimes for testing we send through a giant batch.
+        # We'll only load the PSF frm the first candidate, if possible.
+        # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
+        try:
             iblk = cand_in['iblk']
-            iblk0 = iblk[0]
-            # Sometimes for testing we send through a giant batch.
-            # We'll only load the PSF frm the first candidate, if possible.
-            # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
-            try:
+            if len(cand_in) > 0:
+                iblk0 = iblk[0]
                 self.load_psf_from_file(iblk0)
                 log.info('Loaded new PSF for iblk=%d', iblk0)
-            except FileNotFoundError: # No PSF available. Oh well. maybe next year.
-                pass
+        except FileNotFoundError: # No PSF available. Oh well. maybe next year.
+            pass
 
-            for istep, step in enumerate(self.steps):
-                cand_out = step(self, cand_in)
-                stepname = step.__module__.split('.')[-1]
-                log.debug('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
-                if self.args.save_intermediate:
-                    fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
-                    fout = os.path.join(self.args.outdir, fout)
-                    log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
-                    cand_out.to_csv(fout)
+        for istep, step in enumerate(self.steps):
+            cand_out = step(self, cand_in)
+            stepname = step.__module__.split('.')[-1]
+            log.debug('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
+            if self.args.save_intermediate:
+                fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
+                fout = os.path.join(self.args.outdir, fout)
+                log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
+                cand_out.to_csv(fout)
 
-                cand_in = cand_out
+            cand_in = cand_out
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)

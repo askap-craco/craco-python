@@ -225,6 +225,21 @@ def test_copy_best_cand():
     copy_best_cand(short_df.head(0), cands_np2)
     assert np.all(cands_np2['snr'][3:] == -1)
 
+def test_candpipe_len0(config):
+    parser = get_parser()
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    args = parser.parse_args([])
+    beamno = 4
+    pipe = Pipeline(beamno, None, config, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=True)
+    cands = load_cands(cand_fname)
+    cblk = cands[:0] # make length 0 array
+    dout = np.zeros(8, dtype=CandidateWriter.out_dtype)
+    cands_df = pipe.process_block(cblk, dout)
+    assert len(cands_df) == 0
+    # Shoudl also have additional column
+
+
+
 
 def test_candpipe_block_by_block_np(config):
     parser = get_parser()
@@ -237,12 +252,14 @@ def test_candpipe_block_by_block_np(config):
     dout = np.zeros(8, dtype=CandidateWriter.out_dtype)
 
     #all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
-    all_clustered_cands = [pipe.process_block(cblk, dout) for cblk in cand_blocker(cands)]
+    #all_clustered_cands = [pipe.process_block(cblk, dout) for cblk in cand_blocker(cands)]
     for iblk, cblk in enumerate(cand_blocker(cands)):
-        cands_df = pipe.process_block(cblk, dout)
+        cands_df = pipe.process_block(cblk, dout)        
+        cands_df = filter_df_for_unknown(cands_df)
         n = len(cands_df)
         nout = min(n, len(dout))
         best_df = cands_df.sort_values(by='snr', ascending=False)
+        
         if n > 0:
             print('hello', n)
         assert np.all(best_df.iloc[:n]['snr'] == dout[:n]['snr'])

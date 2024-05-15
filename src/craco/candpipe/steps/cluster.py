@@ -133,11 +133,14 @@ class Step(ProcessingStep):
             data['total_sample_middle'] = data['total_sample'].copy()
             data['total_sample'] = save_ts            
 
-        cls = DBSCAN(eps=reference_eps_param, 
-                     min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
+        if len(rescaled_data) > 0: # DBSCAN doesn't lik 0
+            cls = DBSCAN(eps=reference_eps_param, 
+                         min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
         
-        # data is the original dataframe
-        data["cluster_id"] = cls.labels_
+            # data is the original dataframe
+            data["cluster_id"] = cls.labels_
+        else:
+            data['cluster_id'] = []
 
         return data 
 
