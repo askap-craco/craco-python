@@ -14,8 +14,12 @@ import os
 import sys
 import logging
 from craco.candidate_writer import CandidateWriter
+from craco.mpi_tracefile import MpiTracefile
+from craco.tracing import tracing
 import mpi4py.util.dtlib
 from craco.mpiutil import np2array
+from astropy.time import Time
+from astropy import units as u
 
 log = logging.getLogger(__name__)
 
@@ -28,21 +32,39 @@ class MpiCandidateBuffer:
         self.cands = np.zeros(max_ncand, dtype=CandidateWriter.out_dtype)
         self.mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(CandidateWriter.out_dtype)
         self.mpi_msg = [self.cands, max_ncand, self.mpi_dtype]
+        self.trace_file = MpiTracefile.instance()
 
     def gather(self):
         self.comm.Gatherv(self.s_msg, self.r_msg)
-        return self.cands
+        valid = self.cands['snr'] > 0
+        outcands = self.cands[valid]
+        self.trace_cands(outcands)
+        return outcands
     
     def send(self, ncand):
         assert 0<= ncand <= len(self.cands)
         mpi_msg = [self.cands, ncand, self.mpi_dtype]
         self.comm.Send(mpi_msg, dest=self.destrank)
+        self.trace_cands(self.cands[:ncand])
 
     def recv(self):
         status = MPI.Status()
         self.comm.Recv(self.mpi_msg, source=self.rxrank, status=status)
         ncand = status.Get_count(self.mpi_dtype)
-        return ncand
+        candout = self.cands[:ncand]
+        self.trace_cands(candout)
+        return candout
+    
+    def trace_cands(self, cands):
+        now = Time.now()
+        diffs = now - Time(cands['mjd'], format='mjd', scale='utc')        
+        latency = 0 if len(cands) == 0 else diffs.to(u.millisecond).max().value
+        maxsnr = 0 if len(cands) == 0 else cands['snr'].max()
+        log.info('Tracing cands %d %f %f', len(cands), maxsnr, latency)
+        self.trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(cands)},ts=None)
+        self.trace_file += tracing.CounterEvent('SNR', args={'maxsnr':maxsnr},ts=None)
+        self.trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
+        
     
     @staticmethod
     def for_tx(comm, destrank):

@@ -1076,9 +1076,15 @@ def proc_beam_run(proc):
 
             candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
             t.tick('pipeline')
-            if candidates is not None:
-                log.info('Sending ncands %s maxsnr=%0.2f', len(candidates), cand_buf.cands['snr'].max())
-                cand_buf.send(len(candidates))
+            if candidates is None:
+                ncand = 0
+                #maxsnr = 0
+            else:
+                ncand = len(candidates)
+                #maxsnr = cand_buf.cands['snr'].max()
+
+            cand_buf.send(ncand)
+            t.tick('sendcand')
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -1098,6 +1104,7 @@ def proc_beam_run(proc):
 
 class Processor:
     def __init__(self, pipe_info):
+        self.trace_file = MpiTracefile.instance()
         self.pipe_info = pipe_info
         
         is_rx = pipe_info.mpi_app.is_rx_processor
@@ -1131,7 +1138,6 @@ class Processor:
     
     def run(self):
         pass
-        
 
 class RxProcessor(Processor):
     def get_headers(self):
@@ -1249,18 +1255,18 @@ class BeamCandProcessor(Processor):
                 wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
                 t.tick('RX wcs')
             
-            ncand = cand_buff.recv()
+            cands = cand_buff.recv()
+            ncand = len(cands)
             t.tick('recv')
-            maxsnr_in = cand_buff.cands['snr'].max()
+
+            maxsnr_in = cands['snr'].max() if ncand > 0 else 0
             log.info('Got %d candidates in BeamCandProc maxsnr=%0.2f', ncand, maxsnr_in)
             #ncand_out = self.single_beam_process(cand_buff.cands[:ncand], out_cand_buff)
-            short_cands = cand_buff.cands[:ncand]
 
             self.check_wcs()
-            out_df = pipe.process_block(short_cands, out_cand_buff.cands)
-            maxsnr = out_cand_buff.cands['snr'].max()
-            log.info('Candidates nin=%d nout=%d maxsn_df=%f maxsn_cands=%f', ncand, len(out_df), out_df['snr'].max(), maxsnr)
-            trace_file += tracing.CounterEvent('Candidates', ts=None, args={'ncandin':ncand, 'ncandout': len(out_df), 'maxsnr':maxsnr})
+            out_df = pipe.process_block(cands, out_cand_buff.cands)
+            maxsnr = out_cand_buff.cands['snr'].max() if len(out_df) > 0 else 0
+            log.info('Candidates nin=%d nout=%d maxsn_df=%f maxsn_cands=%f', ncand, len(out_df), out_df['snr'].max(), maxsnr)            
             t.tick('process')
 
             # gather to everyone - synchronous
@@ -1298,29 +1304,24 @@ class CandMgrProcessor(Processor):
         self.slack_poster = SlackPostManager(test=False)
         while True:
             t = Timer(args={'iblk':iblk})
-            cands.gather()
+            valid_cands = cands.gather()
             t.tick('Gather')
-            self.multi_beam_process(cands.cands)
+            self.multi_beam_process(valid_cands)
             t.tick('Multi process')
             iblk += 1
 
-    def multi_beam_process(self, cands):
+    def multi_beam_process(self, valid_cands):
         '''
         :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
         cands['snr'] = -1 for no candidates
         '''
-        #cands = cands[cands['snr'] > 0]
-        valid_cands = cands[cands['snr'] > 0]
-        
-        maxidx = np.argmax(cands['snr'])
-        bestcand = cands[maxidx]        
+        #cands = cands[cands['snr'] > 0]        
+        maxidx = np.argmax(valid_cands['snr'])
+        bestcand = valid_cands[maxidx]        
         self.cand_writer.update_latency(valid_cands)
         self.cand_writer.write_cands(valid_cands)
         trace_file = MpiTracefile.instance()
-        log.info('Got %d candidates. Best candidate from beam %d was %s', len(cands), bestcand['ibeam'], bestcand)
-        latency = 0 if len(valid_cands) == 0 else valid_cands['latency_ms'].max()
-        trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(valid_cands)},ts=None)
-        trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
+        log.info('Got %d candidates. Best candidate from beam %d was %s', len(valid_cands), bestcand['ibeam'], bestcand)        
         outdir = self.pipe_info.values.outdir
         bestcand_dict = {k:bestcand[k] for k in bestcand.dtype.names}
 
