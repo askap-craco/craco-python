@@ -197,8 +197,20 @@ class Pipeline:
                 steps.catalog_cross_match.Step(self),
             ]
 
+        if not os.path.exists(args.outdir):
+            #npy_append_array cannot create the parent directory upon initialising the file.
+            #So we need to make sure it exists.
+            os.mkdir(args.outdir)
+
         self.output_npy_dtype = None
         self.uniq_cands_fout = CandidateWriter(outname = os.path.join(args.outdir, f"candidates.b{self.beamno:02d}.uniq.npy"))
+        if args.save_intermediate:
+            self.intermediate_fouts = []
+            self.intermediate_npy_dtypes = []
+            for ii, istep in enumerate(self.steps[:-1]):        #:-1 because the output of the last step is not an intermediate product but the final .uniq product
+                cand_fname = os.path.join(args.outdir, f"candidates.b{self.beamno:02d}.istep{ii}.{istep.step_name}.out.npy")
+                self.intermediate_fouts.append(CandidateWriter(outname=cand_fname))
+                self.intermediate_npy_dtypes.append(None)
 
         log.debug('srcdir=%s beamno=%s candfile=%s uvfits=%s cas=%s ics=%s pcb=%s arguments=%s',
                   self.srcdir, self.beamno, self.cand_fname, self.uvfits_fname,
@@ -279,6 +291,9 @@ class Pipeline:
             step.close()
         if hasattr(self, 'uniq_cands_fout'):
             self.uniq_cands_fout.close()
+        if hasattr(self, 'intermediate_fouts'):
+            for fout in self.intermediate_fouts:
+                fout.close()
     
     def convert_np_to_df(self, npin):
         '''
@@ -293,10 +308,14 @@ class Pipeline:
     def convert_df_to_np(self, dfin):
         '''
         Converts pandas dataframe to a numpy recordarray
+        See - https://stackoverflow.com/questions/3622850/converting-a-2d-numpy-array-to-a-structured-array
+
         '''
         if self.output_npy_dtype is None:
             dtype_list = []
             for item in dfin.dtypes.items():
+                if item[1] == np.dtype('O'):
+                    item = (item[0], 'U128')
                 dtype_list.append(item)
 
             self.output_npy_dtype = np.dtype(dtype_list)
@@ -304,6 +323,28 @@ class Pipeline:
         cands_npy_array = dfin.to_numpy()
         cands_npy_array = np.array(np.rec.fromarrays(cands_npy_array.transpose(), names = self.output_npy_dtype.names).astype(dtype=self.output_npy_dtype).tolist(), dtype=self.output_npy_dtype)
         return cands_npy_array
+
+    def convert_intermediate_df_to_np(self, dfin, istep):
+        '''
+        Converts pandas dataframe to a numpy recordarray
+        See - https://stackoverflow.com/questions/3622850/converting-a-2d-numpy-array-to-a-structured-array
+
+        '''
+        if self.intermediate_npy_dtypes[istep] is None:
+            dtype_list = []
+            for item in dfin.dtypes.items():
+                if item[1] == np.dtype('O'):
+                    item = (item[0], 'U128')
+                dtype_list.append(item)
+
+            self.intermediate_npy_dtypes[istep] = np.dtype(dtype_list)
+        
+        d = self.intermediate_npy_dtypes[istep]
+        cands_npy_array = dfin.to_numpy()
+        cands_npy_array = np.array(np.rec.fromarrays(cands_npy_array.transpose(), names = d.names).astype(dtype=d).tolist(), dtype=d)
+        return cands_npy_array
+
+
 
     def process_block(self, cand_in, cand_out_buf=None):
         '''
@@ -323,7 +364,7 @@ class Pipeline:
         try:
             iblk = cand_in['iblk']
             if len(cand_in) > 0:
-                iblk0 = iblk[0]
+                iblk0 = iblk[0]     #BUG: this gives error if the cand_in is a pandas data-frame; it needs iblk.iloc[0] @Keith!
                 self.load_psf_from_file(iblk0)
                 log.info('Loaded new PSF for iblk=%d', iblk0)
         except FileNotFoundError: # No PSF available. Oh well. maybe next year.
@@ -333,18 +374,14 @@ class Pipeline:
             cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
             log.debug('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
-            if self.args.save_intermediate:
-                fout = self.cand_fname+f'.{stepname}.i{istep}.csv'
-                fout = os.path.join(self.args.outdir, fout)
-                log.debug('Saving step %s i=%d to %s', stepname, istep, fout)
-                cand_out.to_csv(fout)
-
+            if self.args.save_intermediate and istep < len(self.steps)-1:   #-1 because last step is not an intermediate step
+                self.intermediate_fouts[istep].write_cands(self.convert_intermediate_df_to_np(cand_out, istep))
             cand_in = cand_out
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)
         if hasattr(self, 'uniq_cands_fout'):
-            self.uniq_cands_fout.append(cand_out)
+            self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
         
         return cand_out
 
