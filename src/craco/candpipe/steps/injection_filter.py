@@ -35,6 +35,8 @@ def get_parser():
     return parser
 
 class Step(ProcessingStep):
+
+    step_name = "injection_filter"
     def __init__(self, *args, **kwargs):
         '''
         Initialise and check any inputs after calling super

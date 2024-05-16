@@ -41,6 +41,8 @@ def get_parser():
 
 
 class Step(ProcessingStep):
+    
+    step_name = "cross_match"
     def __init__(self, *args, **kwargs):
         '''
         Initialise and check any inputs after calling super
