@@ -12,6 +12,7 @@ import numpy as np
 import os
 import sys
 import logging
+import warnings
 
 from astropy import wcs
 from astropy.io import fits
@@ -75,14 +76,18 @@ class Step(ProcessingStep):
         # select catalogue objects located within the observation field of view 
         for i, catpath in enumerate(config['catpath']):
             log.debug('Selecting sources from existing catalogue %s', catpath)
+            filter_radius = config['filter_radius']
             catdf, catcoord = self.filter_cat(ra=ra, 
                                               dec=dec, 
                                               catpath=catpath, 
-                                              radius=config['filter_radius'], 
+                                              radius=filter_radius, 
                                               racol=config['catcols']['ra'][i], 
                                               deccol=config['catcols']['dec'][i])
 
             log.debug('Found %s sources within %s degree radius in %s', len(catdf), config['filter_radius'], catpath)
+            if len(catdf) == 0:
+                warnings.warn('Catalog {catpath} contains no sources within {filter_radius} of ({ra},{dec})')    
+
             log.debug('Starting in-field sources crossmatch %s', catpath)
 
             outd = self.cross_matching(candidates=ind, 
@@ -144,9 +149,15 @@ class Step(ProcessingStep):
             select_bool = sep < radius
             catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
             d = catdf.iloc[select_bool], catcoord
-            self.catalogs[catpath] = d
-        
-        d = self.catalogs[catpath]
+
+            # cache the answer if the input was reasonable            
+            # ra will be Nan if the input block was empty.
+            # if you cache it it will break forever. This would suck.
+            if not np.isnan(ra):
+                self.catalogs[catpath] = d
+        else:        
+            d = self.catalogs[catpath]
+
         return d
 
 

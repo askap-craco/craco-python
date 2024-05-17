@@ -270,6 +270,52 @@ def test_candpipe_block_by_block_np(config):
 
         assert np.all(dout[n:]['snr'] == -1)
 
+def test_candpipe_missing_clasifications(config):
+    # See https://jira.csiro.au/browse/CRACO-244
+    cand_fname = '/CRACO/DATA_03/craco/SB062401/scans/00/20240515090811/candidates.b20.txt'
+    # contains piles of candidates that the candpipe seems to have not classified as vela
+    # LIke this one
+    # ban115@skadi-00:/CRACO/DATA_03/craco/SB062401/scans/00/20240515090811/test$ grep 257 ../candidates.b20.txt  | grep ^103
+    #103.4	128	128	0	1	14	1	3325	257	3.5528	60445.381749111	71.365	128.83333	-45.17639	20	4487.5
+
+    parser = get_parser()
+    args = parser.parse_args([])
+    beamno = 4
+    pipe = Pipeline(beamno, None, config, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=True)
+    cands = load_cands(cand_fname)
+
+    dout = np.zeros(8, dtype=CandidateWriter.out_dtype)
+
+    #all_clustered_cands = [pipe.process_block(cblk) for cblk in cand_blocker(cands)]
+    #all_clustered_cands = [pipe.process_block(cblk, dout) for cblk in cand_blocker(cands)]
+    for iblk, cblk in enumerate(cand_blocker(cands)):
+        cands_df = pipe.process_block(cblk, dout)
+        if len(cands_df) != 0:
+            thecand = cands_df[cands_df['total_sample'] == 257]
+            if len(thecand) == 1:                             
+                thecand = thecand.iloc[0]
+                assert thecand['PSR_name'] == 'J0835-4510'
+        
+        if iblk >= 1:
+            break
+          
+        cands_df = filter_df_for_unknown(cands_df)
+        
+        n = len(cands_df)
+        nout = min(n, len(dout))
+        best_df = cands_df.sort_values(by='snr', ascending=False)
+        
+        if n > 0:
+            print('hello', n)
+        assert np.all(best_df.iloc[:n]['snr'] == dout[:n]['snr'])
+
+        print(iblk, n, dout['snr'])
+        if not np.all(dout[n:]['snr'] == -1):
+            print(iblk, n, dout[n:]['snr'])
+
+        assert np.all(dout[n:]['snr'] == -1)
+
+
 
         
 
