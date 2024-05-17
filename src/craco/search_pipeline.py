@@ -1003,7 +1003,7 @@ def get_parser():
     parser.add_argument('--print-dm0-stats', action='store_true', default=False, help='Print DM0 stats -slows thigns down')
     parser.add_argument('--phase-center-filterbank', default=None, help='Name of filterbank to write phase center data to')
     parser.add_argument('-m','--metadata', help='Path to schedblock metdata .json.gz file')
-    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nxnt samples (for search_pipeline) or Nx112ms blocks (for MPIpipeline). Set to 0 to disable', type=int, default=256)
+    parser.add_argument('--update-uv-blocks', help='Update UV coordinates every Nxnt samples (for search_pipeline and MPI pipeline). Set to 0 to disable', type=int, default=8)
 
     parser.set_defaults(verbose   = False)
     parser.set_defaults(wait      = False)
