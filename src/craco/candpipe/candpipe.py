@@ -113,6 +113,12 @@ class ProcessingStep:
         '''
         raise NotImplementedError('You should override this method')
 
+    def set_current_wcs(self, wcs, iblk):
+        '''
+        Hook for when the WCS is updated, in case you want to pre-load catalogues, etc.
+        '''
+        pass
+
 
     def close(self):
         '''
@@ -177,12 +183,6 @@ class Pipeline:
         self.anti_alias = anti_alias
 
         if anti_alias:
-            if psf_exists:
-                self.load_psf_from_file(0)
-            else:
-                pass
-                # hope that someone calls set_current_psf()
-
             self.steps = [
                 steps.cluster.Step(self),
                 steps.time_space_filter.Step(self), 
@@ -190,6 +190,11 @@ class Pipeline:
                 steps.alias_filter.Step(self), 
                 steps.injection_filter.Step(self), 
             ]
+            if psf_exists:
+                self.load_psf_from_file(0)
+            else:
+                pass
+                # hope that someone calls set_current_psf()
         else:
             self.steps = [
                 steps.cluster.Step(self),
@@ -224,6 +229,8 @@ class Pipeline:
         self.psf_header = hdr
         self.curr_wcs = WCS(hdr)
         self.curr_psf_iblk = iblk
+        for step in self.steps:
+            step.set_current_wcs(self.curr_wcs, iblk)
         
         return hdr
 
@@ -270,6 +277,17 @@ class Pipeline:
         dec_fov = np.abs(h['NAXIS2'] * h['CDELT2'])
 
         return (ra_fov, dec_fov)
+
+    def get_current_phase_center(self):
+        '''
+        Return phase center as (ra,dec) degrees tuple
+        '''
+        h = self.psf_header
+        ra = h['CRVAL1']
+        dec = h['CRVAL2']
+        assert 0 <= ra < 360
+        assert -90 <= dec <= 90
+        return (ra, dec)
     
     def close(self):
         for step in self.steps:

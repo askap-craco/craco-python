@@ -160,6 +160,23 @@ class Step(ProcessingStep):
 
         return d
 
+    def set_current_wcs(self, wcs, iblk):
+        '''
+        If catalogs not loaded, load them using WCS phase center
+        '''
+        config = self.pipeline.config
+        ra, dec = self.pipeline.get_current_phase_center()
+        if len(self.catalogs) == 0:
+            for i, catpath in enumerate(config['catpath']):
+                log.debug('Selecting sources from existing catalogue %s', catpath)
+                filter_radius = config['filter_radius']
+                catdf, catcoord = self.filter_cat(ra=ra, 
+                                                dec=dec, 
+                                                catpath=catpath, 
+                                                radius=filter_radius, 
+                                                racol=config['catcols']['ra'][i], 
+                                                deccol=config['catcols']['dec'][i])
+
 
     def cross_matching(self, candidates, catalogue, coord, 
                        threshold=30, 

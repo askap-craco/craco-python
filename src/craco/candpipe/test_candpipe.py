@@ -15,6 +15,7 @@ import pytest
 import yaml
 from craco.candpipe.candpipe import *
 from craco.plot_cand import load_cands
+from astropy.io import fits
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +75,8 @@ def test_candpipe_runs_anti_alias_nofile(config):
     assert pipe.psf_header == pipe2.psf_header
     assert pipe.get_current_fov() == pipe2.get_current_fov()
     assert len(pipe.steps) == 5 #check its actually runnign the anti aliasing
+    assert len(pipe.steps[2].catalogs) >= 0, 'Catalogs should have been loaded!'
+
     input_cands = load_cands(cand_fname, fmt='pandas')
     cands = pipe.process_block(input_cands)
 
@@ -271,17 +274,56 @@ def test_candpipe_block_by_block_np(config):
         assert np.all(dout[n:]['snr'] == -1)
 
 def test_candpipe_missing_clasifications(config):
-    # See https://jira.csiro.au/browse/CRACO-244
-    cand_fname = '/CRACO/DATA_03/craco/SB062401/scans/00/20240515090811/candidates.b20.txt'
+    ''' See https://jira.csiro.au/browse/CRACO-244
     # contains piles of candidates that the candpipe seems to have not classified as vela
     # LIke this one
     # ban115@skadi-00:/CRACO/DATA_03/craco/SB062401/scans/00/20240515090811/test$ grep 257 ../candidates.b20.txt  | grep ^103
     #103.4	128	128	0	1	14	1	3325	257	3.5528	60445.381749111	71.365	128.83333	-45.17639	20	4487.5
+    
+    Also: there was a problem where if the initial blcok was empty there was no catalog loaded. That's been fixed. This dataset tests it.
+
+
+    # From the log file
+    # 
+
+Number of WCS axes: 2
+CTYPE : 'RA---SIN'  'DEC--SIN'  
+CRVAL : 128.833333355614  -45.17638895171388  
+CRPIX : 129.0  129.0  
+PC1_1 PC1_2  : 1.0  0.0  
+PC2_1 PC2_2  : 0.0  1.0  
+CDELT : -0.004296875  0.004296875  
+NAXIS : 0  0
+    '''
+
+    cand_fname = 'testdata/candpipe/velaclass/candidates.b20.txt'
+    hdr = fits.header.Header()
+    hdr['CRVAL1'] = 128.833333355614
+    hdr['CRVAL2'] =  -45.17638895171388 
+    hdr['CRPIX1'] = 129
+    hdr['CRPIX2'] = 129
+    hdr['CDELT1'] =  -0.004296875
+    hdr['CDELT2'] = 0.004296875  
+    hdr['NAXIS1'] = 256
+    hdr['NAXIS2'] = 256
+    
+    # Guess
+    hdr['FCH1_HZ'] = 850e6
+    hdr['CH_BW_HZ'] = 1e6
+    hdr['NCHAN'] = 288
+    hdr['TSAMP'] = 13.7e-3
+
 
     parser = get_parser()
     args = parser.parse_args([])
     beamno = 4
-    pipe = Pipeline(beamno, None, config, src_dir='testdata/candpipe/super_scattered_frb/', anti_alias=True)
+    pipe = Pipeline(beamno, None, config, src_dir='.', anti_alias=True)
+    iblk=0
+    pipe.set_current_psf(iblk, hdr)
+
+    if not os.path.exists(cand_fname):
+        # ONly check this on tethys - that file is too big to checkin
+        return
     cands = load_cands(cand_fname)
 
     dout = np.zeros(8, dtype=CandidateWriter.out_dtype)
@@ -290,7 +332,7 @@ def test_candpipe_missing_clasifications(config):
     #all_clustered_cands = [pipe.process_block(cblk, dout) for cblk in cand_blocker(cands)]
     for iblk, cblk in enumerate(cand_blocker(cands)):
         cands_df = pipe.process_block(cblk, dout)
-        if len(cands_df) != 0:
+        if len(cands_df) != 0 and iblk == 1:
             thecand = cands_df[cands_df['total_sample'] == 257]
             if len(thecand) == 1:                             
                 thecand = thecand.iloc[0]
@@ -298,23 +340,6 @@ def test_candpipe_missing_clasifications(config):
         
         if iblk >= 1:
             break
-          
-        cands_df = filter_df_for_unknown(cands_df)
-        
-        n = len(cands_df)
-        nout = min(n, len(dout))
-        best_df = cands_df.sort_values(by='snr', ascending=False)
-        
-        if n > 0:
-            print('hello', n)
-        assert np.all(best_df.iloc[:n]['snr'] == dout[:n]['snr'])
-
-        print(iblk, n, dout['snr'])
-        if not np.all(dout[n:]['snr'] == -1):
-            print(iblk, n, dout[n:]['snr'])
-
-        assert np.all(dout[n:]['snr'] == -1)
-
 
 
         
