@@ -53,7 +53,7 @@ def test_save_and_load():
 
 def test_create_from_metadata():
     ant_numbers = np.arange(36)+1
-    prep = ScanPrep.create_from_metafile(metafile, ant_numbers=ant_numbers)
+    prep = ScanPrep.create_from_metafile(metafile, valid_ant_numbers=ant_numbers)
     
 
 def _main():
