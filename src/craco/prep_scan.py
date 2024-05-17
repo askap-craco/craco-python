@@ -156,7 +156,7 @@ class ScanPrep:
         phase_centers = [s['skycoord'] for s in sources]
         sbid = metafile.sbid
         scan_id = metafile.d0['scan_id']
-        prep = ScanPrep(targname, sbid, scan_id, fcmfile)
+        prep = ScanPrep(targname, sbid, scan_id, fcmfile=fcmfile)
         prep.add_calc11_configuration(phase_centers,t0, t0+duration)
         prep.valid_ant_numbers   = valid_ant_numbers
         prep.metafilename = 'metafile.json'
