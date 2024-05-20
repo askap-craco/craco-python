@@ -984,6 +984,18 @@ class TAB_handler:
             self.fouts[isrc].fin.close()
 
 
+def calculate_num_good_cells(tf_weights, bl_weights, fixed_freq_weights):
+    '''
+    Counts how many good cells are there for a given block in total. Useful for keeping track of statistics
+    Also returns num of good baselines and channels
+    '''
+    combined_tf_weights = tf_weights & fixed_freq_weights[:, None]
+    tf_sum = combined_tf_weights.sum()
+    bl_sum = bl_weights.sum()
+    freq_sum = fixed_freq_weights.sum()
+    tot_sum = tf_sum * bl_sum
+    return tot_sum, bl_sum, freq_sum
+
 class FastPreprocess:
 
     #TODO -- add the capacity to write filterbank out for the masked values
@@ -1015,6 +1027,14 @@ class FastPreprocess:
         self.crs_block = np.zeros((nf, nt), dtype=np.float64)
 
         self.output_buf = np.zeros(self.blk_shape, dtype=np.complex64)
+
+        self.num_good_nbl_pre = 0
+        self.num_good_cells_pre = 0
+
+        self.num_good_nbl_post = 0
+        self.num_good_cells_post = 0
+
+        self.num_nblks = 0
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
@@ -1025,6 +1045,31 @@ class FastPreprocess:
         dummy_bl_weights = np.ones(nbl, dtype=bool)
         self.__call__(dummy_block, dummy_bl_weights, dummy_input_tf_weights)
 
+    def update_preflagging_statistics(self, tf_weights, bl_weights):
+        num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
+        self.num_good_cells_pre += num_good_cells
+        self.num_good_nbl_post += num_good_nbl
+
+    def update_postflagging_statistics(self, tf_weights, bl_weights):
+        num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
+        self.num_good_cells_post += num_good_cells
+        self.num_good_nbl_post += num_good_nbl
+
+    @property
+    def preflagging_stats(self):
+        mean_cells = self.num_good_cells_pre / self.num_nblks
+        mean_bls = self.num_good_nbl_pre / self.num_nblks
+        mean_chans = self.fixed_freq_weights.sum()
+
+        return mean_cells, mean_bls, mean_chans
+    
+    @property
+    def postflagging_stats(self):
+        mean_cells = self.num_good_cells_post / self.num_nblks
+        mean_bls = self.num_good_nbl_post / self.num_nblks
+        mean_chans = self.fixed_freq_weights.sum()
+
+        return mean_cells, mean_bls, mean_chans
 
     @property
     def means(self):
@@ -1052,6 +1097,7 @@ class FastPreprocess:
         std_val = np.sqrt( (std_real_sq + std_imag_sq) / 2 ) / global_N
 
         return std_val
+
 
 
     def make_averaged_cal_sol(self, cal_soln_array):
@@ -1128,12 +1174,17 @@ class FastPreprocess:
                         cas = self.cas_block, 
                         crs = self.crs_block)
         
+        self.update_preflagging_statistics(input_tf_weights, bl_weights)
+
         get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
                                         finest_nt = self.dflag_nt,
                                         tf_weights=input_tf_weights,
                                         freq_radius=self.dflag_fradius,
                                         freq_threshold=self.dflag_fthreshold)
-        
+
+        self.update_postflagging_statistics(input_tf_weights, bl_weights)
+        self.num_nblks += 1
+
         fast_preprocess_sos(input_data=input_data,
                             bl_weights=bl_weights,
                             fixed_freq_weights=self.fixed_freq_weights,
