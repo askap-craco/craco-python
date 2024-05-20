@@ -975,7 +975,7 @@ class TAB_handler:
              self.tab_array[isrc].T.tofile(self.fouts[isrc].fin)
 
     def __call__(self, vis_array):
-        self.tab_array[:] = 0
+        self.tab_array[:] = 0       #this is necessary, and only costs us ~80 micro-secs per block
         create_tabs_numba(vis_array, self.phasor_array, self.tab_array)
         self.dump_to_fil()
             
@@ -1010,6 +1010,7 @@ class FastPreprocess:
         self.global_norm = global_norm
         self.target_input_rms = values.target_input_rms
         self.sky_sub = sky_sub
+        self.stats_log_fout = None
 
         self.blk_shape = blk_shape
         self._initialise_internal_buffers()
@@ -1035,6 +1036,11 @@ class FastPreprocess:
         self.num_good_cells_post = 0
 
         self.num_nblks = 0
+
+        if self.stats_log_fout is None:
+            self.stats_log_fout = open("flagging_logs.csv", 'w')
+            self.stats_log_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}")
+            self.stats_log_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\n")
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
@@ -1055,21 +1061,28 @@ class FastPreprocess:
         self.num_good_cells_post += num_good_cells
         self.num_good_nbl_post += num_good_nbl
 
+    def log_flagging_stats(self):
+        good_bls_pre, good_cells_pre = self.preflagging_stats
+        good_bls_post, good_cells_post = self.postflagging_stats
+
+        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\n"
+        self.stats_log_fout.write(out_str)
+
+    def close(self):
+        if self.stats_log_fout is not None:
+            self.stats_log_fout.close()
+            
     @property
     def preflagging_stats(self):
         mean_cells = self.num_good_cells_pre / self.num_nblks
         mean_bls = self.num_good_nbl_pre / self.num_nblks
-        mean_chans = self.fixed_freq_weights.sum()
-
-        return mean_cells, mean_bls, mean_chans
+        return mean_bls, mean_cells
     
     @property
     def postflagging_stats(self):
         mean_cells = self.num_good_cells_post / self.num_nblks
         mean_bls = self.num_good_nbl_post / self.num_nblks
-        mean_chans = self.fixed_freq_weights.sum()
-
-        return mean_cells, mean_bls, mean_chans
+        return mean_bls, mean_cells
 
     @property
     def means(self):
