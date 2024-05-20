@@ -1214,7 +1214,7 @@ class BeamCandProcessor(Processor):
         cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         from craco.candpipe import candpipe
-        candout_dir = os.path.join('results/clustering_output')
+        candout_dir = 'results/clustering_output'
         os.makedirs(candout_dir, exist_ok=True)
         beamid = self.pipe_info.beamid
         candfname = f'candidates.b{beamid:02d}.txt'
@@ -1223,10 +1223,10 @@ class BeamCandProcessor(Processor):
         except FileExistsError:
             pass
                 
-        candpipe_args = candpipe.get_parser().parse_args([f'-o {candout_dir}'])
+        candpipe_args = candpipe.get_parser().parse_args(['-o', candout_dir])
         
         pipe = candpipe.Pipeline(self.pipe_info.beamid, 
-                                 args=candpipe_args,  # use defaults
+                                 args=candpipe_args,  
                                  config=None,  # use defaults
                                  src_dir='.', 
                                  anti_alias=True)
@@ -1322,19 +1322,17 @@ class CandMgrProcessor(Processor):
             t = Timer(args={'iblk':iblk})
             valid_cands = cands.gather()
             t.tick('Gather')
-            self.multi_beam_process(valid_cands)
+            if len(valid_cands) > 0:
+                self.multi_beam_process(valid_cands)
+
             t.tick('Multi process')
             iblk += 1
 
     def multi_beam_process(self, valid_cands):
         '''
-        :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
-        cands['snr'] = -1 for no candidates
+        :cands: CandidateWriter.out_dype np array candidates. Should be len > 1
         '''        
-        if len(valid_cands) == 0: # avoid empty sequence error
-            maxidx = 0
-        else:       
-            maxidx = np.argmax(valid_cands['snr'])
+        maxidx = np.argmax(valid_cands['snr'])
 
         bestcand = valid_cands[maxidx]        
         self.cand_writer.update_latency(valid_cands)
