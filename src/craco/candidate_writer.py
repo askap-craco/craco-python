@@ -73,7 +73,7 @@ class CandidateWriter:
     # dtype without beam and latency
     out_dtype_short = np.dtype(out_dtype_list[:14])
 
-    def __init__(self, outname, first_tstart, overwrite = True, delimiter = "\t", ibeam=0):
+    def __init__(self, outname, first_tstart=None, overwrite = True, delimiter = "\t", ibeam=0):
         '''
         Initialises the object, opens file handler and writes the header (if appropriate)
 

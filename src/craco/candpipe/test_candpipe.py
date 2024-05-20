@@ -342,7 +342,53 @@ NAXIS : 0  0
             break
 
 
-        
+def test_candpipe_dump_output(config):
+    test_df = pd.read_csv("testdata/candpipe/pulsar/SB61584.n500.candidates.b24.txt.uniq.csv", index_col=0)
+    beamno = 24
+    args = get_parser().parse_args(['--outdir', 'clustering_output'])
+    if not os.path.exists(args.outdir):
+        os.mkdir(args.outdir)
+    candpipe_obj = Pipeline(beamno, args, config, anti_alias=True)
+    '''
+    t = np.arange(5)
+    candpipe_obj.uniq_cands_fout.write_cands(t)
+    rt = np.load(candpipe_obj.uniq_cands_fout.outname)
+    assert np.allclose(t, rt)
+    '''
+    #'''
+    for icands in cand_blocker(test_df):
+        npy_cands = candpipe_obj.convert_df_to_np(icands)
+        candpipe_obj.uniq_cands_fout.write_cands(npy_cands)
+
+    candpipe_obj.uniq_cands_fout.close()
+    rx_cands = np.load(candpipe_obj.uniq_cands_fout.outname)
+    in_cands = test_df
+    in_rows = [in_cands.iloc[0], in_cands.iloc[-1]]
+    out_rows = [rx_cands[0], rx_cands[-1]]
+
+    for icand, ocand in zip(in_rows, out_rows):
+        for ii in range(len(icand)):
+            if test_df.dtypes.iloc[ii] == np.dtype('O'):
+                assert str(icand.iloc[ii]) == str(ocand[ii])
+            else:
+                assert np.isclose(icand.iloc[ii], ocand[ii], equal_nan=True), f"{ii} \n {icand} \n {ocand}"
+
+    #'''
+
+def test_candpipe_intermediate_test_output(config):
+    cand_fname = 'testdata/candpipe/super_scattered_frb/candidates.b04.txt'
+    test_df = load_cands(cand_fname)
+    beamno = 24
+    args = get_parser().parse_args(['--outdir', 'clustering_output', '-s'])
+    if not os.path.exists(args.outdir):
+        os.mkdir(args.outdir)
+    candpipe_obj = Pipeline(beamno, args, config, anti_alias=False)
+
+    for ii, cand_block in enumerate(cand_blocker(test_df)):
+        cand_out = candpipe_obj.process_block(cand_block)
+
+    candpipe_obj.close()
+
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

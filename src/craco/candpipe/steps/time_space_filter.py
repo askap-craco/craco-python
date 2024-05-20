@@ -43,6 +43,7 @@ def get_parser():
 
 class Step(ProcessingStep):
 
+    step_name = "time_space_filter"
     def __init__(self, *args, **kwargs):
         '''
         Initialise and check any inputs after calling super
