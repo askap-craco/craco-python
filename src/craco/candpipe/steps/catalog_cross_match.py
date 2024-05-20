@@ -87,11 +87,6 @@ class Step(ProcessingStep):
                                               deccol=config['catcols']['dec'][i])
 
             log.debug('Found %s sources within %s degree radius in %s', len(catdf), config['filter_radius'], catpath)
-            if len(catdf) == 0:
-                warnings.warn('Catalog {catpath} contains no sources within {filter_radius} of ({ra},{dec})')    
-
-            log.debug('Starting in-field sources crossmatch %s', catpath)
-
             outd = self.cross_matching(candidates=ind, 
                                        catalogue=catdf, 
                                        coord=catcoord, 
@@ -157,6 +152,8 @@ class Step(ProcessingStep):
             # if you cache it it will break forever. This would suck.
             if not np.isnan(ra):
                 self.catalogs[catpath] = d
+                log.info('Loaded %d sources from %s within %f of (%f, %f)', len(d), catpath, radius, ra, dec)
+                     
         else:        
             d = self.catalogs[catpath]
 
@@ -169,6 +166,7 @@ class Step(ProcessingStep):
         config = self.pipeline.config
         ra, dec = self.pipeline.get_current_phase_center()
         if len(self.catalogs) == 0:
+            log.info('Loading %d catalogs  for (%f,%f)', len(config['catpath']), ra, dec)
             for i, catpath in enumerate(config['catpath']):
                 log.debug('Selecting sources from existing catalogue %s', catpath)
                 filter_radius = config['filter_radius']
