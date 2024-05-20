@@ -1,4 +1,6 @@
 from craco import mpipipeline
+from craco.candidate_writer import CandidateWriter
+import numpy as np
 
 def test_parse_host_devices():
     hosts = [f'seren-{i:02d}' for i in range(1,11)]
@@ -16,4 +18,15 @@ def test_parse_host_devices():
             assert devs == ()
         else:
             assert devs == (0,1)
+
+
+def test_format_candidate():
+    cand = np.zeros(1, dtype=CandidateWriter.out_dtype)[0]
+    outdir = '/data/craco/craco/SB062480/scans/00/20240519210226'
+    msg = mpipipeline.format_candidate_slack_message(cand, outdir)
+    print(msg)
+    assert isinstance(msg, str)
+    assert len(msg) > 0
+
+
             

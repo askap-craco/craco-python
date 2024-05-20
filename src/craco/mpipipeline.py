@@ -1287,7 +1287,23 @@ class BeamCandProcessor(Processor):
             self.set_wcs(self.new_wcs)
         
 
-            
+def format_candidate_slack_message(bestcand_dict, outdir):
+    '''
+    Format a message for the slack channel
+    '''
+    outdir_split = outdir.split("/")
+    sbid = int(outdir_split[4][2:])
+    scan = outdir_split[-2]; tstart = outdir_split[-1]
+
+    url = f"""http://localhost:8024/candidate?sbid={sbid}&beam={bestcand_dict["ibeam"]}&scan={scan}&tstart={tstart}&runname=results"""
+    url += f"""&dm={bestcand_dict["dm_pccm3"]}&boxcwidth={bestcand_dict["boxc_width"]}&lpix={bestcand_dict["lpix"]}&mpix={bestcand_dict["mpix"]}"""
+    url += f"""&totalsample={bestcand_dict["total_sample"]}&ra={bestcand_dict["ra_deg"]}&dec={bestcand_dict["dec_deg"]}"""
+
+    #######################################################################################################
+    msg = f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}\n Click the link - {url}'
+
+    return msg
+
 class CandMgrProcessor(Processor):
     def run(self):
         app = self.pipe_info.mpi_app
@@ -1332,21 +1348,8 @@ class CandMgrProcessor(Processor):
             log.critical('Sending candidate %s', bestcand_dict)
             self.cand_sender.send(bestcand)
             trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
-            #################### this part of code is for shitty posting for now for testing ######################
-            # get sbid and scanpath from outdir
-            outdir_split = outdir.split("/")
-            sbid = int(outdir_split[4][2:])
-            scan = outdir_split[-2]; tstart = outdir_split[-1]
-
-            url = f"""http://localhost:8024/candidate?sbid={sbid}&beam={bestcand_dict["ibeam"]}&scan={scan}&tstart={tstart}&runname=results"""
-            url += f"""&dm={bestcand_dict["dm_pccm3"]}&boxcwidth={bestcand_dict["boxc_width"]}&lpix={bestcand_dict["lpix"]}&mpix={bestcand_dict["mpix"]}"""
-            url += f"""&totalsample={bestcand_dict["total_sample"]}&ra={bestcand_dict["ra_deg"]}&dec={bestcand_dict["dec_deg"]}"""
-
-            #######################################################################################################
-
-            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}\n Click the link - {url}')
-
-
+            msg = format_candidate_slack_message(bestcand, outdir)
+            self.slack_poster.post_message(msg)
 
 def processor_class_factory(app):                    
     if app.is_beam_transposer:
