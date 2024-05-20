@@ -298,11 +298,12 @@ class MetadataObsmanDriver:
             self.sbid = sbid
             # pick up antenna list from observation variables
 
-        elif sbid == self.sbid:
-            assert state != ObsState.EXECUTING
-            # It must have gone out of executing
-            self.sbid = None
-            self.scan_manager = None
+        else:
+            if sbid == self.sbid:
+                assert state != ObsState.EXECUTING
+                # It must have gone out of executing
+                self.sbid = None
+                self.scan_manager = None
 
     def publish(self, pub_data, current=None):
         '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher

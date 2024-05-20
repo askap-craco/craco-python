@@ -1314,9 +1314,12 @@ class CandMgrProcessor(Processor):
         '''
         :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
         cands['snr'] = -1 for no candidates
-        '''
-        #cands = cands[cands['snr'] > 0]        
-        maxidx = np.argmax(valid_cands['snr'])
+        '''        
+        if len(valid_cands) == 0: # avoid empty sequence error
+            maxidx = 0
+        else:       
+            maxidx = np.argmax(valid_cands['snr'])
+
         bestcand = valid_cands[maxidx]        
         self.cand_writer.update_latency(valid_cands)
         self.cand_writer.write_cands(valid_cands)
