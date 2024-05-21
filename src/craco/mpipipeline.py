@@ -1193,6 +1193,7 @@ class PlannerProcessor(Processor):
 
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
             # To not just fill buffers for ever, we'll need to wait for an ack from the beam
+            plan.prev_plan = None # Don't send previous plan - otherwise we maek a nice linked list to all the plans!!!!
             comm.send(plan_data, dest=app.BEAMPROC_RANK)            
             self.send_to_candproc(iblk, plan)
             log.info('Plan sent count=%d iblk=%d', count, iblk)
