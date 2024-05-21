@@ -18,6 +18,7 @@ import traceback
 from astropy.io import fits
 from astropy.wcs import WCS
 from craco.candidate_writer import CandidateWriter
+from craco.dataframe_streamer import DataframeStreamer
 import pandas as pd
 
 from . import steps
@@ -202,13 +203,15 @@ class Pipeline:
                 steps.catalog_cross_match.Step(self),
             ]
 
-        if not os.path.exists(args.outdir):
-            #npy_append_array cannot create the parent directory upon initialising the file.
-            #So we need to make sure it exists.
-            os.mkdir(args.outdir)
+        os.makedirs(args.outdir, exist_ok=True)
 
         self.output_npy_dtype = None
-        self.uniq_cands_fout = CandidateWriter(outname = os.path.join(args.outdir, f"candidates.b{self.beamno:02d}.uniq.npy"))
+        # disable while we fix this
+        
+        outname = os.path.join(args.outdir, f"candidates.b{self.beamno:02d}.uniq.csv")
+        log.info('Writing candpipe output candiates to %s', outname)
+        #self.uniq_cands_fout = CandidateWriter(outname)
+        self.uniq_cands_fout = DataframeStreamer(outname)
         if args.save_intermediate:
             self.intermediate_fouts = []
             self.intermediate_npy_dtypes = []
@@ -379,6 +382,7 @@ class Pipeline:
         # Sometimes for testing we send through a giant batch.
         # We'll only load the PSF frm the first candidate, if possible.
         # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
+        iblk0 = -1
         try:
             iblk = cand_in['iblk']
             if len(cand_in) > 0:
@@ -398,8 +402,16 @@ class Pipeline:
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)
-        if hasattr(self, 'uniq_cands_fout'):
-            self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
+        if hasattr(self, 'uniq_cands_fout'):            
+            if iblk0 >= 0 and len(cand_out) > 0:
+                try :
+                    #self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
+                    self.uniq_cands_fout.write(cand_out)
+                except:
+                    fname = os.path.join(self.args.outdir, f'candpipe_uniq_iblk{iblk0}_b{self.beamno:02d}.csv')
+                    cand_out.to_csv(fname)
+                    log.exception('Could not write uniq candidates file. Dumping iblk %s to %s', iblk0, fname)
+                    
         
         return cand_out
 
