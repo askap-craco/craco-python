@@ -1,5 +1,4 @@
 #!/bin/bash
-echo "Hello!"
 if [[ -z $INDIR ]] ; then
     echo "No input directory"
     exit 1
@@ -14,7 +13,10 @@ if [[ ! -f $uvfits ]] ; then
 fi
 
 rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
-metafile=$rootdir/../../../SB*.json.gz
+sbid=$(echo $indir | awk -F/ '{print $5}')
+short_sbid=$(echo $sbid | sed s%SB0%SB%)
+metafile=/CRACO/DATA_00/craco/metadata/$short_sbid.json.gz
+#metafile=$rootdir/../../../SB*.json.gz
 
 source /home/craftop/.conda/.remove_conda.sh
 source /home/craftop/.conda/.activate_conda.sh
