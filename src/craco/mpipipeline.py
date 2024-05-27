@@ -48,6 +48,7 @@ from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
 from craco.tracing import tracing
+import pickle
 
     
 log = logging.getLogger(__name__)
@@ -294,11 +295,23 @@ class MpiObsInfo:
 
     def fid_of_block(self, iblk):
         '''
-        Returns the frame ID at the beginning? of the block index indexed by idex
-        idx=0 = first ever block we receive
-        I think the first block is discarded, which is why we have iblk+1 in the code
+        Returns the frame ID at the beginning? of the BEAMFORMER block index indexed by idex
+        idx=0 = first ever beamformer block we receive
         '''
-        return self.fid0 + np.uint64(iblk + 1)*np.uint64(NSAMP_PER_FRAME)
+        return self.fid0 + np.uint64(iblk)*np.uint64(NSAMP_PER_FRAME)
+
+    def fid_of_search_block(self, siblk):
+        '''
+        Returns frame ID at the beginning of a SEARCH block index.
+        Note that a search block is always 256 samples, where as a BEAMFORMER block / frame is always 110ms.
+        Handling all this is a headache
+        '''
+        assert siblk >= 0
+        nint_per_search_block = 256        
+        nsamp_per_search_block = nint_per_search_block * self.nt * self.vis_tscrunch / np.uint64(NSAMP_PER_FRAME)
+        fid = self.fid0 + np.uint64(siblk)*np.uint64(nsamp_per_search_block)
+
+        return fid
 
     @property
     def nchan(self):
@@ -362,16 +375,22 @@ class MpiObsInfo:
 
     @property
     def inttime(self):
+        '''
+        Returns instegration time as quantity in seconds
+        '''
         return self.main_merger.inttime*u.second
 
     @property
     def vis_inttime(self):
+        '''
+        Returns quantity in seconds
+        '''
         return self.inttime*self.values.vis_tscrunch # do I need to scale by vis_tscrunch? Main merger already has it?
 
     @property
     def nt(self):
         '''
-        Return number of samples per frame
+        Return number of integrations per beamformer frame
         '''
         return self.main_merger.nt_per_frame
 
@@ -1029,7 +1048,7 @@ def proc_beam_run(proc):
     # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
     # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
     # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
-    PLAN_MSG_SIZE = 32*1024*1024
+    PLAN_MSG_SIZE = 64*1024*1024
 
     planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
     transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
@@ -1127,8 +1146,7 @@ class Processor:
         fid0 = world.bcast(fid0, root=0)
         log.debug('FID0 after bcast %d',fid0)
         self.obs_info.fid0 = fid0            
-        start_fid = self.obs_info.fid_of_block(1)
-        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        log.info(f'fid0={fid0} {type(fid0)}')
 
     def get_headers(self):
         return ''
@@ -1167,9 +1185,8 @@ class PlannerProcessor(Processor):
         self.app = app
         comm = self.pipe_info.mpi_app.beam_chain_comm
         self.comm = comm
-        fid0 = self.obs_info.fid0
-        start_fid = self.obs_info.fid_of_block(1)
-        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        fid0 = self.obs_info.fid0        
+        log.info(f'fid0={fid0} {type(fid0)}')
         update_uv_blocks = self.pipe_info.values.update_uv_blocks
         iblk = 0
         adapter = VisInfoAdapter(self.obs_info, iblk)
@@ -1177,6 +1194,8 @@ class PlannerProcessor(Processor):
         log.info('Completed initial plan')
         # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
         # YUK this smells.
+        self.dump_plans = True
+
         self.send_to_candproc(iblk, plan)
 
         while True:     
@@ -1184,9 +1203,9 @@ class PlannerProcessor(Processor):
 
             log.info('Waiting for request from %d. Expect iblk=%d', app.BEAMPROC_RANK, iblk)
             req_iblk = comm.recv(source=app.BEAMPROC_RANK)
-            log.info('Got request to make plan for iblk=%d. My count=%d', req_iblk, iblk)
             assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
             adapter = VisInfoAdapter(self.obs_info, iblk)
+            log.info('Got request to make plan for iblk=%d. My count=%d adapter=%s', req_iblk, iblk, adapter)
             plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
             plan.fdmt_plan # lazy evaluate fdmt_plan
             plan_data = {'count':count, 'iblk': iblk, 'plan':plan}
@@ -1194,6 +1213,9 @@ class PlannerProcessor(Processor):
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
             # To not just fill buffers for ever, we'll need to wait for an ack from the beam
             plan.prev_plan = None # Don't send previous plan - otherwise we maek a nice linked list to all the plans!!!!
+            plan.fdmt_plan.prev_pipeline_plan = None # Same for this! Yikes
+            plan.fdmt_plan.container1 = None
+            plan.fdmt_plan.container2 = None
             comm.send(plan_data, dest=app.BEAMPROC_RANK)            
             self.send_to_candproc(iblk, plan)
             log.info('Plan sent count=%d iblk=%d', count, iblk)
@@ -1203,9 +1225,13 @@ class PlannerProcessor(Processor):
     def send_to_candproc(self, iblk, plan):
         wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
         self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
-
-
-
+        if self.dump_plans:            
+            beamid = self.pipe_info.beamid
+            fout = f'plan_b{beamid:02d}_iblk{iblk}.pkl'
+            with open(fout, 'wb') as f:
+                pickle.dump(plan,f)
+                sz = os.path.getsize(fout)
+                log.info('Wrote %d plan to %s. Size %d', iblk, fout, sz)
 
 class BeamCandProcessor(Processor):
     def run(self):

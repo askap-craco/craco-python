@@ -399,7 +399,7 @@ class CardcapFile:
     @property
     def nt_per_frame(self):
         '''
-        Returns the total number of time integrations per frame
+        Returns the total number of time integrations per beamformer frame
         '''
         return self.ntpkt_per_frame*self.nint_per_packet
     
