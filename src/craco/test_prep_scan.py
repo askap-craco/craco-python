@@ -13,9 +13,11 @@ import sys
 import logging
 import pytest
 from craco.prep_scan import ScanPrep
+from craft.craco import bl2ant,bl2array,uvw_to_array
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 import tempfile
+from scipy import constants
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +56,44 @@ def test_save_and_load():
 def test_create_from_metadata():
     ant_numbers = np.arange(36)+1
     prep = ScanPrep.create_from_metafile(metafile, valid_ant_numbers=ant_numbers)
+
+def test_uvmax_problem():
+    '''
+    See CRACO-249
+    from teh log file:
+    2024-05-21 11:43:13,363 [skadi-14:3823758] r186 search_pipeline_sink Returning baselines for iblk=0 start_fid=549566528 fid_mid=549574720.0 mjd_mid=60451.15603319182 tstart=60451.156028071826
+    2024-05-21 11:43:10,163 [skadi-03:3825540] r143 mpipipeline Valid ants: [ 1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24]
+
+    '''
+    mjd_mid=60451.15603319182
+    indir = '/data/craco/craco/SB062502/scans/00/20240521034236'
+    indirstart = '/data/craco/craco/SB062502/scans/00/20240521020713'
+    beamid = 31
+    tmid = Time(mjd_mid, scale='tai', format='mjd')
+    prep = ScanPrep.load(indir)
+    prep0 = ScanPrep.load(indirstart) # first scan in teh SB
+    
+    # I have a terrible feeling tstart hasn't changed
+    assert indir != indirstart
+    assert prep.start > prep0.start, 'Different scans should have differnt start times'
+
+    expected_valid_ants_0based = np.array(' 1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24'.split()).astype(int) - 1
+    valid_ants_0based = np.array(prep.valid_ant_numbers) - 1
+    md = prep.calc_meta_file(beamid)
+    baselines = md.baselines_at_time(tmid, expected_valid_ants_0based, beamid)
+    print(baselines)
+    for blid, uvw in baselines.items():
+        a1,a2 = bl2ant(blid)
+        u,v,w = uvw_to_array(uvw)*constants.c
+        r = np.sqrt(u**2 + v**2)
+        print(f'{a1}-{a2} {u}/{v}/{w} r={r}')
+        if r >= 6e3:
+            print('eh?')
+        #assert r <= 6e3
+
+
+
+
     
 
 def _main():

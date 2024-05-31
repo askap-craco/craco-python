@@ -89,10 +89,11 @@ class ScanManager:
         ok_to_run = flags_ok and all_unchanged and scan_ok
 
         #print(sum(antok), sum(ok_ants), frac_ok_ants, flags_ok, all_unchanged, ok_to_run)
+        self.latest_good_metafile = None
 
         if self.running:
             if ok_to_run:
-                pass # continue - everything is fine
+                self.latest_good_metafile = mfile # continue - everything is fine
             else:
                 self._stop_scan(d)
 
