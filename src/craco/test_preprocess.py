@@ -116,7 +116,7 @@ if os.path.exists(fname):
     values = craco_plan.get_parser().parse_args(["--flag-ants", "12,15,20,30", "--calibration", calname])
 
     f = uvfits_meta.open(fname, metadata_file = meta_name)
-    f.set_flagants(values.flag_ants)
+    #f.set_flagants(values.flag_ants)
 
     plan = craco_plan.PipelinePlan(f, values)
     calsoln = calibration.CalibrationSolution(plan)
