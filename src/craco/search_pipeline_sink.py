@@ -74,9 +74,9 @@ class VisInfoAdapter:
         # fid_mid is the frame ID of hte middle of the block starting at the beginning of iblk
         # and finishing at the beginning of iblk+nblk
         end_fid = self.info.fid_of_search_block(self.iblk+nblk)
-        mid_fid = start_fid + (end_fid - start_fid) // 2
+        mid_fid = start_fid + np.uint64((end_fid - start_fid) // 2)
 
-        # nblk == 0 is disabled. fid_mid will be the beginning of the block. You have been warned
+        # nblk == 0 is disabled. fid_mid will be the beginning of the block. You have been warned - in a comment that no-one will read
         mjd_mid = self.info.fid_to_mjd(mid_fid)
         mjd_start = self.info.fid_to_mjd(start_fid)
         mjd_end = self.info.fid_to_mjd(end_fid)
