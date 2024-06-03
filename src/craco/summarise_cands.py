@@ -10,42 +10,13 @@ import logging
 import pandas as pd
 from craft.sigproc import SigprocFile as SF
 from craco.datadirs import ScanDir
-#from craco.craco_run.auto_sched import SlackPostManager
+from craco.craco_run.auto_sched import SlackPostManager
 import glob
 import numpy as np
+import subprocess
+import logging 
 
 log = logging.getLogger(__name__)
-
-__author__ = "Keith Bannister <keith.bannister@csiro.au>"
-
-def format_msg(r):
-    msg = 'UNKNOWN=' + str(r['Unknown']) + ' ' \
-        'PSR=' + str(r['PSR_name']) + ' ' \
-        'RACS=' + str(r['RACS_name']) + ' ' \
-        'CRACO=' + str(r['NEW_name']) + ' ' \
-        'ALIAS=' + str(r['ALIAS_name']) + ' ' \
-        + r['link']
-    
-    if r["Unknown"] > 0: return f"*{msg}* \n"
-    return f"{msg} \n"
-
-def beam_of(f):
-    beamno = int(os.path.basename(f).split('.')[1][1:])
-    return beamno
-
-
-def read_file(filename, snr=8, cet_remove=False):
-
-    f = pd.read_csv(filename, index_col=0)
-    # f = f[ (f['dm'] < 150) ]
-    f = f[ f['SNR'] >= snr ]
-
-    if cet_remove:
-        # remove all central ghost things
-        f = f[ ~( (f['lpix'] >= 126) & (f['mpix'] >= 126) & (f['lpix'] <= 130) & (f['lpix'] <= 130) ) ]
-
-    return f
-
 
 def read_filterbank_stats(filpath):
     try:
@@ -61,6 +32,48 @@ def read_filterbank_stats(filpath):
         msg = f"!Error: Could not read filterbank information from path - {filpath}!"
     finally:
         return msg
+
+def parse_scandir_env(path):
+    parts = path.strip().split("/")
+    if len(parts) > 0:
+        for ip, part in enumerate(parts):
+            if part.startswith("SB0"):
+                sbid = part
+                scanid = parts[ip + 1]
+                tstart = parts[ip + 2]
+                
+                if len(sbid) == 8 and len(scanid) == 2 and len(tstart) == 14:
+                    return sbid, scanid, tstart
+
+    raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
+
+def run_with_tsp():
+    log.info(f"queuing up summarise cands")
+    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
+    TMPDIR = "/data/craco/craco/tmpdir"
+    environment = {
+        "TS_SOCKET": EOS_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""summarise_cands -snr 8 -sbid {sbid} -scanid {scanin} -tstart {tstart}"""
+
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info("Queued summarise cands job")
 
 
 def _main():
@@ -110,10 +123,9 @@ def _main():
             raw_num += nlines
 
     msg = f"""Finished processing scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
-    print(msg)
-    #slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
-    #slack_poster.post_message(msg)
-
+    log.info("Posting message - \n", msg)
+    slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+    slack_poster.post_message(msg)
 
 if __name__ == '__main__':
     _main()
