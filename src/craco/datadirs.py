@@ -128,7 +128,17 @@ class SchedDir:
         metapath = "{}/{}.json.gz".format(
             self.sched_head_dir, format_sbid(self.sbid, padding=False)
         )
-        return metapath if check_path(metapath) else None
+        backup_metapath = "{}/metadata/{}.json.gz".format(
+            self.datadirs.node_dir, format_sbid(self.sbid, padding=False)
+        )
+        
+        final_metapath = None
+        if check_path(metapath):
+            final_metapath = metapath
+        elif check_path(backup_metapath):
+            final_metapath = backup_metapath
+        
+        return final_metapath
 
     @property
     def flagfile(self):
@@ -229,10 +239,12 @@ class ScanDir:
         )
 
         if len(node_beam_map) == 0:
-            node_beam_map = re.findall(
-                "=skadi-(\d{2}).*# Beam (\d{1,2}) xrtdevid",
+            _node_beam_map = re.findall(
+                "=skadi-(\d{2}).*# Beam (\d{1,2})( processor)? xrtdevid",
                 rank_file_text
             )
+            ### cuz here we extract three element
+            node_beam_map = [(node, beam) for node, beam, _ in _node_beam_map]
         
         self.beam_node_dict = {int(beam): node for node, beam in node_beam_map}
 
