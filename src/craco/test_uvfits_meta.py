@@ -480,6 +480,45 @@ def test_before_and_after_flags_vis_equal():
     assert raw_nbl == f2.raw_nbl
     assert np.all(v1==v2)
 
+def test_wrong_timestamp():
+    '''
+    Nasty test with the wrong teimstamp.
+    Turned out to be a corrupted last block
+    Probably should refacto rthis with a standard test and make sure you 
+    can fast_raw_blocks() past the end and nothing will happen
+    
+    '''
+    metafile = '/data/craco/craco/SB062220/SB62220.json.gz'
+    inf = '/CRACO/DATA_01/craco/SB062220/scans/00/20240506172535/b00.uvfits'
+    if not os.path.exists(inf):
+        return
+    
+    f = craco.uvfits_meta.open(inf,metadata_file=metafile)
+    rawf = craft.uvfits.open(inf)
+    nbl = f.nbl
+    tblk  = 3991
+    # breaks for index: slice(1620752, 1621158, None)
+    istart = tblk*nbl
+    iend = istart+nbl
+    d = f.vis[istart:iend] # should be OK for 3991
+    try:
+        for iblk,d in enumerate(f.fast_raw_blocks(istart=tblk, nsamp=3000)): # try to read past the end of the file
+            print(iblk)
+    except ValueError: # interpolation error
+        print(iblk)
+        raise
+              
+
+    
+    assert d is not None
+
+
+
+
+
+    
+
+
     
 
 
