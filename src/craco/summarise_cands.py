@@ -73,7 +73,7 @@ def run_with_tsp():
             [f"tsp {cmd}"], shell=True, capture_output=True,
             text=True, env=ecopy,
         )
-        log.info("Queued summarise cands job")
+        log.info(f"Queued summarise cands job - with command - {cmd}")
 
 
 def _main():
