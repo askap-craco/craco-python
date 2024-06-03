@@ -89,7 +89,7 @@ def _main():
     num_unknown_cands = 0
     raw_num = 0
 
-    msg = f"""Scan summary::\n{values.sbid}/{values.scanid}/{values.tstart}\n"""
+    msg = f"""End of scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n"""
     try:
         scan = ScanDir(sbid = values.sbid, scan = f"{values.scanid}/{values.tstart}")
     except ValueError as VE:
