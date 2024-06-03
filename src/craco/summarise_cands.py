@@ -27,7 +27,7 @@ def read_filterbank_stats(filpath):
         ra = f.src_raj_deg
         dec = f.src_dej_deg
 
-        msg = f"Duration: {dur:.1f} min\nBW: {bw:.1f} MHz\nFcen: {fcen:.1f} MHz\nBeam0 coords: {ra},{dec}\n"
+        msg = f"- Duration: {dur:.1f} min\n- BW: {bw:.1f} MHz\n- Fcen: {fcen:.1f} MHz\n- Beam0 coords: {ra},{dec}\n"
     except:
         msg = f"!Error: Could not read filterbank information from path - {filpath}!"
     finally:
@@ -67,13 +67,13 @@ def run_with_tsp():
         return
     else:
         sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""summarise_cands -snr 8 -sbid {sbid} -scanid {scanin} -tstart {tstart}"""
+        cmd = f"""summarise_cands -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
 
         subprocess.run(
             [f"tsp {cmd}"], shell=True, capture_output=True,
             text=True, env=ecopy,
         )
-        log.info("Queued summarise cands job")
+        log.info(f"Queued summarise cands job - with command - {cmd}")
 
 
 def _main():
@@ -89,43 +89,53 @@ def _main():
     num_unknown_cands = 0
     raw_num = 0
 
+    msg = f"""End of scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n"""
+    try:
+        scan = ScanDir(sbid = values.sbid, scan = f"{values.scanid}/{values.tstart}")
+    except ValueError as VE:
+        msg += f"Cannot instantiate a ScanDir object with the given arguments!"
+    else:
+         found_pcb = False
 
-    scan = ScanDir(sbid = values.sbid, scan = f"{values.scanid}/{values.tstart}")
+         for inode, node_dir in enumerate(scan.scan_data_dirs):
 
+             unclustered_candidate_files = glob.glob(node_dir + "/results/candidates.b*.txt")
+             uniq_candidate_files = glob.glob(node_dir + "/results/clustering_output/candidates.b*.uniq.csv")
 
-    for inode, node_dir in enumerate(scan.scan_data_dirs):
-        # assert beam_of(f) == ibeam
+             filpath = os.path.join(node_dir, "pcbb00.fil")
+             if os.path.exists(filpath):
+                 found_pcb = True
+                 search_dur_message = read_filterbank_stats(filpath)
 
-        unclustered_candidate_files = glob.glob(node_dir + "/results/candidates.b*.txt")
-        uniq_candidate_files = glob.glob(node_dir + "/results/clustering_output/candidates.b*.uniq.csv")
+             for uniq_file in uniq_candidate_files:
+                 df = pd.read_csv(uniq_file, index_col=0)
+                 num_uniq_cands += len(df)
 
-        filpath = os.path.join(node_dir, "pcbb00.fil")
-        if os.path.exists(filpath):
-            search_dur_message = read_filterbank_stats(filpath)
+                 snr = values.snr
+                 df = df[ df['snr'] >= snr ]
 
-        for uniq_file in uniq_candidate_files:
-            df = pd.read_csv(uniq_file, index_col=0)
-            num_uniq_cands += len(df)
+                 df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+         
+                 num_unknown_cands += len(df[df['Unknown']])
 
-            # snr >= 9
-            snr = values.snr
-            df = df[ df['snr'] >= snr ]
+             for raw_file in unclustered_candidate_files:
+                 nlines = -1
+                 with open(raw_file, 'r') as f:
+                     for _  in f:
+                         nlines += 1
+                 raw_num += nlines
 
-            df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
-    
-            num_unknown_cands += len(df[df['Unknown']])
-
-        for raw_file in unclustered_candidate_files:
-            nlines = -1
-            with open(raw_file, 'r') as f:
-                for _  in f:
-                    nlines += 1
-            raw_num += nlines
-
-    msg = f"""Finished processing scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
-    log.info("Posting message - \n", msg)
-    slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
-    slack_poster.post_message(msg)
+         if not found_pcb:
+             if num_unknown_cands == 0 and raw_num == 0:
+                 msg += "We don't have a pcb file for this scan --> didn't search!\n"
+             else:
+                 msg += "We don't have a pcb file, but somehow candidates exist for this scan - something went wrong, please take a look VG, Andy, Keith!!!\n"
+         else:
+             msg += f"""{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
+    finally:     
+        log.info("Posting message - \n" + msg)
+        slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+        slack_poster.post_message(msg)
 
 if __name__ == '__main__':
     _main()

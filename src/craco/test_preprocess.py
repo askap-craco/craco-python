@@ -381,3 +381,17 @@ def test_fast_preprocess_init():
     np.all(fp.crs_block == 0)
     np.all(fp.interim_means == 0)
 
+def test_fast_preprocess_call():
+    nbl, nf, nt = block0.shape
+    fp = FastPreprocess(block0.shape, calsoln.solarray, values, np.ones(nf, dtype=np.bool), True, True)
+
+    fp(block0)
+    fp.log_flagging_stats()
+
+    fp(block0)
+    fp.log_flagging_stats()
+    
+    fp(block0)
+    fp.log_flagging_stats()
+    
+    fp.close()
