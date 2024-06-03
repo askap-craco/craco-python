@@ -48,6 +48,7 @@ from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
 from craco.tracing import tracing
+import pickle
 
     
 log = logging.getLogger(__name__)
@@ -294,11 +295,23 @@ class MpiObsInfo:
 
     def fid_of_block(self, iblk):
         '''
-        Returns the frame ID at the beginning? of the block index indexed by idex
-        idx=0 = first ever block we receive
-        I think the first block is discarded, which is why we have iblk+1 in the code
+        Returns the frame ID at the beginning? of the BEAMFORMER block index indexed by idex
+        idx=0 = first ever beamformer block we receive
         '''
-        return self.fid0 + np.uint64(iblk + 1)*np.uint64(NSAMP_PER_FRAME)
+        return self.fid0 + np.uint64(iblk)*np.uint64(NSAMP_PER_FRAME)
+
+    def fid_of_search_block(self, siblk):
+        '''
+        Returns frame ID at the beginning of a SEARCH block index.
+        Note that a search block is always 256 samples, where as a BEAMFORMER block / frame is always 110ms.
+        Handling all this is a headache
+        '''
+        assert siblk >= 0
+        nint_per_search_block = 256        
+        nsamp_per_search_block = nint_per_search_block * self.nt * self.vis_tscrunch / np.uint64(NSAMP_PER_FRAME)
+        fid = self.fid0 + np.uint64(siblk)*np.uint64(nsamp_per_search_block)
+
+        return fid
 
     @property
     def nchan(self):
@@ -362,16 +375,22 @@ class MpiObsInfo:
 
     @property
     def inttime(self):
+        '''
+        Returns instegration time as quantity in seconds
+        '''
         return self.main_merger.inttime*u.second
 
     @property
     def vis_inttime(self):
+        '''
+        Returns quantity in seconds
+        '''
         return self.inttime*self.values.vis_tscrunch # do I need to scale by vis_tscrunch? Main merger already has it?
 
     @property
     def nt(self):
         '''
-        Return number of samples per frame
+        Return number of integrations per beamformer frame
         '''
         return self.main_merger.nt_per_frame
 
@@ -1029,7 +1048,7 @@ def proc_beam_run(proc):
     # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
     # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
     # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
-    PLAN_MSG_SIZE = 32*1024*1024
+    PLAN_MSG_SIZE = 64*1024*1024
 
     planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
     transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
@@ -1127,8 +1146,7 @@ class Processor:
         fid0 = world.bcast(fid0, root=0)
         log.debug('FID0 after bcast %d',fid0)
         self.obs_info.fid0 = fid0            
-        start_fid = self.obs_info.fid_of_block(1)
-        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        log.info(f'fid0={fid0} {type(fid0)}')
 
     def get_headers(self):
         return ''
@@ -1167,9 +1185,8 @@ class PlannerProcessor(Processor):
         self.app = app
         comm = self.pipe_info.mpi_app.beam_chain_comm
         self.comm = comm
-        fid0 = self.obs_info.fid0
-        start_fid = self.obs_info.fid_of_block(1)
-        log.info(f'fid0={fid0} {start_fid} {type(start_fid)}')
+        fid0 = self.obs_info.fid0        
+        log.info(f'fid0={fid0} {type(fid0)}')
         update_uv_blocks = self.pipe_info.values.update_uv_blocks
         iblk = 0
         adapter = VisInfoAdapter(self.obs_info, iblk)
@@ -1177,6 +1194,8 @@ class PlannerProcessor(Processor):
         log.info('Completed initial plan')
         # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
         # YUK this smells.
+        self.dump_plans = True
+
         self.send_to_candproc(iblk, plan)
 
         while True:     
@@ -1184,15 +1203,19 @@ class PlannerProcessor(Processor):
 
             log.info('Waiting for request from %d. Expect iblk=%d', app.BEAMPROC_RANK, iblk)
             req_iblk = comm.recv(source=app.BEAMPROC_RANK)
-            log.info('Got request to make plan for iblk=%d. My count=%d', req_iblk, iblk)
             assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
             adapter = VisInfoAdapter(self.obs_info, iblk)
+            log.info('Got request to make plan for iblk=%d. My count=%d adapter=%s', req_iblk, iblk, adapter)
             plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
             plan.fdmt_plan # lazy evaluate fdmt_plan
             plan_data = {'count':count, 'iblk': iblk, 'plan':plan}
 
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
             # To not just fill buffers for ever, we'll need to wait for an ack from the beam
+            plan.prev_plan = None # Don't send previous plan - otherwise we maek a nice linked list to all the plans!!!!
+            plan.fdmt_plan.prev_pipeline_plan = None # Same for this! Yikes
+            plan.fdmt_plan.container1 = None
+            plan.fdmt_plan.container2 = None
             comm.send(plan_data, dest=app.BEAMPROC_RANK)            
             self.send_to_candproc(iblk, plan)
             log.info('Plan sent count=%d iblk=%d', count, iblk)
@@ -1202,9 +1225,13 @@ class PlannerProcessor(Processor):
     def send_to_candproc(self, iblk, plan):
         wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
         self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
-
-
-
+        if self.dump_plans:            
+            beamid = self.pipe_info.beamid
+            fout = f'plan_b{beamid:02d}_iblk{iblk}.pkl'
+            with open(fout, 'wb') as f:
+                pickle.dump(plan,f)
+                sz = os.path.getsize(fout)
+                log.info('Wrote %d plan to %s. Size %d', iblk, fout, sz)
 
 class BeamCandProcessor(Processor):
     def run(self):
@@ -1214,7 +1241,7 @@ class BeamCandProcessor(Processor):
         cand_buff = MpiCandidateBuffer.for_rx(rx_comm, app.BEAMPROC_RANK)
         out_cand_buff = MpiCandidateBuffer.for_beam_processor(app.cand_comm)
         from craco.candpipe import candpipe
-        candout_dir = os.path.join('results/clustering_output')
+        candout_dir = 'results/clustering_output'
         os.makedirs(candout_dir, exist_ok=True)
         beamid = self.pipe_info.beamid
         candfname = f'candidates.b{beamid:02d}.txt'
@@ -1223,10 +1250,10 @@ class BeamCandProcessor(Processor):
         except FileExistsError:
             pass
                 
-        candpipe_args = candpipe.get_parser().parse_args([f'-o {candout_dir}'])
+        candpipe_args = candpipe.get_parser().parse_args(['-o', candout_dir])
         
         pipe = candpipe.Pipeline(self.pipe_info.beamid, 
-                                 args=candpipe_args,  # use defaults
+                                 args=candpipe_args,  
                                  config=None,  # use defaults
                                  src_dir='.', 
                                  anti_alias=True)
@@ -1287,7 +1314,23 @@ class BeamCandProcessor(Processor):
             self.set_wcs(self.new_wcs)
         
 
-            
+def format_candidate_slack_message(bestcand_dict, outdir):
+    '''
+    Format a message for the slack channel
+    '''
+    outdir_split = outdir.split("/")
+    sbid = int(outdir_split[4][2:])
+    scan = outdir_split[-2]; tstart = outdir_split[-1]
+
+    url = f"""http://localhost:8024/candidate?sbid={sbid}&beam={bestcand_dict["ibeam"]}&scan={scan}&tstart={tstart}&runname=results"""
+    url += f"""&dm={bestcand_dict["dm_pccm3"]}&boxcwidth={bestcand_dict["boxc_width"]}&lpix={bestcand_dict["lpix"]}&mpix={bestcand_dict["mpix"]}"""
+    url += f"""&totalsample={bestcand_dict["total_sample"]}&ra={bestcand_dict["ra_deg"]}&dec={bestcand_dict["dec_deg"]}"""
+
+    #######################################################################################################
+    msg = f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}\n Click the link - {url}'
+
+    return msg
+
 class CandMgrProcessor(Processor):
     def run(self):
         app = self.pipe_info.mpi_app
@@ -1306,17 +1349,18 @@ class CandMgrProcessor(Processor):
             t = Timer(args={'iblk':iblk})
             valid_cands = cands.gather()
             t.tick('Gather')
-            self.multi_beam_process(valid_cands)
+            if len(valid_cands) > 0:
+                self.multi_beam_process(valid_cands)
+
             t.tick('Multi process')
             iblk += 1
 
     def multi_beam_process(self, valid_cands):
         '''
-        :cands: CandidateWriter.out_dype np array of candidates.MAX_NCAND from each beam.
-        cands['snr'] = -1 for no candidates
-        '''
-        #cands = cands[cands['snr'] > 0]        
+        :cands: CandidateWriter.out_dype np array candidates. Should be len > 1
+        '''        
         maxidx = np.argmax(valid_cands['snr'])
+
         bestcand = valid_cands[maxidx]        
         self.cand_writer.update_latency(valid_cands)
         self.cand_writer.write_cands(valid_cands)
@@ -1329,21 +1373,8 @@ class CandMgrProcessor(Processor):
             log.critical('Sending candidate %s', bestcand_dict)
             self.cand_sender.send(bestcand)
             trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
-            #################### this part of code is for shitty posting for now for testing ######################
-            # get sbid and scanpath from outdir
-            outdir_split = outdir.split("/")
-            sbid = int(outdir_split[4][2:])
-            scan = outdir_split[-2]; tstart = outdir_split[-1]
-
-            url = f"""http://localhost:8024/candidate?sbid={sbid}&beam={bestcand_dict["ibeam"]}&scan={scan}&tstart={tstart}&runname=results"""
-            url += f"""&dm={bestcand_dict["dm_pccm3"]}&boxcwidth={bestcand_dict["boxc_width"]}&lpix={bestcand_dict["lpix"]}&mpix={bestcand_dict["mpix"]}"""
-            url += f"""&totalsample={bestcand_dict["total_sample"]}&ra={bestcand_dict["ra_deg"]}&dec={bestcand_dict["dec_deg"]}"""
-
-            #######################################################################################################
-
-            self.slack_poster.post_message(f'REALTIME CANDIDATE TRIGGERED {bestcand_dict} during scan {outdir}\n Click the link - {url}')
-
-
+            msg = format_candidate_slack_message(bestcand, outdir)
+            self.slack_poster.post_message(msg)
 
 def processor_class_factory(app):                    
     if app.is_beam_transposer:

@@ -286,6 +286,7 @@ class MetadataObsmanDriver:
         self.sb_service = get_service_object(comm,
                     "SchedulingBlockService@DataServiceAdapter",
                     iceint.schedblock.ISchedulingBlockServicePrx)
+        log.info('Got SB service from ICE')
 
 
     def changed(self, sbid, state, updated, old_state, current=None):
@@ -298,11 +299,12 @@ class MetadataObsmanDriver:
             self.sbid = sbid
             # pick up antenna list from observation variables
 
-        elif sbid == self.sbid:
-            assert state != ObsState.EXECUTING
-            # It must have gone out of executing
-            self.sbid = None
-            self.scan_manager = None
+        else:
+            if sbid == self.sbid:
+                assert state != ObsState.EXECUTING
+                # It must have gone out of executing
+                self.sbid = None
+                self.scan_manager = None
 
     def publish(self, pub_data, current=None):
         '''Implements iceint.datapublisher.ITimeTaggedTypedValueMapPublisher
@@ -328,7 +330,7 @@ class MetadataObsmanDriver:
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
-                info = ScanPrep.create_from_metafile(mgr.scan_metadata, self.ant_numbers)
+                info = ScanPrep.create_from_metafile(mgr.latest_good_metafile, self.ant_numbers)
                 self.obsman.scan_changed(info)
             else:
                 pass # continue not running a scan

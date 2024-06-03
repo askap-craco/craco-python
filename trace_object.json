@@ -1,4 +1,0 @@
-{ "traceEvents": [
-{"pid": 4041784, "tid": 139923383916352, "ts": 1, "cat": "", "ph": "B", "name": "hello", "args": {}}
-],"stackFrames":[]
-}
