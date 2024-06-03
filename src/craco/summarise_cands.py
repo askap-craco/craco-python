@@ -4,18 +4,15 @@ Summarise sttistics fomr andidates and send to slcak
 
 Copyright (C) CSIRO 2022
 """
-import pylab
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
 import os
 import sys
 import logging
 import pandas as pd
-import json
-from IPython import embed
-from slack_sdk import WebClient
 from craft.sigproc import SigprocFile as SF
+from craco.datadirs import ScanDir
+#from craco.craco_run.auto_sched import SlackPostManager
+import glob
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -50,135 +47,73 @@ def read_file(filename, snr=8, cet_remove=False):
     return f
 
 
-def read_filterbank_length(filpath):
+def read_filterbank_stats(filpath):
     try:
         f = SF(filpath)
         dur = f.nsamples * f.tsamp / 60         #minutes
-        msg = f"Duration: {dur:.1f} mins"
+        bw = np.abs(f.foff) * f.nchans
+        fcen = f.fch1 + bw / 2
+        ra = f.src_raj_deg
+        dec = f.src_dej_deg
+
+        msg = f"Duration: {dur:.1f} min\nBW: {bw:.1f} MHz\nFcen: {fcen:.1f} MHz\nBeam0 coords: {ra},{dec}\n"
     except:
-        msg = f"Error: Could not read filterbank information from path - {filpath}"
+        msg = f"!Error: Could not read filterbank information from path - {filpath}!"
     finally:
         return msg
 
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument('-o', '--output', type=str, default=None, help="output concat file for all beams")
+    parser = ArgumentParser()
     parser.add_argument('-snr', type=float, default=9, help='SNR selection threshold for candidates checking')
-    parser.add_argument(dest='files', nargs='+')
-    parser.set_defaults(verbose=False)
+    parser.add_argument('-sbid', type=str, required=True, help="SBID")
+    parser.add_argument('-scanid', type=str, required=True, help="Scan ID")
+    parser.add_argument('-tstart', type=str, required=True, help="Tstart")
     values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
 
-
-    all_df = []
-    links = []
-    num_cands = 0
+    num_uniq_cands = 0
+    num_unknown_cands = 0
     raw_num = 0
-    rfi_num = 0
-    raw_snr_num = 0
-    rfi_snr_num = 0
 
-    files = sorted(values.files, key=beam_of)
 
-    for ibeam, f in enumerate(files):
+    scan = ScanDir(sbid = values.sbid, scan = f"{values.scanid}/{values.tstart}")
+
+
+    for inode, node_dir in enumerate(scan.scan_data_dirs):
         # assert beam_of(f) == ibeam
-        beamno = beam_of(f)
 
-        df = pd.read_csv(f, index_col=0)
-        num_cands += len(df)
+        unclustered_candidate_files = glob.glob(node_dir + "/results/candidates.b*.txt")
+        uniq_candidate_files = glob.glob(node_dir + "/results/clustering_output/candidates.b*.uniq.csv")
 
-        # snr >= 9
-        snr = values.snr
-        df = df[ df['SNR'] >= snr ]
+        filpath = os.path.join(node_dir, "pcbb00.fil")
+        if os.path.exists(filpath):
+            search_dur_message = read_filterbank_stats(filpath)
 
-        df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
-        df['beamno'] = beamno
-        all_df.append(df)
+        for uniq_file in uniq_candidate_files:
+            df = pd.read_csv(uniq_file, index_col=0)
+            num_uniq_cands += len(df)
 
-        if len(df) != 0:
-            links.append(f'<http://localhost:8024/beam?fname={f}| Beam{beamno:02d}>')
+            # snr >= 9
+            snr = values.snr
+            df = df[ df['snr'] >= snr ]
 
-        rawcat = os.path.join(os.path.dirname(os.path.dirname(f)), os.path.basename(f).split('.uniq.csv')[0])
-        log.debug('%s %s %s', beamno, f, rawcat)
-
-        rficat = os.path.join(os.path.dirname(f), os.path.basename(f).replace('uniq', 'rfi'))
-        log.debug(rficat)
-
-        try: 
-            rawcat_csv = rficat.replace('rfi', 'rawcat')
-            raw_snr = read_file(rawcat_csv, snr=snr, cet_remove=True)
-            rfi_snr = read_file(rficat, snr=snr)
-            raw_snr_num += len(raw_snr)
-            rfi_snr_num += len(rfi_snr)
-
-        except:
-            log.info('cannot open rawcat and/or rficat')
-            
-
-        raw_num += sum(1 for _ in open(rawcat))
-        rfi_num += sum(1 for _ in open(rficat))
-        log.debug(rfi_num)
-
-
-    df = pd.concat(all_df)
-
-    # rawstats = f'raw_cand={raw_num} clustered={num_cands} rfi={rfi_num} cand={len(df)}'
-    rawstats = f'rawcand={raw_num} rawbright={raw_snr_num} rfi={rfi_num} rfibright={rfi_snr_num} clustered={num_cands} cand={len(df)}'
-    log.info(rawstats)
-
-
-    if values.output is not None:
-        # unknown = df[ df['Unknown'] ]
-        # unknown.to_csv(values.output, index=False)
-        df.to_csv(values.output, index=False)
-
-    summary = df.groupby('beamno').count()
-    summary2 = df.groupby('beamno').sum()
-
-    # links = [f'*<http://localhost:8024/beam?fname={fname}| Beam{ibeam:02d}>*\n ' for ibeam, fname in enumerate(files)]
-    summary['link'] = links
-    summary['Unknown'] = summary2['Unknown']
-
-    log.info(summary)
-
-    # columns = ['NEW_name','NEW_sep','link']
-    # tab = summary[columns].to_markdown()
-    # fields = [{'type':'mrkdwn','text':t} for t in msgs]
-
-
-    scanname = '/'.join(f.split('/')[4:8])
-
-
-    msgs = [format_msg(r) for _, r in summary.iterrows()]
-    # msgs = [scanname + ' ' + '\n'] + [rawstats + ' ' + '\n' ] + msgs
-    msgs = [scanname + ' (snr=' + str(snr) + ') ' + '\n'] + [rawstats + ' ' + '\n' ] + msgs
-
-    blocks1 = [{"type": "divider"}]
-
-    blocks1 += [
-        {
-            'type':'section',
-            'text':{
-                'type':'mrkdwn',
-                'text':t
-            }
-        } for t in msgs
-    ]
-
-    blocks1 += [{"type": "divider"}]
-    log.info(blocks1)
-
-    token = os.environ["SLACK_CRACO_TOKEN"]
-    client = WebClient(token=token)
-    channel = 'C05Q11P9GRH'
-    client.chat_postMessage(channel=channel, blocks=blocks1)
+            df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
     
+            num_unknown_cands += len(df[df['Unknown']])
+
+        for raw_file in unclustered_candidate_files:
+            nlines = -1
+            with open(raw_file, 'r') as f:
+                for _  in f:
+                    nlines += 1
+            raw_num += nlines
+
+    msg = f"""Finished processing scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
+    print(msg)
+    #slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+    #slack_poster.post_message(msg)
+
 
 if __name__ == '__main__':
     _main()
