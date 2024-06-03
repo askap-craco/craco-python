@@ -86,7 +86,10 @@ def test_scanprep_and_metafile(mfstub):
 
     nbeams = 36
     beam = 0
-    prep = ScanPrep.create_from_metafile_and_fcm(mfstub, fcmfile, dout, duration=15*u.minute)
+
+    valid_ant_numbers = np.arange(36)+1
+
+    prep = ScanPrep.create_from_metafile(mfstub, valid_ant_numbers, fcmfile, duration=15*u.minute)
     prep2 = ScanPrep.load(prep.outdir)
     t0 = mfstub.times[0]
     calc_meta = prep.calc_meta_file(beam)

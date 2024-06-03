@@ -42,6 +42,11 @@ class VisInfoAdapter:
         '''
         self.flag_ants = list(flag_ants)
 
+    def __str__(self):
+        s = f'VisInfo beam={self.beamid} iblk={self.iblk} tstart={self.tstart} maxuv={self.get_max_uv()} target={self.target_name} {self.target_skycoord} freq={self.freq_config} tsamp={self.tsamp}'
+
+        return s
+
     def get_max_uv(self):
         ''' Return umax, vmax'''
         fmax = self.channel_frequencies.max()
@@ -62,20 +67,25 @@ class VisInfoAdapter:
         # bleach. Gross. This requires much thinking
         # for now we just do something brittle and see where it breaks
 
-        # calculate the block when this VisInfo finishes
+        # calculate the block when this VisInfo finishe
         nblk = self.info.values.update_uv_blocks
         assert nblk >= 0,'Invalid update uv blocks'
-        start_fid = self.info.fid_of_block(self.iblk)  # Frame ID of beginning
+        start_fid = self.info.fid_of_search_block(self.iblk)  # Frame ID of beginning
         # fid_mid is the frame ID of hte middle of the block starting at the beginning of iblk
         # and finishing at the beginning of iblk+nblk
-        end_fid = self.info.fid_of_block(self.iblk+nblk)
-        fid_mid = start_fid + (end_fid - start_fid) // 2
+        end_fid = self.info.fid_of_search_block(self.iblk+nblk)
+        mid_fid = start_fid + np.uint64((end_fid - start_fid) // 2)
 
-        # nblk == 0 is disabled. fid_mid will be the beginning of the block. You have been warned
-        mjd_mid = self.info.fid_to_mjd(fid_mid)
-        log.info('Returning baselines for iblk=%s start_fid=%s fid_mid=%s mjd_mid=%s tstart=%s',
-                 self.iblk, start_fid, fid_mid, mjd_mid, self.tstart)
+        # nblk == 0 is disabled. fid_mid will be the beginning of the block. You have been warned - in a comment that no-one will read
+        mjd_mid = self.info.fid_to_mjd(mid_fid)
+        mjd_start = self.info.fid_to_mjd(start_fid)
+        mjd_end = self.info.fid_to_mjd(end_fid)
+        tstart = self.info.tstart
+        middif = (mjd_mid - tstart).to('s')
+        expect_mjd_mid = tstart + self.tsamp*256*(self.iblk + 0.5)
 
+        log.info('Returning baselines for iblk=%s FID: %d/%d/%d MJD %s/%s/%s expect mid MJD: %s mid-tstart=%f', 
+                 start_fid, mid_fid, end_fid, mjd_start, mjd_mid, mjd_end, expect_mjd_mid, middif)
         
         self._baselines = self.info.baselines_at_time(mjd_mid)
         return self._baselines
