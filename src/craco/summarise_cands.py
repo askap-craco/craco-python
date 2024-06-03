@@ -15,6 +15,7 @@ import pandas as pd
 import json
 from IPython import embed
 from slack_sdk import WebClient
+from craft.sigproc import SigprocFile as SF
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,17 @@ def read_file(filename, snr=8, cet_remove=False):
         f = f[ ~( (f['lpix'] >= 126) & (f['mpix'] >= 126) & (f['lpix'] <= 130) & (f['lpix'] <= 130) ) ]
 
     return f
+
+
+def read_filterbank_length(filpath):
+    try:
+        f = SF(filpath)
+        dur = f.nsamples * f.tsamp / 60         #minutes
+        msg = f"Duration: {dur:.1f} mins"
+    except:
+        msg = f"Error: Could not read filterbank information from path - {filpath}"
+    finally:
+        return msg
 
 
 def _main():
