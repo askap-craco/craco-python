@@ -128,7 +128,17 @@ class SchedDir:
         metapath = "{}/{}.json.gz".format(
             self.sched_head_dir, format_sbid(self.sbid, padding=False)
         )
-        return metapath if check_path(metapath) else None
+        backup_metapath = "{}/metadata/{}.json.gz".format(
+            self.datadirs.node_dir, format_sbid(self.sbid, padding=False)
+        )
+        
+        final_metapath = None
+        if check_path(metapath):
+            final_metapath = metapath
+        elif check_path(backup_metapath):
+            final_metapath = backup_metapath
+        
+        return final_metapath
 
     @property
     def flagfile(self):
