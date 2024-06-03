@@ -27,7 +27,7 @@ def read_filterbank_stats(filpath):
         ra = f.src_raj_deg
         dec = f.src_dej_deg
 
-        msg = f"Duration: {dur:.1f} min\nBW: {bw:.1f} MHz\nFcen: {fcen:.1f} MHz\nBeam0 coords: {ra},{dec}\n"
+        msg = f"- Duration: {dur:.1f} min\n- BW: {bw:.1f} MHz\n- Fcen: {fcen:.1f} MHz\n- Beam0 coords: {ra},{dec}\n"
     except:
         msg = f"!Error: Could not read filterbank information from path - {filpath}!"
     finally:
@@ -67,7 +67,7 @@ def run_with_tsp():
         return
     else:
         sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""summarise_cands -snr 8 -sbid {sbid} -scanid {scanin} -tstart {tstart}"""
+        cmd = f"""summarise_cands -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
 
         subprocess.run(
             [f"tsp {cmd}"], shell=True, capture_output=True,
