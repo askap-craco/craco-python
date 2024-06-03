@@ -16,10 +16,9 @@ rootdir=$(echo $indir | sed s%/data/craco/%/CRACO/DATA_00/%)
 sbid=$(echo $indir | awk -F/ '{print $5}')
 short_sbid=$(echo $sbid | sed s%SB0%SB%)
 metafile=/CRACO/DATA_00/craco/metadata/$short_sbid.json.gz
-#metafile=$rootdir/../../../SB*.json.gz
 
 source /home/craftop/.conda/.remove_conda.sh
 source /home/craftop/.conda/.activate_conda.sh
 conda activate craco
 
-uvfits_average $uvfits -metadata $metafile $@
+uvfits_image $uvfits -metadata $metafile $@

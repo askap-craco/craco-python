@@ -81,7 +81,7 @@ else:
         robust=robust,
         pblimit=-1,
         niter=niter,
-        savemodel="modelcolumn",
+        # savemodel="modelcolumn",
         threshold=threshold,
     )
 
