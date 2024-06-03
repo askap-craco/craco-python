@@ -1,6 +1,6 @@
 
-# for clustering 
-min_samples: 1 
+# for clustering
+min_samples: 1
 
 # eps params for time/dm clustering
 eps:
@@ -13,33 +13,33 @@ eps2:
   lpix: 3
   mpix: 3
 
-# candidates classify 
+# candidates classify
 threshold:
-  lpix_rms: 2           # minimum threshold for a RFI clustering 
+  lpix_rms: 2           # minimum threshold for a RFI clustering
   mpix_rms: 2
   num_samps: 2          # number of samples for each cluster - one metric for RFI classification
   num_spatial: 2        # number of spatially coherent clusteres in each space/time clusters
-  max_snr: 50           # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric 
-  mSlope: 1             # m6, for m6>1 select the first two brightest spatial clusters 
+  max_snr: 50           # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric
+  mSlope: 1             # m6, for m6>1 select the first two brightest spatial clusters
   mSlopeSmooth: 0.04    # selection metrics - if 0 <= m7 < 0.04 then it can be a real source
   mSNR: 0.5             # selection metrics - rule out all candidates with m3 < 0.5 (they're just some kind of weird RFIs)
-  num_mSlopeSmooth: 10  # using first 10 data points to do smooth 
+  num_mSlopeSmooth: 10  # using first 10 data points to do smooth
 
-filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius 
+filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius
 
 # location for pulsar/RACS/new sources catalogue csv
-catpath: ['/CRACO/SOFTWARE/ban115/catalogues/atnf_psrcat_localized_no0837.csv', 
-          '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv', 
+catpath: ['/CRACO/DATA_00/craco/wan348/catalogues/atnf_psrcat_localized.csv',
+          '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv',
           '/CRACO/DATA_00/craco/wan348/catalogues/craco_updated.csv']
-catcols: 
+catcols:
   ra: ['RAJD', 'RA', 'RAD']
   dec: ['DECJD', 'Dec', 'DECD']
   input_colname: ['PSRJ', 'Gaussian_ID', 'NAME']
   output_prefix: ['PSR', 'RACS', 'NEW']
 
-threshold_crossmatch: [60, 60, 60] # in unit of arcsec 
+threshold_crossmatch: [60, 60, 60] # in unit of arcsec
 
-# for aliasing 
+# for aliasing
 catpath_alias: '/CRACO/DATA_00/craco/wan348/catalogues/cat_bright_for_alias.csv'
 threshold_alias: 60  # in unit of arcsec
 
@@ -47,7 +47,8 @@ threshold_alias: 60  # in unit of arcsec
 inject_tol:
   srcsep: 60 # in unit of arcsec
   tsmaps: 10 # pixel
-  dm_pccm3: 10 # in physical units 
+  dm_pccm3: 20 # in physical units
+  dm_frac: 0.1 #in percentage of dm
 
 # dataframe format
 dformat:
@@ -68,17 +69,17 @@ dformat:
     centm: 2
 
   colint: [
-    'lpix', 
-    'mpix', 
-    'boxc_width', 
-    'time', 
-    'dm', 
-    'iblk', 
-    'rawsn', 
-    'total_sample', 
-    'cluster_id', 
-    'spatial_id', 
-    'num_samps', 
-    'num_spatial', 
+    'lpix',
+    'mpix',
+    'boxc_width',
+    'time',
+    'dm',
+    'iblk',
+    'rawsn',
+    'total_sample',
+    'cluster_id',
+    'spatial_id',
+    'num_samps',
+    'num_spatial',
     ]
 
