@@ -23,17 +23,60 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 dtype = CandidateWriter.out_dtype
 
+search_cas_fil_dtype = np.dtype([
+    ('SNR','<f4'),
+    ('boxcar','<u1'),
+    ('DM','<f4'),
+    ('samp','<f4'),
+    ('ngroup','<f4'),
+    ('ncluster','<f4'),
+    ('boxcar_ms','<f4'),
+    ('DM_pccc','<f4'),
+    ('time_s','<f4'),
+    ('mjd_inf','<f4'),
+    ('mjd_lower_edge','<f4')
+])
+
+out_dtype_list = [
+            ('snr', '<f4'),
+            ('lpix', '<u1'),
+            ('mpix', '<u1'),
+            ('boxc_width', '<u1'),
+            ('time', '<u1'),
+            ('dm', '<u2'),
+            ('iblk', '<u4'),            #Saturates after 12725 days
+            ('rawsn', '<i2'),
+            ('total_sample', '<u4'),    #Saturates after 50 days
+            ('obstime_sec', '<f4'),     #Saturates after 25 days
+            ('mjd', '<f8'),
+            ('dm_pccm3', '<f4'),
+            ('ra_deg', '<f4'),
+            ('dec_deg', 'f4'),
+            ('ibeam', '<u1'), # beam number
+            ('latency_ms', '<f4') # latency in milliseconds. Can be update occasionally
+        ]
+
+all_dtypes = [CandidateWriter.out_dtype,
+              CandidateWriter.out_dtype_short,
+              search_cas_fil_dtype]
+
 def load_cands(fname, maxcount=None, fmt='numpy'):
     '''
     Load candidates from file
     if fmt=='numpy' (default) returns numpy structured array.
     if fmt=='pandas' returns pandas dataframe
     '''
+    c = None
+    for dt in all_dtypes:
+        try:               
+            c = np.loadtxt(fname, dtype=dt, max_rows=maxcount)
+            break
+        except ValueError: # usually happens if the input file is missing the last 2 columns
+            pass # that dtype didn't work
 
-    try:
-        c = np.loadtxt(fname, dtype=CandidateWriter.out_dtype, max_rows=maxcount)
-    except ValueError: # usually happens if the input file is missing the last 2 columns
-        c = np.loadtxt(fname, dtype=CandidateWriter.out_dtype_short, max_rows=maxcount)
+    if c is None:
+        raise ValueError(f'Could not load file{fname} Unkonwn dtype')
+        
     if fmt == 'numpy':
         if len(c.shape) == 0: # psycho np.loadtxt returns a length 0 array with only 1 row!
             c.shape = (1,)
