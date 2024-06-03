@@ -330,7 +330,7 @@ class MetadataObsmanDriver:
                 self.obsman.terminate_process()
         else:
             if next_scan_running: # start new scan
-                info = ScanPrep.create_from_metafile(mgr.self.latest_good_metafile, self.ant_numbers)
+                info = ScanPrep.create_from_metafile(mgr.latest_good_metafile, self.ant_numbers)
                 self.obsman.scan_changed(info)
             else:
                 pass # continue not running a scan
