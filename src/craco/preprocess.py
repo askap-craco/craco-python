@@ -69,8 +69,6 @@ def normalise(block, target_input_rms = 1):
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
 
-    #import IPython
-    #IPython.embed()
     return new_block
 
 
@@ -992,9 +990,8 @@ def calculate_num_good_cells(tf_weights, bl_weights, fixed_freq_weights):
     combined_tf_weights = tf_weights & fixed_freq_weights[:, None]
     tf_sum = combined_tf_weights.sum()
     bl_sum = bl_weights.sum()
-    freq_sum = fixed_freq_weights.sum()
     tot_sum = tf_sum * bl_sum
-    return tot_sum, bl_sum, freq_sum
+    return tot_sum, bl_sum
 
 class FastPreprocess:
 
@@ -1039,7 +1036,6 @@ class FastPreprocess:
 
         if self.stats_log_fout is None:
             self.stats_log_fout = open("flagging_logs.csv", 'w')
-            self.stats_log_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}")
             self.stats_log_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\n")
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
@@ -1052,9 +1048,12 @@ class FastPreprocess:
         self.__call__(dummy_block, dummy_bl_weights, dummy_input_tf_weights)
 
     def update_preflagging_statistics(self, tf_weights, bl_weights):
+        #import pdb 
+        #pdb.set_trace()
+        #print(tf_weights.sum(), bl_weights.sum())
         num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
         self.num_good_cells_pre += num_good_cells
-        self.num_good_nbl_post += num_good_nbl
+        self.num_good_nbl_pre += num_good_nbl
 
     def update_postflagging_statistics(self, tf_weights, bl_weights):
         num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
@@ -1070,6 +1069,12 @@ class FastPreprocess:
 
     def close(self):
         if self.stats_log_fout is not None:
+            self.stats_log_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}\n")
+            self.stats_log_fout.write("#num_good_bl_pre_cumul =  no of good baselines before flagging\n")
+            self.stats_log_fout.write("#num_good_cells_pre_cumul =  no of good cells before flagging\n")
+            self.stats_log_fout.write("#num_good_bl_post_cumul =  no of good baselines after flagging\n")
+            self.stats_log_fout.write("#num_good_cells_post_cumul =  no of good cells after flagging\n")
+            self.stats_log_fout.write("#All quantities are averaged by the no of blocks seen. So to get the true cumulative value, multiply by the corresponding nblks\n")
             self.stats_log_fout.close()
             
     @property
