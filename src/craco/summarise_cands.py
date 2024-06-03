@@ -123,7 +123,7 @@ def _main():
             raw_num += nlines
 
     msg = f"""Finished processing scan::\n{values.sbid}/{values.scanid}/{values.tstart}\n{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
-    log.info("Posting message - \n", msg)
+    log.info("Posting message - \n" + msg)
     slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
     slack_poster.post_message(msg)
 
