@@ -20,7 +20,7 @@ import numpy as np
 from craco.prep_scan import touchfile,ScanPrep
 from craft.cmdline import strrange
 from craco.craco_run import auto_sched
-
+from craco import summarise_cands
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +234,7 @@ def exit_function():
         if do_calibration:
             log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
+        summarise_cands.run_as_tsp()
 
 if __name__ == '__main__':
     _main()
