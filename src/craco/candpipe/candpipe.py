@@ -306,6 +306,15 @@ class Pipeline:
         assert 0 <= ra < 360
         assert -90 <= dec <= 90
         return (ra, dec)
+
+    def get_current_pixel_to_world(self, lpixlist, mpixlist):
+        '''
+        Return pixel to world coordindates based on given lpix mpix 
+        '''
+        h = self.psf_header
+        wcs_info = WCS(h, naxis=2)
+        coords = wcs_info.pixel_to_world(lpixlist, mpixlist)
+        return coords
     
     def close(self):
         for step in self.steps:
