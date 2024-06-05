@@ -234,7 +234,7 @@ def exit_function():
         if do_calibration:
             log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
-        summarise_cands.run_as_tsp()
+        summarise_cands.run_with_tsp()
 
 if __name__ == '__main__':
     _main()
