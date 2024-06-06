@@ -84,8 +84,11 @@ class VisInfoAdapter:
         middif = (mjd_mid - tstart).to('s')
         expect_mjd_mid = tstart + self.tsamp*256*(self.iblk + 0.5)
 
-        log.info('Returning baselines for iblk=%s FID: %d/%d/%d MJD %s/%s/%s expect mid MJD: %s mid-tstart=%f', 
-                 start_fid, mid_fid, end_fid, mjd_start, mjd_mid, mjd_end, expect_mjd_mid, middif)
+        log.info('Returning baselines for iblk=%s FID: %s/%s/%s MJD %s/%s/%s expect mid MJD: %s mid-tstart=%s (sec)', 
+                 self.iblk,
+                 start_fid, mid_fid, end_fid, 
+                 mjd_start.iso, mjd_mid.iso, mjd_end.iso, 
+                 expect_mjd_mid.iso, middif)
         
         self._baselines = self.info.baselines_at_time(mjd_mid)
         return self._baselines
