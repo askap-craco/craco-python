@@ -307,8 +307,10 @@ class MpiObsInfo:
         Handling all this is a headache
         '''
         assert siblk >= 0
-        nint_per_search_block = 256        
-        nsamp_per_search_block = nint_per_search_block * self.nt * self.vis_tscrunch / np.uint64(NSAMP_PER_FRAME)
+        nint_per_search_block = 256
+        nint_per_frame = self.main_merger.nint_per_frame
+        nsamp_per_int = self.vis_tscrunch * np.uint64(NSAMP_PER_FRAME) // nint_per_frame  # number of FIDS per integration. Including tscrunch    
+        nsamp_per_search_block = nint_per_search_block * nsamp_per_int
         fid = self.fid0 + np.uint64(siblk)*np.uint64(nsamp_per_search_block)
 
         return fid
