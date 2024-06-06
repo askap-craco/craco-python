@@ -128,7 +128,7 @@ class Step(ProcessingStep):
         lpixlist = np.array(injpar['injection_pixels'])[:, 0]
         mpixlist = np.array(injpar['injection_pixels'])[:, 1]
 
-        coords = self.pipeline.wcs_info.pixel_to_world(lpixlist, mpixlist)
+        coords = self.pipeline.get_current_pixel_to_world(lpixlist, mpixlist)
         injpar_df['lpix_inj'] = lpixlist
         injpar_df['mpix_inj'] = mpixlist
         injpar_df['ra_deg_inj'] = coords.ra.deg
