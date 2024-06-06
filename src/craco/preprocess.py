@@ -69,8 +69,6 @@ def normalise(block, target_input_rms = 1):
     else:
         raise Exception("Unknown type of block provided - expecting dict, np.ndarray, or np.ma.core.MaskedArray")
 
-    #import IPython
-    #IPython.embed()
     return new_block
 
 
@@ -975,7 +973,7 @@ class TAB_handler:
              self.tab_array[isrc].T.tofile(self.fouts[isrc].fin)
 
     def __call__(self, vis_array):
-        self.tab_array[:] = 0
+        self.tab_array[:] = 0       #this is necessary, and only costs us ~80 micro-secs per block
         create_tabs_numba(vis_array, self.phasor_array, self.tab_array)
         self.dump_to_fil()
             
@@ -983,6 +981,17 @@ class TAB_handler:
         for isrc in range(self.nsrc):
             self.fouts[isrc].fin.close()
 
+
+def calculate_num_good_cells(tf_weights, bl_weights, fixed_freq_weights):
+    '''
+    Counts how many good cells are there for a given block in total. Useful for keeping track of statistics
+    Also returns num of good baselines and channels
+    '''
+    combined_tf_weights = tf_weights & fixed_freq_weights[:, None]
+    tf_sum = combined_tf_weights.sum()
+    bl_sum = bl_weights.sum()
+    tot_sum = tf_sum * bl_sum
+    return tot_sum, bl_sum
 
 class FastPreprocess:
 
@@ -998,6 +1007,7 @@ class FastPreprocess:
         self.global_norm = global_norm
         self.target_input_rms = values.target_input_rms
         self.sky_sub = sky_sub
+        self.stats_log_fout = None
 
         self.blk_shape = blk_shape
         self._initialise_internal_buffers()
@@ -1015,6 +1025,18 @@ class FastPreprocess:
         self.crs_block = np.zeros((nf, nt), dtype=np.float64)
 
         self.output_buf = np.zeros(self.blk_shape, dtype=np.complex64)
+
+        self.num_good_nbl_pre = 0
+        self.num_good_cells_pre = 0
+
+        self.num_good_nbl_post = 0
+        self.num_good_cells_post = 0
+
+        self.num_nblks = 0
+
+        if self.stats_log_fout is None:
+            self.stats_log_fout = open("flagging_logs.csv", 'w')
+            self.stats_log_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\n")
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
@@ -1025,6 +1047,47 @@ class FastPreprocess:
         dummy_bl_weights = np.ones(nbl, dtype=bool)
         self.__call__(dummy_block, dummy_bl_weights, dummy_input_tf_weights)
 
+    def update_preflagging_statistics(self, tf_weights, bl_weights):
+        #import pdb 
+        #pdb.set_trace()
+        #print(tf_weights.sum(), bl_weights.sum())
+        num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
+        self.num_good_cells_pre += num_good_cells
+        self.num_good_nbl_pre += num_good_nbl
+
+    def update_postflagging_statistics(self, tf_weights, bl_weights):
+        num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
+        self.num_good_cells_post += num_good_cells
+        self.num_good_nbl_post += num_good_nbl
+
+    def log_flagging_stats(self):
+        good_bls_pre, good_cells_pre = self.preflagging_stats
+        good_bls_post, good_cells_post = self.postflagging_stats
+
+        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\n"
+        self.stats_log_fout.write(out_str)
+
+    def close(self):
+        if self.stats_log_fout is not None:
+            self.stats_log_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}\n")
+            self.stats_log_fout.write("#num_good_bl_pre_cumul =  no of good baselines before flagging\n")
+            self.stats_log_fout.write("#num_good_cells_pre_cumul =  no of good cells before flagging\n")
+            self.stats_log_fout.write("#num_good_bl_post_cumul =  no of good baselines after flagging\n")
+            self.stats_log_fout.write("#num_good_cells_post_cumul =  no of good cells after flagging\n")
+            self.stats_log_fout.write("#All quantities are averaged by the no of blocks seen. So to get the true cumulative value, multiply by the corresponding nblks\n")
+            self.stats_log_fout.close()
+            
+    @property
+    def preflagging_stats(self):
+        mean_cells = self.num_good_cells_pre / self.num_nblks
+        mean_bls = self.num_good_nbl_pre / self.num_nblks
+        return mean_bls, mean_cells
+    
+    @property
+    def postflagging_stats(self):
+        mean_cells = self.num_good_cells_post / self.num_nblks
+        mean_bls = self.num_good_nbl_post / self.num_nblks
+        return mean_bls, mean_cells
 
     @property
     def means(self):
@@ -1052,6 +1115,7 @@ class FastPreprocess:
         std_val = np.sqrt( (std_real_sq + std_imag_sq) / 2 ) / global_N
 
         return std_val
+
 
 
     def make_averaged_cal_sol(self, cal_soln_array):
@@ -1128,12 +1192,17 @@ class FastPreprocess:
                         cas = self.cas_block, 
                         crs = self.crs_block)
         
+        self.update_preflagging_statistics(input_tf_weights, bl_weights)
+
         get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
                                         finest_nt = self.dflag_nt,
                                         tf_weights=input_tf_weights,
                                         freq_radius=self.dflag_fradius,
                                         freq_threshold=self.dflag_fthreshold)
-        
+
+        self.update_postflagging_statistics(input_tf_weights, bl_weights)
+        self.num_nblks += 1
+
         fast_preprocess_sos(input_data=input_data,
                             bl_weights=bl_weights,
                             fixed_freq_weights=self.fixed_freq_weights,
