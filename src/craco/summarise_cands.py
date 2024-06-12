@@ -11,12 +11,47 @@ import pandas as pd
 from craft.sigproc import SigprocFile as SF
 from craco.datadirs import ScanDir
 from craco.craco_run.auto_sched import SlackPostManager
+from craco.metadatafile import MetadataFile as MF
 import glob
 import numpy as np
 import subprocess
 import logging 
 
 log = logging.getLogger(__name__)
+
+
+def dec_to_dms(deg:float) -> str:
+    '''
+    Converts dec angle in degrees (float) to DD:MM:SS.ss (string)
+    '''
+    dd = int(deg)
+    signum = np.sign(deg)
+    if signum >= 0:
+        prefix = '+'
+    else:
+        prefix = '-'
+
+    rem = np.abs(deg - dd)
+    mm = int(rem * 60)
+    ss = (rem * 60  - mm) * 60
+    ss_int = int(ss)
+    ss_frac = int((ss - ss_int) * 100)
+
+    return f"{prefix}{np.abs(dd):02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
+
+def ra_to_hms(ha:float) -> str:
+    '''
+    Converts ra angle in ha (float) to HH:MM:SS.ss (string)
+    '''
+    ha /= 15
+    hh = int(ha)
+    rem = ha - hh
+    mm = int(rem * 60)
+    ss = (rem*60  - mm) * 60
+    ss_int = int(ss)
+    ss_frac = int((ss - ss_int) * 100)
+
+    return f"{hh:02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
 
 def read_filterbank_stats(filpath):
     try:
@@ -26,8 +61,9 @@ def read_filterbank_stats(filpath):
         fcen = f.fch1 + bw / 2
         ra = f.src_raj_deg
         dec = f.src_dej_deg
+        coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
 
-        msg = f"- Duration: {dur:.1f} min\n- BW: {bw:.1f} MHz\n- Fcen: {fcen:.1f} MHz\n- Beam0 coords: {ra},{dec}\n"
+        msg = f"- Duration: {dur:.1f} min\n- BW: {bw:.1f} MHz\n- Fcen: {fcen:.1f} MHz\n- Beam0 coords: {coord_string}\n"
     except:
         msg = f"!Error: Could not read filterbank information from path - {filpath}!"
     finally:
@@ -39,8 +75,8 @@ def parse_scandir_env(path):
         for ip, part in enumerate(parts):
             if part.startswith("SB0"):
                 sbid = part
-                scanid = parts[ip + 1]
-                tstart = parts[ip + 2]
+                scanid = parts[ip + 2]
+                tstart = parts[ip + 3]
                 
                 if len(sbid) == 8 and len(scanid) == 2 and len(tstart) == 14:
                     return sbid, scanid, tstart
@@ -76,6 +112,23 @@ def run_with_tsp():
         log.info(f"Queued summarise cands job - with command - {cmd}")
 
 
+def get_metadata_info(scan):
+    metapath = os.path.join(scan.scan_head_dir, "metafile.json")
+    if not os.path.exists(metapath):
+        msg = f"Metafile not found at path - {metapath}"
+    else:
+        try:
+           mf = MF(metapath)
+           source_names = str(list(mf.sources(0).keys()))
+           msg = f"Beam 0 source names - {source_names}\n"
+        except Exception as E:
+            emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
+            log.critical(emsg)
+            msg = emsg
+    return msg
+
+
+
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser()
@@ -95,7 +148,10 @@ def _main():
     except ValueError as VE:
         msg += f"Cannot instantiate a ScanDir object with the given arguments!"
     else:
+         msg += f"Scan head dir: {scan.scan_head_dir}\n"
          found_pcb = False
+         metainfo = get_metadata_info(scan)
+         msg += metainfo
 
          for inode, node_dir in enumerate(scan.scan_data_dirs):
 
@@ -107,23 +163,41 @@ def _main():
                  found_pcb = True
                  search_dur_message = read_filterbank_stats(filpath)
 
-             for uniq_file in uniq_candidate_files:
-                 df = pd.read_csv(uniq_file, index_col=0)
-                 num_uniq_cands += len(df)
+             if len(unclustered_candidate_files) == 0:
+                 msg += f"No raw candidate files found on node: {node_dir}!\n"
+                 continue
 
-                 snr = values.snr
-                 df = df[ df['snr'] >= snr ]
+             try:
+                 for raw_file in unclustered_candidate_files:
+                     nlines = -1
+                     with open(raw_file, 'r') as f:
+                         for _  in f:
+                             nlines += 1
+                     raw_num += nlines
+             except Exception as E:
+                 emsg = f"Could not read the raw candidate file - {raw_file} due the following error - \n{E}\n"
+                 log.critical(emsg)
+                 continue
+             
+             if len(uniq_candidate_files) == 0:
+                 msg += f"No clustered candidate files found on node: {node_dir}!\n"
+                 continue
 
-                 df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+             try:
+                 for uniq_file in uniq_candidate_files:
+                     df = pd.read_csv(uniq_file, index_col=0)
+                     num_uniq_cands += len(df)
+
+                     snr = values.snr
+                     df = df[ df['snr'] >= snr ]
+
+                     df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
          
-                 num_unknown_cands += len(df[df['Unknown']])
-
-             for raw_file in unclustered_candidate_files:
-                 nlines = -1
-                 with open(raw_file, 'r') as f:
-                     for _  in f:
-                         nlines += 1
-                 raw_num += nlines
+                     num_unknown_cands += len(df[df['Unknown']])
+             except Exception as E:
+                 emsg = f"Could not read the uniq candidate file - {uniq_file} due to the following error - \n{E}"
+                 log.critical(emsg)
+                 continue
 
          if not found_pcb:
              if num_unknown_cands == 0 and raw_num == 0:
@@ -131,7 +205,7 @@ def _main():
              else:
                  msg += "We don't have a pcb file, but somehow candidates exist for this scan - something went wrong, please take a look VG, Andy, Keith!!!\n"
          else:
-             msg += f"""{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands:{num_unknown_cands}\n"""
+             msg += f"""{search_dur_message}\nTotal raw cands: {raw_num}\nTotal unknown cands: {num_unknown_cands}\n"""
     finally:     
         log.info("Posting message - \n" + msg)
         slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
