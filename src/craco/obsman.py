@@ -383,16 +383,20 @@ def _main():
     parser.add_argument('--ignore-ants', type=strrange, default='', help='List of antennas to remove from the list of available antenans')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
-    if values.verbose:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s %(levelname)-8s %(processName)s (%(process)d) %(message)s',
+
+    level = logging.DEBUG if values.verbose else logging.INFO
+        
+    logging.basicConfig(
+            level=level,
+            format='%(asctime)s %(levelname)-8s %(filename)s:%(funcName)s %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S')
-    else:
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S')
+    
+    os.makedirs('logs', exist_ok=True)
+    filehandler = logging.handlers.TimedRotatingFileHandler('logs/obsman.log', when='D', interval=1, backupCount=10)
+    formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(filename)s:%(funcName)s %(message)s', '%Y-%m-%d %H:%M:%S')
+    filehandler.setFormatter(formatter)
+    logging.getLogger().addHandler(filehandler)
+    log.info('Starting obsman')
 
     obs = Obsman(values)
     if values.driver == 'meta':
