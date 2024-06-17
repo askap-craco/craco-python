@@ -315,6 +315,9 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
     rank = 0
     rxrank = 0
     cardno = 0
+    ncores_per_socket = 16
+    nslots_per_host = 2
+
     for block in values.block:
         for card in values.card:
             cardno += 1
@@ -322,17 +325,14 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
                 break
             for fpga in values.fpga[::fpga_per_rx]:
                 hostidx = rxrank // nrx_per_host
-                hostrank = rxrank % nrx_per_host
+                hostrank = rxrank % nrx_per_host                
                 host = hosts[hostidx]
-                slot = 1 # fixed because both cards are on NUMA=1
-                # Put different FPGAs on differnt cores
-                evenfpga = fpga % 2 == 0
-                ncores_per_socket = 10
                 ncores_per_proc = 1
-                icore = (hostrank*ncores_per_proc) % ncores_per_socket # use even numbered cores becase of hyperthreading
-                core='0-9'
+                slot = hostrank // nslots_per_host
+                icore = hostrank % nslots_per_host
+                #icore = (slotrank*ncores_per_proc) % ncores_per_socket 
+                #core='0-9'
                 core = f'{icore}-{icore+ncores_per_proc-1}'
-                slot = 1 # where the network cards are
                 rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
                 pipe_info.add_rank(rank_info)
                 rank += 1
@@ -351,7 +351,6 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
         host = hosts[hostidx]
         nslots = 2
         slot = beam % nslots  # put on the U280 slot. If you put in slot1 it runs about 20% 
-        core='0-9'
         devices = host_cards[host]
         this_host_search_beams = host_search_beams.get(host,[])
         host_search_beams[host] = this_host_search_beams
@@ -365,13 +364,13 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
                 devid = None
 
         log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
-        pipe_info.add_rank(BeamTranRankInfo(beam, rank, host, slot, core))
+        pipe_info.add_rank(BeamTranRankInfo(beam, rank, host, slot, core='13'))
         rank += 1
-        pipe_info.add_rank(BeamProcRankInfo(beam, rank, host, slot, core, devid))
+        pipe_info.add_rank(BeamProcRankInfo(beam, rank, host, slot, core='9-12', xrt_device_id=devid)) # extra cores for prepare step multi-threading
         rank += 1
-        pipe_info.add_rank(PlannerRankInfo(beam, rank, host, slot, core))
+        pipe_info.add_rank(PlannerRankInfo(beam, rank, host, slot, core='14'))
         rank += 1
-        pipe_info.add_rank(BeamCandRankInfo(beam, rank, host, slot, core))
+        pipe_info.add_rank(BeamCandRankInfo(beam, rank, host, slot, core='15'))
         rank += 1
 
     if values.dump_rankfile:
