@@ -92,7 +92,7 @@ def write_data_slow(uvout, uvw_baselines,dreshape, weights, fits_sourceidx, mjds
         #log.debug('UVFITSfid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
         uvout.put_data_block(uvw_baselines, mjd, blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
 
-@njit # damn - njit doesn't support big endian on intel.
+@njit(cache=True) # damn - njit doesn't support big endian on intel.
 def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
     '''
     dout is the dtype = np.dtype([('UU', dt), ('VV', dt), ('WW', dt), \
