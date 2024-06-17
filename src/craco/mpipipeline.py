@@ -47,6 +47,8 @@ from craco.candidate_writer import CandidateWriter
 from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
+from craco.uvfitsfile_sink import UvFitsFileSink
+
 from craco.tracing import tracing
 import pickle
 
@@ -256,6 +258,22 @@ class MpiObsInfo:
         Requested visibility fscrunch factor
         '''
         return self.values.vis_fscrunch
+
+    @property
+    def vis_nt(self) ->int:
+        '''
+        visiblity NT per block after tscrunch in teh transpose dtype
+        '''
+        vnt  = self.nt // self.vis_tscrunch
+        return vnt
+    
+    @property
+    def vis_nc(self) -> int:
+        '''
+        Visibility NChan after fscrunch in the transpose dtype
+        '''
+        vnc = NCHAN*NFPGA // self.vis_fscrunch
+        return vnc
 
     @property
     def vis_tscrunch(self):
@@ -783,162 +801,6 @@ class FilterbankSink:
     def close(self):
         self.fout.fin.close()
 
-
-class UvFitsFileSink:
-    def __init__(self, obs_info):
-        from craco.ccapfits2uvfits import get_antennas
-        from craft.corruvfits import CorrUvFitsFile
-        import scipy
-        beamno = obs_info.pipe_info.beamid
-        self.beamno = beamno
-        self.obs_info = obs_info
-        self.blockno = 0
-        values = obs_info.values
-        if values.fcm is None or beamno not in obs_info.values.save_uvfits_beams:
-            log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
-                     beamno, obs_info.values.save_uvfits_beams)
-            self.uvout = None
-            return
-        
-        fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
-        self.fileout = fileout
-        fcm = Parset.from_file(values.fcm)
-        antennas = get_antennas(fcm)
-        log.info('FCM %s contained %d antennas', values.fcm, len(antennas))
-        info = obs_info
-        fcent = info.fcent
-        foff = info.foff * values.vis_fscrunch
-        assert info.nchan % values.vis_fscrunch == 0, f'Fscrunch needs to divide nchan {info.nchan} {values.vis_fscrunch}'
-        nchan = info.nchan // values.vis_fscrunch
-        self.npol = 1 # card averager always sums polarisations
-        npol = self.npol
-        tstart = (info.tstart.utc.value + info.inttime.to(u.day).value)
-        self.total_nchan = nchan
-        self.source_list = obs_info.sources().values()
-        source_list = self.source_list
-        log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
-        extra_header = {'BEAMID': beamno, 'TSCALE':'UTC'}
-        self.uvout = CorrUvFitsFile(fileout,
-                                    fcent,
-                                    foff,
-                                    nchan,
-                                    npol,
-                                    tstart,
-                                    source_list,
-                                    antennas,
-                                    extra_header=extra_header,
-                                    instrume='CRACO')
-
-        # create extra tables so we can fix it later on. if the file is not closed properly
-        self.uvout.fq_table().writeto(fileout+".fq_table", overwrite=True)
-        self.uvout.an_table(self.uvout.antennas).writeto(fileout+'.an_table', overwrite=True)
-        self.uvout.su_table(self.uvout.sources).writeto(fileout+'.su_table', overwrite=True)
-        self.uvout.hdr.totextfile(fileout+'.header', overwrite=True)
-        self.blids = [bl.blid for bl in self.obs_info.baseline_iter()]
-
-        with open(fileout+'.groupsize', 'w') as fout:
-            fout.write(str(self.uvout.dtype.itemsize) + '\n')
-            
-
-    def write(self, vis_block):
-        '''
-        vis_data has len(nrx) and shape inner shape
-        vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
-        or 
-        vishape = (nbl, vis_nc, vis_nt) if np.complex64
-        '''
-        if self.uvout is None:
-            return
-
-        t = Timer()
-        vis_data = vis_block.data
-
-
-        raw_dump = False
-        if raw_dump:
-            vis_data.tofile(self.uvout.fout)
-            return
-
-        
-        info = self.obs_info
-        fid_start = vis_block.fid_start
-        nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
-        assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
-        fid_mid = vis_block.fid_mid
-        mjd = vis_block.mjd_mid
-        sourceidx = vis_block.source_index
-        uvw = vis_block.uvw
-        antflags = vis_block.antflags
-        t.tick('prep')
-        if np.iscomplexobj(vis_data):
-            dreshape = np.transpose(vis_data, (3,1,0,2)).reshape(vis_nt, nbl, self.total_nchan, self.npol) # should be [t, baseline, coarsechan*finechan]
-            t.tick('transpose')
-            damp = abs(dreshape)
-            t.tick('amp')
-        else:
-            # transpose takes 30 ms
-            dreshape = np.transpose(vis_data, (3,1,0,2,4)).reshape(vis_nt, nbl, self.total_nchan, self.npol,2) # should be [t, baseline, coarsechan*finechan]
-            t.tick('transpose')
-
-            # amplitude takes 14 ms
-            damp = np.sqrt(dreshape[...,0]**2 + dreshape[...,1]**2)
-            t.tick('amp')
-
-
-        log.debug('Input data shape %s, output data shape %s', vis_data.shape, dreshape.shape)
-        nant = info.nant
-        inttime = info.inttime.to(u.second).value*info.vis_tscrunch
-        assert NSAMP_PER_FRAME % vis_nt == 0
-        samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
-        blflags = vis_block.baseline_flags
-
-        weights = np.ones((vis_nt, nbl, self.total_nchan, self.npol), dtype=np.float32)
-        weights[damp == 0] = 0 # flag channels that have zero amplitude
-        uvw_baselines = np.empty((nbl, 3))
-
-        # fits convention has source index with starting value of 1
-        fits_sourceidx = sourceidx + 1
-        t.tick('prep weights')
-
-        for blinfo in info.baseline_iter():
-            ia1 = blinfo.ia1
-            ia2 = blinfo.ia2
-            a1 = blinfo.a1
-            a2 = blinfo.a2
-            ibl = blinfo.blidx
-            uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
-            if blflags[ibl]:
-                weights[:, ibl, ...] = 0
-                dreshape[:, ibl,...] = 0 # set output to zeros too, just so we can't cheat
-
-        t.tick('apply weights')
-        
-        # UV Fits files really like being in time order
-        for itime in range(vis_nt):
-            # FID is for the beginning of the block.
-            # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
-            fid_itime = fid_start + samps_per_vis // 2 + itime*samps_per_vis
-            mjd = info.fid_to_mjd(fid_itime).utc
-            log.debug('UVFITS block %s fid_start=%s fid_mid=%s info.nt=%s vis_nt=%s fid_itime=%s mjd=%s=%s inttime=%s', self.blockno, fid_start, fid_mid, info.nt, vis_nt, fid_itime, mjd, mjd.iso, inttime)
-            self.uvout.put_data_block(uvw_baselines, mjd.value, self.blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
-
-        t.tick('Write')
-        self.uvout.fout.flush()
-        t.tick('flush')
-        if self.beamno == 0:
-            log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
-        self.blockno += 1
-
-
-    def close(self):
-        print(f'Closing file {self.uvout}')
-        if self.uvout is not None:
-            self.uvout.close()
-
-    def __del__(self):
-        self.close()
-        
-
 def transpose_beam_get_fid0(proc):
     info = proc.obs_info
 
@@ -1197,6 +1059,9 @@ class PlannerProcessor(Processor):
         # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
         # YUK this smells.
         self.dump_plans = True
+        beamid = self.pipe_info.beamid
+        self.plan_dout = f'beam{beamid:02d}/plans/'
+        os.makedirs(self.plan_dout, exist_ok=True)
 
         self.send_to_candproc(iblk, plan)
 
@@ -1227,9 +1092,8 @@ class PlannerProcessor(Processor):
     def send_to_candproc(self, iblk, plan):
         wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
         self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
-        if self.dump_plans:            
-            beamid = self.pipe_info.beamid
-            fout = f'plan_b{beamid:02d}_iblk{iblk}.pkl'
+        if self.dump_plans:                        
+            fout =os.path.join(self.plan_dout, f'plan_iblk{iblk}.pkl')
             with open(fout, 'wb') as f:
                 pickle.dump(plan,f)
                 sz = os.path.getsize(fout)
@@ -1417,7 +1281,7 @@ def get_parser():
     parser.add_argument('--save-rescale', action='store_true', default=False, help='Save rescale data to numpy files')
     parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
     parser.add_argument('--proc-type', help='Process type')
-    parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=10.0)
+    parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=9.0)
     parser.add_argument(dest='files', nargs='*')
     
     parser.set_defaults(verbose=False)
