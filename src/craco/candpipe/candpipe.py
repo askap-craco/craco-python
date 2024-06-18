@@ -20,6 +20,7 @@ from astropy.wcs import WCS
 from craco.candidate_writer import CandidateWriter
 from craco.dataframe_streamer import DataframeStreamer
 import pandas as pd
+from craco.timer import Timer
 
 from . import steps
 from craco.plot_cand import load_cands
@@ -382,28 +383,37 @@ class Pipeline:
         cand_out_buf - if it's a np.dtype=cand_out it will put the best N candidates into that the dataframe to that cand out.
         '''
 
+        if len(cand_in) == 0:
+            iblk0 = -1
+        else:
+            try:
+                iblk0 = cand_in['iblk'].iloc[0] # i'm hoping this works for pandas
+            except:
+                iblk0 = cand_in['iblk'][0]
+
+        t = Timer({'iblk':iblk0})
 
         if isinstance(cand_in, np.ndarray):
             cand_in = self.convert_np_to_df(cand_in)
-
+            t.tick('convert')
 
 
         # Sometimes for testing we send through a giant batch.
         # We'll only load the PSF frm the first candidate, if possible.
         # assert np.all(cand_in['iblk'] == iblk0), f'Should only get 1 iblk at a time {iblk} != {cand_in["iblk"]}'
-        iblk0 = -1
-        try:
-            iblk = cand_in['iblk']
-            if len(cand_in) > 0:
-                iblk0 = iblk[0]     #BUG: this gives error if the cand_in is a pandas data-frame; it needs iblk.iloc[0] @Keith!
+        try:            
+            if iblk0 >= 0:                
                 self.load_psf_from_file(iblk0)
                 log.info('Loaded new PSF for iblk=%d', iblk0)
+                t.tick('load psf')
         except FileNotFoundError: # No PSF available. Oh well. maybe next year.
             pass
 
         for istep, step in enumerate(self.steps):
-            cand_out = step(self, cand_in)
             stepname = step.__module__.split('.')[-1]
+            cand_out = step(self, cand_in)
+            t.tick(stepname)
+            
             log.debug('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
             if self.args.save_intermediate and istep < len(self.steps)-1:   #-1 because last step is not an intermediate step
                 self.intermediate_fouts[istep].write_cands(self.convert_intermediate_df_to_np(cand_out, istep))
@@ -411,14 +421,17 @@ class Pipeline:
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)
+            t.tick('copy best')
         if hasattr(self, 'uniq_cands_fout'):            
             if iblk0 >= 0 and len(cand_out) > 0:
                 try :
                     #self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
                     self.uniq_cands_fout.write(cand_out)
+                    t.tick('Write cands uniq')
                 except:
                     fname = os.path.join(self.args.outdir, f'candpipe_uniq_iblk{iblk0}_b{self.beamno:02d}.csv')
                     cand_out.to_csv(fname)
+                    t.tick('Write cands csv')
                     log.exception('Could not write uniq candidates file. Dumping iblk %s to %s', iblk0, fname)
                     
         
