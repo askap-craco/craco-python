@@ -8,6 +8,7 @@ import os
 import sys
 import logging
 from astropy.io import fits
+import fcntl
 
 log = logging.getLogger(__name__)
 
@@ -15,18 +16,34 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 FITS_BLOCK_SIZE = 2880
 
+def lock_file(f):
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+def unlock_file(f):
+    fcntl.flock(f, fcntl.LOCK_UN | fcntl.LOCK_NB)
+
+def lock_hdu(hdu):
+    lock_file(hdu._file._file.fileno())
+
+def unlock_hdu(hdu):
+    unlock_file(hdu._file._file.fileno())
+
+
 def fix_length(fname):
     '''
     Appends zeros to the end of a fits file to make it a multiple of FITS_BLOCK_SIZE bytes
     '''
     filesize = os.path.getsize(fname)
     with open(fname, 'ab') as fout:
+        lock_file(fout)
+
         n_extra_bytes = FITS_BLOCK_SIZE - filesize % FITS_BLOCK_SIZE
         if n_extra_bytes == FITS_BLOCK_SIZE:
             n_extra_bytes = 0
 
         print(f'Current position {fout.tell()} writing {n_extra_bytes}')
         fout.write(bytes(n_extra_bytes))
+        unlock_file(fout)
 
     newsize = os.path.getsize(fname)
     print(f'Wrote {n_extra_bytes} to {fname} to make it from {filesize} {newsize}')
@@ -89,10 +106,14 @@ def fix_gcount(fname, groupsize=None):
         hdr['FIXED'] = True
 
         with open(fname, 'r+b') as fout: # can't be 'a' as it only appends, irrepsective of seek position
+            lock_file(fout)
             fout.seek(0,0)
             fout.write(bytes(hdr.tostring(), 'utf-8'))
             assert fout.tell() % FITS_BLOCK_SIZE == 0
             fout.flush()
+            unlock_file(fout)
+
+
 
 def fix_tables(fname):
     # only add tables if they're missing
@@ -102,12 +123,14 @@ def fix_tables(fname):
     if os.path.exists(fname+'.fq_table') and is_missing_tables:
         print('Appending tables')
         hdu = fits.open(fname, 'append')
+        lock_hdu(hdu)
         fq_table = fits.open(fname+'.fq_table')[1]
         an_table = fits.open(fname+'.an_table')[1]
         su_table = fits.open(fname+'.su_table')[1]
         hdu.append(fq_table)
         hdu.append(an_table)
         hdu.append(su_table)
+        unlock_hdu(hdu)
         hdu.close()
     else:
         print(f'No new tables required - already has {extra_tab_bytes} bytes of tables')
