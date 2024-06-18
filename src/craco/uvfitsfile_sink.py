@@ -212,6 +212,13 @@ class DataPrepper:
         self.dout.view(np.float32).byteswap(inplace=True).tofile(self.uvfitsout.fout)
         self.uvfitsout.ngroups += self.dout.size
         return self.dout
+
+    def compile(self, vis_data):
+        '''
+        Run the numba funciton to compile it
+        '''
+        prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days )
+
             
 
 class UvFitsFileSink:
@@ -277,6 +284,9 @@ class UvFitsFileSink:
         with open(fileout+'.groupsize', 'w') as fout:
             fout.write(str(self.uvout.dtype.itemsize) + '\n')
             
+
+    def compile(self, vis_data):
+        self.prepper.compile(vis_data)
 
     def write(self, vis_block):
         '''
