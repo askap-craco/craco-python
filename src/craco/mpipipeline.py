@@ -533,7 +533,7 @@ class ByteTransposer:
         log.info('Transposing %s with type=%s  size=%s NMSG=%s msgsize=%s numprocs=%s', 
                  self.dtype, self.mpi_dtype, self.dtype.itemsize, self.nmsgs, self.msgsize, numprocs)
         
-        assert self.nrx + self.nbeam == numprocs, f'Incorrect number of processes in rx_beam_comm. numproc={numproc} nbeams={self.nbeam} nrx={self.nrx}'
+        assert self.nrx + self.nbeam == numprocs, f'Incorrect number of processes in rx_beam_comm. numproc={numprocs} nbeams={self.nbeam} nrx={self.nrx}'
         self.values = info.values
         self.tx_counts = np.zeros(numprocs, np.int32)
         self.tx_displacements = np.zeros(numprocs, np.int32)
@@ -847,6 +847,9 @@ def transpose_beam_run(proc):
 
     # requested block to planner to get moving
     transposer = proc.transposer
+
+    # let the fits sink see some ddata so it can compile
+    vis_file.compile(transposer.drx['vis'])
 
    # warmup send
     beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
