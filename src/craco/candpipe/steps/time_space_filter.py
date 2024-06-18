@@ -251,12 +251,24 @@ class Step(ProcessingStep):
         dformat = self.pipeline.config['dformat']
         colint = dformat['colint']
         colfloat = dformat['colfloat']
-        
-        # make some columns as int
-        data[colint] = data[colint].astype(int)
 
-        # make some columns as float
-        data = data.round(colfloat)
+        for ind in colint:
+            try:
+                data[ind] = data[ind].astype(int)
+            except:
+                None
+        
+        for ind in colfloat:
+            try:
+                data = data.round(ind)
+            except:
+                None
+        
+        # # make some columns as int
+        # data[colint] = data[colint].astype(int)
+
+        # # make some columns as float
+        # data = data.round(colfloat)
 
         return data
 
