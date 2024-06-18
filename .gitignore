@@ -16,6 +16,7 @@ header*.txt
 *.rank
 test.txt
 test.txt.gz
+*.csv
 
 *trace*.json
 
