@@ -357,11 +357,11 @@ def test_candpipe_dump_output(config):
     '''
     #'''
     for icands in cand_blocker(test_df):
-        npy_cands = candpipe_obj.convert_df_to_np(icands)
-        candpipe_obj.uniq_cands_fout.write_cands(npy_cands)
+        #npy_cands = candpipe_obj.convert_df_to_np(icands)
+        candpipe_obj.uniq_cands_fout.write(icands)
 
     candpipe_obj.uniq_cands_fout.close()
-    rx_cands = np.load(candpipe_obj.uniq_cands_fout.outname)
+    rx_cands = np.load(candpipe_obj.uniq_cands_fout.foutname)
     in_cands = test_df
     in_rows = [in_cands.iloc[0], in_cands.iloc[-1]]
     out_rows = [rx_cands[0], rx_cands[-1]]
