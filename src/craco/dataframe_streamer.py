@@ -19,6 +19,7 @@ class DataframeStreamer:
     def __init__(self, foutname):
         self.fout = open(foutname, 'w')
         self.nwrite = 0
+        self.foutname = foutname
         atexit.register(self.close)
 
     def write(self, df:pd.DataFrame, **kwargs):
