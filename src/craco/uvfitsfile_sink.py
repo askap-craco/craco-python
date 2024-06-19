@@ -187,12 +187,16 @@ class DataPrepper:
         self.dout = np.zeros((vis_nt, nbl), dtype=self.dtype_le)
         dout = self.dout
         blids = [bl.blid for bl in baselines]
+        self.blids =np.array(blids)
 
         # set the things that are constant
-        dout['FREQSEL'] = 1
-        dout['SOURCE'] = fits_sourceidx
-        dout['BASELINE'] = np.array(blids)[None,:]
-        dout['INTTIM'] = inttim
+        # Used to be able to do this but you can't because we'r edoing inplace byteswap
+        # and you can't byteswap to a different buffe
+                ##dout['FREQSEL'] = 1
+        #dout['SOURCE'] = fits_sourceidx
+        #dout['BASELINE'] = np.array(blids)[None,:]
+        #dout['INTTIM'] = inttim
+
         self.iblk = 0
         self.inttime_days = self.inttim / 86400
 
@@ -207,7 +211,18 @@ class DataPrepper:
             ibl = blinfo.blidx
             self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
 
-        prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days )
+
+        dout = self.dout
+        # Bulk set these values. IT's eaiser and probably not to slow. 
+        # coul dpass into the numba function but might not help much
+        # we need to set them again because we did inplace bytswap, which ruins everything
+        # Dammit - why is UVFITS so dumb?
+        dout['FREQSEL'] = 1
+        dout['SOURCE'] = self.fits_sourceidx
+        dout['BASELINE'] = self.blids[None,:]
+        dout['INTTIM'] = self.inttim
+
+        prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
         self.iblk += vis_nt
         self.dout.view(np.float32).byteswap(inplace=True).tofile(self.uvfitsout.fout)
         self.uvfitsout.ngroups += self.dout.size
