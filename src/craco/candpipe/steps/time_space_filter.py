@@ -107,11 +107,11 @@ class Step(ProcessingStep):
         candidates['mSlopeSmooth'] = 0
 
         # put new statistics columns
-        candidates['lpix_rms'] = np.array(grouped.std()['lpix'][~idxs])
-        candidates['mpix_rms'] = np.array(grouped.std()['mpix'][~idxs])
+        # candidates['lpix_rms'] = np.array(grouped.std()['lpix'][~idxs])
+        # candidates['mpix_rms'] = np.array(grouped.std()['mpix'][~idxs])
         candidates['num_samps'] = np.array(grouped.count()['lpix'][~idxs])
-        candidates['centl'] = np.array(grouped.mean()['lpix'][~idxs])
-        candidates['centm'] = np.array(grouped.mean()['mpix'][~idxs])
+        # candidates['centl'] = np.array(grouped.mean()['lpix'][~idxs])
+        # candidates['centm'] = np.array(grouped.mean()['mpix'][~idxs])
         candidates['num_spatial'] = 1
 
         candidates = candidates.reset_index(drop=True)
@@ -137,11 +137,11 @@ class Step(ProcessingStep):
                 max_ind = subgrouped.idxmax()['snr'].loc[spatial_id]
                 candidates = pd.concat([candidates, data[ data.index == max_ind]], axis=0, ignore_index=True)
 
-                candidates.loc[j, 'lpix_rms'] = subgrouped.std()['lpix'].loc[spatial_id]
-                candidates.loc[j, 'mpix_rms'] = subgrouped.std()['mpix'].loc[spatial_id]
+                # candidates.loc[j, 'lpix_rms'] = subgrouped.std()['lpix'].loc[spatial_id]
+                # candidates.loc[j, 'mpix_rms'] = subgrouped.std()['mpix'].loc[spatial_id]
                 candidates.loc[j, 'num_samps'] = subgrouped.count()['lpix'].loc[spatial_id]
-                candidates.loc[j, 'centl'] = subgrouped.mean()['lpix'].loc[spatial_id]
-                candidates.loc[j, 'centm'] = subgrouped.mean()['mpix'].loc[spatial_id]
+                # candidates.loc[j, 'centl'] = subgrouped.mean()['lpix'].loc[spatial_id]
+                # candidates.loc[j, 'centm'] = subgrouped.mean()['mpix'].loc[spatial_id]
                 candidates.loc[j, 'num_spatial'] = data['spatial_id'].max() + 1
                 candidates.loc[j, 'mSNR'] = mSNR
                 candidates.loc[j, 'mSlope'] = mSlope
@@ -251,12 +251,24 @@ class Step(ProcessingStep):
         dformat = self.pipeline.config['dformat']
         colint = dformat['colint']
         colfloat = dformat['colfloat']
-        
-        # make some columns as int
-        data[colint] = data[colint].astype(int)
 
-        # make some columns as float
-        data = data.round(colfloat)
+        for ind in colint:
+            try:
+                data[ind] = data[ind].astype(int)
+            except:
+                None
+        
+        for ind in colfloat:
+            try:
+                data = data.round(ind)
+            except:
+                None
+        
+        # # make some columns as int
+        # data[colint] = data[colint].astype(int)
+
+        # # make some columns as float
+        # data = data.round(colfloat)
 
         return data
 

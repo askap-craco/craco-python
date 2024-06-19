@@ -63,10 +63,10 @@ dformat:
     mSNR: 3
     mSlope: 3
     mSlopeSmooth: 3
-    lpix_rms: 3
-    mpix_rms: 3
-    centl: 2
-    centm: 2
+    # lpix_rms: 3
+    # mpix_rms: 3
+    # centl: 2
+    # centm: 2
 
   colint: [
     'lpix',
@@ -77,6 +77,7 @@ dformat:
     'iblk',
     'rawsn',
     'total_sample',
+    'ibeam', 
     'cluster_id',
     'spatial_id',
     'num_samps',

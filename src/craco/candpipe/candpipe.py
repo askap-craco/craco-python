@@ -271,6 +271,7 @@ class Pipeline:
     def run(self):
         cand_in = load_cands(self.cand_fname, fmt='pandas')
         log.debug('Loaded %d candidates from %s beam=%d. Columns=%s', len(cand_in), self.cand_fname, self.beamno, cand_in.columns)
+        log.debug(cand_in.dtypes)
 
         # create a directory to store output files 
         self.create_dir()
