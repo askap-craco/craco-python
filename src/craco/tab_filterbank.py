@@ -219,8 +219,7 @@ def run(f, values):
     fout.fin.close()
     os.system("rm uv_data*.txt")
     
-
-def _main():
+def get_parser():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Produces a tied array beam filterbank from a UVFITS file', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument("-uv", "--uv", type=str, help="Path to the uvfits file", default=None)
@@ -240,6 +239,10 @@ def _main():
 
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
+    return parser
+
+def _main():
+    parser = get_parser()
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
