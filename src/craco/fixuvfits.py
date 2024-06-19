@@ -9,6 +9,8 @@ import sys
 import logging
 from astropy.io import fits
 import fcntl
+from craft import uvfits
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -157,12 +159,36 @@ def fix(fname):
     hdu.close()
 
 
+def check(fname, values):
+    f = uvfits.open(fname)
+    print('NBL:', f.nbl)
+    print('TSTART:', f.tstart, f.tstart.iso)
+    print('NSAMP:', f.nsamps)
+    
+    for tab in (('AIPS FQ', 'AIPS AN', 'AIPS SU')):
+        print('*'*10, tab, '*'*10)
+        print(f.hdulist[tab].data)
+
+    nt = 256
+    d, uvw= next(f.fast_time_blocks(nt, fetch_uvws=True))
+    d = d.squeeze()
+    print('Data type', d.shape, d.dtype, type(d), len(uvw))
+    for iblk, blk in enumerate(f.fast_raw_blocks(istart=0, nt=1, raw_date=True)):
+        blk = blk.squeeze()
+        print(iblk, type(blk), blk.shape, blk.dtype)
+        print(blk['DATE'][0], blk['DATE'][-1], blk['BASELINE'])
+        assert np.all(blk['BASELINE'] != 0)
+
+
+
+
 
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Fix UV fits files because not closed properly', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument('-c', '--check', action='store_true', help='Print extra check info')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -174,6 +200,8 @@ def _main():
 
     for f in values.files:
         fix(f)
+        if values.check:
+            check(f, values)
         
     
 
