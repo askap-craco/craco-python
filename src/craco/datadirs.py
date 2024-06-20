@@ -207,7 +207,7 @@ class ScanDir:
     @property
     def scan_data_dirs(self):
         for data_node in self.datadirs.data_nodes:
-            yield f"{data_node}/{format_sbid(self.scheddir.sbid)}/scans/{self.scan}"
+            yield f"{data_node}{format_sbid(self.scheddir.sbid)}/scans/{self.scan}"
     
     @property
     def scan_head_dir(self):
