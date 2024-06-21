@@ -3,6 +3,8 @@
 # and sets device from OMPI_COM_WORLD_LOCAL_RANK
 # All other argumetns passed through to search pipeline
 
+echo $0 with $@
+
 if [[ -z $INDIR ]] ; then
     echo "$0: No input directory"
     exit 1
@@ -74,17 +76,29 @@ $cmd 2>&1 | tee $logfile
 #VG: Adding the following lines to run candpipe automatically after a search pipeline run has finished
 #
 
+echo Search pipeline complete
+
 
 # Write data to wrunname
 cd $indir/$RUNNAME
 
 # beamno=$(printf "%02d" $beamno)
 candfile=$(printf "candidates.b%02d.txt" $beamno)
-# echo $candfile, $PWD
 if [ -n "$injection_file" ]; then
   cmd="`which candpipe` $candfile --save-rfi -s --injection $injection_file -o clustering_output -v"
 else
   cmd="`which candpipe` $candfile --save-rfi -s -o clustering_output -v"
 fi
 
-$cmd 
+
+candlog=$(printf "candpipe.b%02d.log" $beamno)
+
+echo Running candpipe v1 in  $PWD log is $candlog
+echo $candfile
+echo $cmd
+
+
+$cmd 2>&1 | tee $candlog
+
+echo $cmd completed with exit code $? >> $candlog
+echo $cmd completed with exit code $? 
