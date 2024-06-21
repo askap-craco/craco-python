@@ -790,6 +790,7 @@ class Pipeline:
         :iblk: = input block number. Increments by 1 for every call.
         :returns: cand_iblk, candidates
         '''
+        raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
 
         fdmt_tblk = iblk % NBLK
         img_tblk = (iblk -1) % NBLK
@@ -957,7 +958,7 @@ def get_parser():
 
     parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
 
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=6)
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=7)
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
@@ -1360,7 +1361,7 @@ def _main():
     plan_info = f.vis_metadata(isamp_update)
     start_info = f.vis_metadata(0)
         
-    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info)
+    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info, parallel_mode=False)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
