@@ -20,7 +20,7 @@ from astropy.wcs import WCS
 from craco.candidate_writer import CandidateWriter
 from craco.dataframe_streamer import DataframeStreamer
 import pandas as pd
-from craco.timer import Timer
+#from craco.timer import Timer
 
 from . import steps
 from craco.plot_cand import load_cands
@@ -392,11 +392,11 @@ class Pipeline:
             except:
                 iblk0 = cand_in['iblk'][0]
 
-        t = Timer({'iblk':iblk0})
+        #t = Timer({'iblk':iblk0})
 
         if isinstance(cand_in, np.ndarray):
             cand_in = self.convert_np_to_df(cand_in)
-            t.tick('convert')
+            #t.tick('convert')
 
 
         # Sometimes for testing we send through a giant batch.
@@ -406,14 +406,14 @@ class Pipeline:
             if iblk0 >= 0:                
                 self.load_psf_from_file(iblk0)
                 log.info('Loaded new PSF for iblk=%d', iblk0)
-                t.tick('load psf')
+                #t.tick('load psf')
         except FileNotFoundError: # No PSF available. Oh well. maybe next year.
             pass
 
         for istep, step in enumerate(self.steps):
             stepname = step.__module__.split('.')[-1]
             cand_out = step(self, cand_in)
-            t.tick(stepname)
+            #t.tick(stepname)
             
             log.debug('Step "%s" produced %d candidates maxsnr=%0.2f', stepname, len(cand_out), cand_out['snr'].max())
             if self.args.save_intermediate and istep < len(self.steps)-1:   #-1 because last step is not an intermediate step
@@ -422,17 +422,17 @@ class Pipeline:
 
         if cand_out_buf is not None:
             copy_best_cand(cand_out, cand_out_buf)
-            t.tick('copy best')
+            #t.tick('copy best')
         if hasattr(self, 'uniq_cands_fout'):            
             if iblk0 >= 0 and len(cand_out) > 0:
                 try :
                     #self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
                     self.uniq_cands_fout.write(cand_out)
-                    t.tick('Write cands uniq')
+                    #t.tick('Write cands uniq')
                 except:
                     fname = os.path.join(self.args.outdir, f'candpipe_uniq_iblk{iblk0}_b{self.beamno:02d}.csv')
                     cand_out.to_csv(fname)
-                    t.tick('Write cands csv')
+                    #t.tick('Write cands csv')
                     log.exception('Could not write uniq candidates file. Dumping iblk %s to %s', iblk0, fname)
                     
         
