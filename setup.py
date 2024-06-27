@@ -111,7 +111,8 @@ if __name__ == '__main__':
                                 'multicast_test=craco.multicast_test:_main',
                                 'merge_traces=craco.tracing.merge_traces:_main',
                                 'snoopy_sender=craco.snoopy_sender:_main',
-                                'plotuvfits=craco.tools.plotuvfits:_main'
+                                'plotuvfits=craco.tools.plotuvfits:_main',
+                                'pyxrtutil=craco.pyxrtutil:_main'
                                 
             ],
         },

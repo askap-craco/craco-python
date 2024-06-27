@@ -1072,7 +1072,21 @@ class VisSource:
 
         return myiter
 
+def open_device(devid, nretry=10):
+    device = None
+    for retry in range(nretry):
+        try:
+            device = pyxrt.device(devid)
+            break
+        except:
+            log.exception('Could not open device %d. On retry %d.', devid, retry)
+            if retry == nretry - 1:
+                raise
+            else:
+                time.sleep(1)
 
+    return device
+        
 class PipelineWrapper:
     def __init__(self, planinfo, values, devid, startinfo=None, parallel_mode=True):
         '''
@@ -1086,7 +1100,11 @@ class PipelineWrapper:
         planinfo
         '''
         self.plan = PipelinePlan(planinfo, values)
-        self.device = pyxrt.device(devid)
+
+        # reset dvice first Don't allocate a device becasue I think you get a bus error
+        reset_device(devid)
+        self.device = open_device(devid)
+
         self.xbin = pyxrt.xclbin(values.xclbin)
         self.uuid = self.device.load_xclbin(self.xbin)
         self.values = values

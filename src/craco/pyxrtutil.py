@@ -2,6 +2,8 @@ import pyxrt
 import numpy as np
 import logging
 import time
+import subprocess
+import os
 
 log = logging.getLogger(__name__)
 
@@ -189,5 +191,71 @@ class KernelStarts:
 
     def __str__(self):
         return str(self.starts)
+    
+
+def get_device_bdf(device:pyxrt.device|int):
+    '''
+    Returns the xrt device BDF given an open device
+
+    device: can bet an int, in which case it creates a pyxrtdevice, or a pyxrt.device
+    I'm not entirelky sure how this works, but let's check it.
+    BDF is of the form 0000:65:00.1
+
+
+    '''
+    if isinstance(device, int):
+        device = pyxrt.device(device)
+
+    info = pyxrt.xrt_info_device(0) # don't know why you can set this to 0 but you can
+    bdf = device.get_info(info.bdf)
+    return bdf
+
+def reset_device(device:pyxrt.device|int|str):
+    '''
+    REsets the given device using xbutil.
+    input: if it's a str it assumes it's BDF is of the form 0000:65:00.1
+    if it's an int, or pyxrt.device it gets the BDF with get_device_bdf()
+    '''
+    if isinstance(device, str):
+        bdf = device
+    else:
+        bdf = get_device_bdf(device)
+
+    cmd = f'xbutil reset --device {bdf} --force'
+
+    log.info('Resetting device %s', bdf)
+    try:
+        retcode = subprocess.check_call(cmd.split(), env=os.environ.copy())
+        log.info('Reset device %s successfully', bdf)
+    except:
+        log.exception('Error resetting card %s', bdf)
+        raise
+
+
+    return retcode
 
  
+def _main():
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
+    parser.add_argument(dest='files', nargs='+')
+    parser.set_defaults(verbose=False)
+    values = parser.parse_args()
+    if values.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    dev = values.files[0]
+    try:
+        dev = int(dev)
+    except:
+        pass
+
+
+    reset_device(dev)
+    
+
+if __name__ == '__main__':
+    _main()
