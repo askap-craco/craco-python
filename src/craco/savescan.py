@@ -56,6 +56,7 @@ def _main():
     parser.add_argument('--search-beams', help='Beams to search')
     parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
     parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
+    parser.add_argument('--update-uv-blocks', default=6, type=int, help='Update uv blocks')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -91,7 +92,7 @@ def _main():
     os.chdir(scandir)
     touchfile('SCAN_START', directory=scandir, check_exists=False)        
     target_file = os.path.join(scandir, 'ccap.fits')
-    log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir}')
+    log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir} calibration={calpath}')
 
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
     #hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
@@ -165,11 +166,13 @@ def _main():
     if flag_ant_str:
         antflag = f'--flag-ants {flag_ant_str}'
     else:
-        antflag = ''    
+        antflag = ''
+
+    update_uv_blocks = f'--update-uv-blocks {values.update_uv_blocks}'
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold} {update_uv_blocks}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag}'
 
