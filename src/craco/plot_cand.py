@@ -124,6 +124,7 @@ def _main():
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
+    parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
@@ -189,6 +190,18 @@ def _main():
         candimg.set_ylabel('Dec (deg)')
 
         fig.tight_layout()
+
+        if values.ncandvblk:
+            f2, axs = pylab.subplots(1,1)
+            f2.suptitle(f)
+            imax = c['iblk'].max()
+            ncand_vs_blk = [sum(c['iblk'] == iblk) for iblk in range(imax)]
+            axs.plot(ncand_vs_blk)
+            axs.set_xlabel('iblk')
+            axs.set_ylabel('ncand')
+
+
+
 
     candvt.set_ylim(1, None)
     fig.canvas.callbacks.connect('pick_event', on_pick)
