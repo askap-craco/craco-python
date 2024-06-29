@@ -57,6 +57,7 @@ def _main():
     parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
     parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
     parser.add_argument('--update-uv-blocks', default=6, type=int, help='Update uv blocks')
+    parser.add_argument(dest='extra', help='Extra arguments')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
@@ -92,7 +93,7 @@ def _main():
     os.chdir(scandir)
     touchfile('SCAN_START', directory=scandir, check_exists=False)        
     target_file = os.path.join(scandir, 'ccap.fits')
-    log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir} calibration={calpath}')
+    log.info(f'Saving scan SB{sbid} scanid={scanid} target={target} to {scandir} calibration={calpath} and extra args {values.extra}')
 
     #cmdname='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpipipeline.sh'
     #hostfile='/data/seren-01/fast/ban115/build/craco-python/mpitests/mpi_seren.txt'
