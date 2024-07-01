@@ -361,7 +361,10 @@ class RunDir:
         return os.path.join(self.beam_folder(beam), f"RFI_tfmask.b{beam:0>2}.fil")
 
     def beam_unique_cand(self, beam):
-        return os.path.join(self.beam_folder(beam), f"clustering_output/candidates.b{beam:0>2}.txt.uniq.csv")
+        uniq_cand_path = os.path.join(self.beam_folder(beam), f"clustering_output/candidates.b{beam:0>2}.txt.uniq.csv")
+        if not check_path(uniq_cand_path):
+            uniq_cand_path = os.path.join(self.beam_folder(beam), f"clustering_output/candidates.b{beam:0>2}.uniq.csv")
+        return uniq_cand_path
 
     def raw_candidate_paths(self):
         all_candidates = [self.beam_candidate(beam) for beam in range(0, 36)]
