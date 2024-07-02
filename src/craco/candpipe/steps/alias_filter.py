@@ -106,7 +106,7 @@ class Step(ProcessingStep):
         return outd
 
 
-    def get_source_coords(self, ra, dec):
+    def get_alias_coords_fov(self, ra, dec):
         # Get FoV (in degree)
         # make it works for a list of ra and dec 
         ra_fov, dec_fov = self.pipeline.get_current_fov()
@@ -124,6 +124,24 @@ class Step(ProcessingStep):
         return ra_alias, dec_alias
 
 
+    def get_alias_coords_pixel_world(self, lpix, mpix):
+        # Get FoV (in degree)
+        # make it works for a list of lpix and mpix
+        lpix, mpix = np.array(lpix, dtype=int), np.array(mpix, dtype=int)
+        xp, yp = self.pipeline.get_current_naxis()
+
+        lpixlist = list(lpix+xp) + list(lpix) + list(lpix-xp) + list(lpix+xp) + \
+                    list(lpix-xp) + list(lpix+xp) + list(lpix) + list(lpix-xp)
+        mpixlist = list(mpix+yp) + list(mpix+yp) + list(mpix+yp) + list(mpix) + \
+                    list(mpix) + list(mpix-yp) + list(mpix-yp) + list(mpix-yp)
+
+        alias_coords = self.pipeline.get_current_pixel_to_world(lpixlist, mpixlist)
+
+        ra_alias, dec_alias = alias_coords.ra.deg, alias_coords.dec.deg
+
+        return list(ra_alias), list(dec_alias)
+
+
     def get_possible_alias_candidates(self, df):
         # only select unknown objects 
         # i.e., output_prefix has a nan value 
@@ -136,14 +154,19 @@ class Step(ProcessingStep):
         log.debug("%s candidates do not have cross-matched sources - continue to alias filtering...", sum(unknown_idx))
         
         # calculate their alias location 
-        ra_alias, dec_alias = self.get_source_coords(unknown_df['ra_deg'], unknown_df['dec_deg'])
-        log.debug("obtained %s possible alias position", len(ra_alias))
+        ra_alias_fov, dec_alias_fov = self.get_alias_coords_fov(unknown_df['ra_deg'], unknown_df['dec_deg'])
+        ra_alias_pixel, dec_alias_pixel = self.get_alias_coords_pixel_world(unknown_df['lpix'], unknown_df['mpix'])
+
+        ra_alias = ra_alias_fov + ra_alias_pixel
+        dec_alias = dec_alias_fov + dec_alias_pixel 
+        num_alias = len(ra_alias) / len(unknown_df)
+        log.debug("obtained %s possible alias position", num_alias)
 
         # create a new alias DataFrame 
         alias_df = pd.DataFrame()
         alias_df['ra_deg'] = ra_alias
         alias_df['dec_deg'] = dec_alias
-        alias_df['idx'] = list(unknown_df.index) * 8
+        alias_df['idx'] = list(unknown_df.index) * int(num_alias)
 
         return alias_df
 
