@@ -193,7 +193,7 @@ class KernelStarts:
         return str(self.starts)
     
 
-def get_device_bdf(device:pyxrt.device|int):
+def get_device_bdf(device): #:pyxrt.device|int):
     '''
     Returns the xrt device BDF given an open device
 
@@ -210,7 +210,7 @@ def get_device_bdf(device:pyxrt.device|int):
     bdf = device.get_info(info.bdf)
     return bdf
 
-def reset_device(device:pyxrt.device|int|str):
+def reset_device(device):#:pyxrt.device|int|str):
     '''
     REsets the given device using xbutil.
     input: if it's a str it assumes it's BDF is of the form 0000:65:00.1
