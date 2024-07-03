@@ -178,7 +178,9 @@ class Pipeline:
         self.ics_fname = self.get_file( f'cas_b{self.beamno:02d}.fil')
         self.pcb_fname = self.get_file( f'pcb{self.beamno:02d}.fil')
         self.psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk0.fits')
-        psf_exists = os.path.isfile(self.psf_fname)
+        psf_exists = self.check_psf_fmt_exists()
+        log.debug('psf exists: %s', psf_exists)
+
         if anti_alias is None:
             anti_alias = psf_exists
 
@@ -244,6 +246,7 @@ class Pipeline:
 
         return full_path
 
+
     def set_current_psf(self, iblk, hdr):        
         self.psf_header = hdr
         self.curr_wcs = WCS(hdr)
@@ -253,11 +256,48 @@ class Pipeline:
         
         return hdr
 
+
+    def check_psf_fmt_exists(self, ):
+        psf_fnamelist = [
+            f'psf.beam{self.beamno:02d}.iblk0.fits', 
+            f'beam{self.beamno:02d}/plans/plan_iblk0.pkl', 
+        ]
+        for fname in psf_fnamelist:
+            if os.path.isfile( self.get_file(fname) ):
+                log.info('psf format %s', fname)
+                self.psf_fname = fname
+                return True
+
+        log.info('Do not find psf files')
+        return False
+        
+
     def load_psf_from_file(self, iblk):
-        psf_fname = self.get_file( f'psf.beam{self.beamno:02d}.iblk{iblk:d}.fits')
-        hdr = fits.getheader(psf_fname)
+        iblk = int(iblk / 6 ) * 6
+        psf_fname = self.psf_fname.replace('iblk0', f'iblk{iblk:d}')
+
+        fmt = psf_fname.split('.')[-1]
+        if fmt == 'fits':
+            hdr = fits.getheader(psf_fname)
+        elif fmt == 'pkl':
+            hdr = self.get_header_from_plan(psf_fname)
+
         self.curr_psf_file = psf_fname
         self.set_current_psf(iblk, hdr)
+
+
+    def get_header_from_plan(self, psf_fname):
+        psf = np.load(psf_fname, allow_pickle=True)
+        hdr = psf.wcs.to_header()
+        hdr['FCH1_HZ'] = psf.fmin
+        hdr['CH_BW_HZ'] = psf.foff
+        hdr['NCHAN'] = psf.nf
+        hdr['TSAMP'] = psf.tsamp_s.to_value()
+
+        hdr['NAXIS1'] = psf.npix
+        hdr['NAXIS2'] = psf.npix
+        return hdr
+        
 
 
     def create_dir(self):
@@ -317,6 +357,10 @@ class Pipeline:
         wcs_info = WCS(h, naxis=2)
         coords = wcs_info.pixel_to_world(lpixlist, mpixlist)
         return coords
+
+    def get_current_naxis(self):
+        h = self.psf_header
+        return (int(h['NAXIS1']), int(h['NAXIS2']))
     
     def close(self):
         for step in self.steps:
