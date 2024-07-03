@@ -1413,7 +1413,18 @@ def _main():
                     log.info("Saving the psf to disk with name=%s", psf_name)
                     PSF.write_psf(outname=psf_name, plan=latest_plan, iblk=iblk)
 
-                t.tick('update_plan')
+                    # Also write plan to disk - 
+                    latest_plan.fdmt_plan # lazy evaluate fdmt_plan
+                    latest_plan.prev_plan = None # Don't send previous plan - otherwise we maek a nice linked list to all the plans!!!!
+                    latest_plan.fdmt_plan.prev_pipeline_plan = None # Same for this! Yikes
+                    latest_plan.fdmt_plan.container1 = None
+                    latest_plan.fdmt_plan.container2 = None
+                    plan_fout =os.path.join(values.outdir, f'plan_iblk{iblk}.pkl')
+                    with open(plan_fout, 'wb') as f:
+                        pickle.dump(plan,f)
+                        sz = os.path.getsize(plan_fout)
+                        log.info('Wrote %d plan to %s. Size %d', iblk, plan_fout, sz)
+
 
             pipeline_wrapper.write(input_flat)
             t.tick('write_data')
