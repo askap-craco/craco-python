@@ -425,7 +425,7 @@ class Pipeline:
         Note: you'd better not fiddle with anything like frequencies, or nbl, otherwise we'll have trouble
         '''
         #uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-        
+        log.info(f"Updating plan to new plan - {plan}")
         self._update_grid_lut(plan)
         self._update_fdmt_lut(plan)
         self._update_ddreader_lut(plan)
@@ -760,7 +760,7 @@ class Pipeline:
         noise_gain = np.sqrt(nsum)*fft_scale
         return (signal_gain, noise_gain)
 
-    def prepare_inbuf(self, input_flat, values):
+    def prepare_inbuf(self, input_flat, values, iblk=None):
         '''
         Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
@@ -769,8 +769,13 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-
+        #self.inbuf.nparr[:] = 0
+        log.info("------------->> Resetting the input buffer now plan=%s", self.plan)
+        log.info("iblk %d plan.fdmt_plan.runs[1].cells[3] = %s", iblk, self.plan.fdmt_plan.runs[1].cells[3])
+        log.info("self.fast_baseline2uv.lut[1,3] = %s", self.fast_baseline2uv.lut[1,3])
+        log.info('iblk %d Value before = %s', iblk, self.inbuf.nparr[1, 0, :, 3, 0])
         self.fast_baseline2uv(input_flat, self.inbuf.nparr, values.input_scale)
+        log.info('iblk %d Value after = %s', iblk, self.inbuf.nparr[1, 0, :,3, 0])
         return self
 
     def copy_input(self, input_flat, values):
@@ -1271,13 +1276,9 @@ class PipelineWrapper:
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
 
-        p.prepare_inbuf(input_flat_cal, values)
+        p.prepare_inbuf(input_flat_cal, values, iblk=iblk)
         t.tick('prepare_inbuf')
         
-        if do_dump(values.dump_uvdata, iblk):
-            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
-            t.tick('dump uv')
-
         if self.parallel_mode:
             cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
         else:
@@ -1305,6 +1306,11 @@ class PipelineWrapper:
             imshow(img, aspect='auto', origin='lower')
             show()
             t.tick('grid candidates')
+
+        # must be after running pipeline otehrwise you copy old data from card into host memory before you dump!
+        if do_dump(values.dump_uvdata, iblk): 
+            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
+            t.tick('dump uv')
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
