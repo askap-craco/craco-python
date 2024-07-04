@@ -26,10 +26,14 @@ class Buffer:
         # make numpy view from mappying the buffer. Doesn't use anymore memory
         # Any writes to teh np array go directly to the host pointer allocated above
         if flags == pyxrt.bo.flags.device_only:
-            self.nparr = None
+            self.__nparr = None
         else:
-            self.nparr = np.frombuffer(self.buf.map(), dtype=dtype)
-            self.nparr.shape = shape
+            self.__nparr = np.frombuffer(self.buf.map(), dtype=dtype)
+            self.__nparr.shape = shape
+
+    @property
+    def nparr(self):
+        return self.__nparr
 
     def clear(self):
         if self.nparr is not None:
@@ -49,9 +53,10 @@ class Buffer:
 
         return self
 
-    def saveto(self, fname):
+    def saveto(self, fname, copy_from_device=True):
         if self.nparr is not None:
-            self.copy_from_device()
+            if copy_from_device:
+                self.copy_from_device()
             log.info(f'Saving buffer {fname}')
             np.save(fname, self.nparr)
 
