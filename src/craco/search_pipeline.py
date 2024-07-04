@@ -425,12 +425,13 @@ class Pipeline:
         Note: you'd better not fiddle with anything like frequencies, or nbl, otherwise we'll have trouble
         '''
         #uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-        #assert uv_shape == self.uv_out.shape, f'Mismached uv shape. Was {uv_shape} expected {self.uv_out.shape}'
+        
         self._update_grid_lut(plan)
         self._update_fdmt_lut(plan)
         self._update_ddreader_lut(plan)
         self.fast_baseline2uv = craco.FastBaseline2Uv(plan, conjugate_lower_uvs=True)
-        self.uv_out  = np.zeros(plan.uv_shape, dtype=np.complex64)
+        # // reset inbuf to zero so as fast baseline2uv only overwrites where there is data.
+        self.inbuf.nparr[:] = 0
 
         self.plan = plan
         
