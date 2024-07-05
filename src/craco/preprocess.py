@@ -1040,7 +1040,7 @@ class FastPreprocess:
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
-    def _send_dummy_block(self):
+    def ls_send_dummy_block(self):
         nbl, nf, nt = self.blk_shape
         dummy_block = np.zeros(self.blk_shape, dtype=np.complex64)
         dummy_input_tf_weights = np.ones((nf, nt), dtype=bool)
