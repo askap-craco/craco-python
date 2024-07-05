@@ -425,8 +425,7 @@ class Pipeline:
         Note: you'd better not fiddle with anything like frequencies, or nbl, otherwise we'll have trouble
         '''
         #uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
-        
-        log.info('Updating plan to new plan %s', plan)
+        log.info(f"Updating plan to new plan - {plan}")
         self._update_grid_lut(plan)
         self._update_fdmt_lut(plan)
         self._update_ddreader_lut(plan)
@@ -1274,10 +1273,6 @@ class PipelineWrapper:
         p.prepare_inbuf(input_flat_cal, values)
         t.tick('prepare_inbuf')
         
-        if do_dump(values.dump_uvdata, iblk):
-            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
-            t.tick('dump uv')
-
         if self.parallel_mode:
             cand_iblk, candidates = p.copy_and_run_pipeline_parallel(iblk, values)
         else:
@@ -1305,6 +1300,11 @@ class PipelineWrapper:
             imshow(img, aspect='auto', origin='lower')
             show()
             t.tick('grid candidates')
+
+        # must be after running pipeline otehrwise you copy old data from card into host memory before you dump!
+        if do_dump(values.dump_uvdata, iblk): 
+            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
+            t.tick('dump uv')
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
