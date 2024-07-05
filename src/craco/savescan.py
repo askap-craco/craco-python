@@ -57,7 +57,7 @@ def _main():
     parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
     parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
     parser.add_argument('--update-uv-blocks', default=6, type=int, help='Update uv blocks')
-    parser.add_argument(dest='extra', help='Extra arguments', required=False, nargs='*')
+    parser.add_argument(dest='extra', help='Extra arguments', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     lformat='%(asctime)s %(levelname)-8s %(filename)s.%(funcName)s (%(process)d) %(message)s'
