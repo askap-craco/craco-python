@@ -760,7 +760,7 @@ class Pipeline:
         noise_gain = np.sqrt(nsum)*fft_scale
         return (signal_gain, noise_gain)
 
-    def prepare_inbuf(self, input_flat, values, iblk=None):
+    def prepare_inbuf(self, input_flat, values):
         '''
         Converts complex input data in [NBL, NC, *NPOL*, NT] into UV data [NUVWIDE, NCIN, NT, NUVREST]
         Then scales by values.input_scale and NBINARY_POINT_FDMTINPUT 
@@ -769,13 +769,7 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-        #self.inbuf.nparr[:] = 0
-        log.info("------------->> Resetting the input buffer now plan=%s", self.plan)
-        log.info("iblk %d plan.fdmt_plan.runs[1].cells[3] = %s", iblk, self.plan.fdmt_plan.runs[1].cells[3])
-        log.info("self.fast_baseline2uv.lut[1,3] = %s", self.fast_baseline2uv.lut[1,3])
-        log.info('iblk %d Value before = %s', iblk, self.inbuf.nparr[1, 0, :, 3, 0])
         self.fast_baseline2uv(input_flat, self.inbuf.nparr, values.input_scale)
-        log.info('iblk %d Value after = %s', iblk, self.inbuf.nparr[1, 0, :,3, 0])
         return self
 
     def copy_input(self, input_flat, values):
@@ -1276,7 +1270,7 @@ class PipelineWrapper:
             d.tofile(pc_filterbank.fin)
             t.tick('PC filterbank')
 
-        p.prepare_inbuf(input_flat_cal, values, iblk=iblk)
+        p.prepare_inbuf(input_flat_cal, values)
         t.tick('prepare_inbuf')
         
         if self.parallel_mode:
