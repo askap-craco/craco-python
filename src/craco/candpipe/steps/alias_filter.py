@@ -159,15 +159,18 @@ class Step(ProcessingStep):
 
         ra_alias = ra_alias_fov + ra_alias_pixel
         dec_alias = dec_alias_fov + dec_alias_pixel 
-        num_alias = len(ra_alias) / len(unknown_df)
-        log.debug("obtained %s possible alias position", num_alias)
-
         # create a new alias DataFrame 
         alias_df = pd.DataFrame()
-        alias_df['ra_deg'] = ra_alias
-        alias_df['dec_deg'] = dec_alias
-        alias_df['idx'] = list(unknown_df.index) * int(num_alias)
 
+        if len(unknown_df) > 0: # KB - try to fix CRACO-286 urgently - but not sure if htis is right.
+            num_alias = len(ra_alias) / len(unknown_df)
+            log.debug("obtained %s possible alias position", num_alias)       
+            alias_df['ra_deg'] = ra_alias
+            alias_df['dec_deg'] = dec_alias
+            alias_df['idx'] = list(unknown_df.index) * int(num_alias)
+        else:
+            num_alias = 0 # # KB - not sure if this needs be done or not.
+                
         return alias_df
 
 
