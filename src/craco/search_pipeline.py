@@ -426,6 +426,7 @@ class Pipeline:
         '''
         #uv_shape     = (plan.nuvrest, plan.nt, plan.ncin, plan.nuvwide)
         
+        log.info('Updating plan to new plan %s', plan)
         self._update_grid_lut(plan)
         self._update_fdmt_lut(plan)
         self._update_ddreader_lut(plan)
@@ -769,7 +770,6 @@ class Pipeline:
         if calibrate is True, calibrates input
 
         '''
-
         self.fast_baseline2uv(input_flat, self.inbuf.nparr, values.input_scale)
         return self
 
