@@ -381,7 +381,7 @@ class LocalAlarm:
         ### post RACS ref comparison
         racsrefpng = f"{self.workdir}/racs_ref.png"
         if self._check_file_exists(racsrefpng):
-            self.slackbot.upload_file(fieldracspng, "RACS-Ref comparison", thread_ts=self.main_ts)
+            self.slackbot.upload_file(racsrefpng, "RACS-Ref comparison", thread_ts=self.main_ts)
         else:
             self.slackbot.post_message("cannot find racs ref comparison image...", thread_ts=self.main_ts)
 
