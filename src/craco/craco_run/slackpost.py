@@ -54,8 +54,10 @@ class SlackPostManager:
     def post_message(self, msg_blocks, thread_ts=None, mention_team=False):
         if isinstance(msg_blocks, str):
             msg_blocks = [self._format_text_block(msg_blocks)]
-        if isinstance(msg_blocks, dict):
+        elif isinstance(msg_blocks, dict):
             msg_blocks = [msg_blocks]
+        elif isinstance(msg_blocks, list):
+            msg_blocks = msg_blocks
 
         if mention_team: msg_blocks.append(self.mention_block)
 
@@ -316,3 +318,87 @@ class CandAlarm:
         main_ts = self.sendalarm()
         self.run_cand_plot(main_ts=main_ts)
 
+### localiser alarm...
+class LocalAlarm:
+    def __init__(self, workdir, channel="C06C6D3V03S"):
+        self.slackbot = SlackPostManager(channel=channel)
+        self.workdir = workdir
+
+    def _check_file_exists(self, path):
+        if os.path.exists(path): return True
+        return False
+
+    def post_main_alarm(self):
+        corrfpath = f"{self.workdir}/coord_correct.txt"
+        if self._check_file_exists(corrfpath):
+            with open(corrfpath, "r") as fp:
+                msg = fp.read()
+            msg = msg.strip("\n")
+        else:
+            msg = f"Error... No coordinate file found under {self.workdir}"
+
+        msg_blocks = [
+            dict(
+                type="section",
+                text=dict(type="mrkdwn", text="*[LOCALISER]* Localisation Report")
+            ),
+            dict(
+                type="rich_text",
+                elements=[
+                    dict(
+                        type="rich_text_preformatted",
+                        elements=[dict(type="text", text=msg)]
+                    )
+                ]
+            ),
+        ]
+
+        response = self.slackbot.post_message(msg_blocks)
+        self.main_ts = self.slackbot.get_thread_ts_from_response(response)
+
+    def post_images(self,):
+        ### post burst image...
+        burstpng = f"{self.workdir}/burstfield.png"
+        if self._check_file_exists(burstpng):
+            self.slackbot.upload_file(burstpng, "Burst Field Image", thread_ts=self.main_ts)
+        else:
+            self.slackbot.post_message("cannot find burst field image...", thread_ts=self.main_ts)
+
+        ### post field RACS comparison
+        fieldracspng = f"{self.workdir}/field_racs.png"
+        if self._check_file_exists(fieldracspng):
+            self.slackbot.upload_file(fieldracspng, "Field-RACS comparison", thread_ts=self.main_ts)
+        else:
+            self.slackbot.post_message("cannot find field racs comparison image...", thread_ts=self.main_ts)
+
+        bootstrap_fieldracs_png = f"{self.workdir}/bootstrap.field_racs.png"
+        if self._check_file_exists(bootstrap_fieldracs_png):
+            self.slackbot.upload_file(bootstrap_fieldracs_png, "Field-RACS Bootstrap Histogram", thread_ts=self.main_ts)
+        else:
+            self.slackbot.post_message("cannot find field racs bootstrap image...", thread_ts=self.main_ts)
+
+        ### post RACS ref comparison
+        racsrefpng = f"{self.workdir}/racs_ref.png"
+        if self._check_file_exists(racsrefpng):
+            self.slackbot.upload_file(fieldracspng, "RACS-Ref comparison", thread_ts=self.main_ts)
+        else:
+            self.slackbot.post_message("cannot find racs ref comparison image...", thread_ts=self.main_ts)
+
+        bootstrap_racsref_png = f"{self.workdir}/bootstrap.racs_ref.png"
+        if self._check_file_exists(bootstrap_racsref_png):
+            self.slackbot.upload_file(bootstrap_racsref_png, "RACS-Ref Bootstrap Histogram", thread_ts=self.main_ts)
+        else:
+            self.slackbot.post_message("cannot find racs ref bootstrap image...", thread_ts=self.main_ts)
+
+    def postalarm(self):
+        self.post_main_alarm()
+        self.post_images()
+
+
+
+
+
+
+        
+
+    
