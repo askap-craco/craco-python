@@ -958,7 +958,7 @@ def get_parser():
 
     parser = ArgumentParser(description='Run search pipeline on a single beam', formatter_class=ArgumentDefaultsHelpFormatter, parents=[plan_parser], conflict_handler='resolve')
 
-    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=7)
+    parser.add_argument('-T', '--threshold', action='store', type=float, help='Threshold for pipeline S/N units. Converted to integer when pipeline executed', default=6)
     parser.add_argument('--no-run-fdmt',  action='store_false', dest='run_fdmt', help="Don't FDMT pipeline", default=True)
     parser.add_argument('--no-run-image', action='store_false', dest='run_image', help="Don't Image pipeline", default=True)
     parser.add_argument('--outdir', '-O', help='Directory to write outputs to', default='.')
