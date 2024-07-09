@@ -403,6 +403,8 @@ class TabAlarm:
 
     def post_status(self, ):
         filfiles = glob.glob(f"{self.workdir}/*.fil")
+        if len(filfiles) == 0: filemsg = "no filterbank files found!"
+        else: filemsg = "\n".join(filfiles)
         msg_blocks = [
             dict(
                 type="section",
@@ -413,7 +415,7 @@ class TabAlarm:
                 elements=[
                     dict(
                         type="rich_text_preformatted",
-                        elements=[dict(type="text", text="\n".join(filfiles))]
+                        elements=[dict(type="text", text=filemsg)]
                     )
                 ]
             ),
