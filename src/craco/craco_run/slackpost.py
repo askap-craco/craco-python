@@ -340,7 +340,7 @@ class LocalAlarm:
         msg_blocks = [
             dict(
                 type="section",
-                text=dict(type="mrkdwn", text="*[LOCALISER]* Localisation Report")
+                text=dict(type="mrkdwn", text=f"*[LOCALISER]* Localisation Report\nWorkdir - {self.workdir}")
             ),
             dict(
                 type="rich_text",
