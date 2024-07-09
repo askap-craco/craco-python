@@ -408,7 +408,7 @@ class TabAlarm:
         msg_blocks = [
             dict(
                 type="section",
-                text=dict(type="mrkdwn", text=f"*[Tab]*Tied-Array Beam Filterbank Job\n_work directory_: {self.workdir}\n{len(filfiles)} filterbank files found...")
+                text=dict(type="mrkdwn", text=f"*[Tab]* Tied-Array Beam Filterbank Job\n_work directory_: {self.workdir}\n{len(filfiles)} filterbank files found...")
             ),
             dict(
                 type="rich_text",
