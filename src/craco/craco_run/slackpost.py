@@ -8,6 +8,7 @@ from craft import craco_plan
 
 import os
 import numpy as np
+import glob
 
 import logging
 log = logging.getLogger(__name__)
@@ -395,7 +396,29 @@ class LocalAlarm:
         self.post_images()
 
 
+class TabAlarm:
+    def __init__(self, workdir, channel="C06C6D3V03S"):
+        self.slackbot = SlackPostManager(channel=channel)
+        self.workdir = workdir
 
+    def post_status(self, ):
+        filfiles = glob.glob(f"{self.workdir}/*.fil")
+        msg_blocks = [
+            dict(
+                type="section",
+                text=dict(type="mrkdwn", text=f"*[Tab]*Tied-Array Beam Filterbank Job\n_work directory_: {self.workdir}\n{len(filfiles)} filterbank files found...")
+            ),
+            dict(
+                type="rich_text",
+                elements=[
+                    dict(
+                        type="rich_text_preformatted",
+                        elements=[dict(type="text", text="\n".join(filfiles))]
+                    )
+                ]
+            ),
+        ]
+        self.slackbot.post_message(msg_blocks)
 
 
 
