@@ -19,7 +19,9 @@ def main():
 
     true_snr = args.det_snr * correction_multiplier
 
-    print(args.det_snr, correction_multiplier, true_snr)
+    print(f"Original SNR = {args.det_snr}")
+    print(f"Correction factor = {correction_multiplier}")
+    print(f"Corrected SNR = {true_snr}")
 
 if __name__ == '__main__':
     a = argparse.ArgumentParser()
