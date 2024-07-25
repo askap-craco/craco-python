@@ -369,6 +369,15 @@ class MetadataObsmanDriver:
         return self.scan_manager
 
 
+def set_craco_ready(is_ready:bool):
+    '''
+    Set craco ready flag in EPICSs
+    https://jira.csiro.au/browse/AXE-919
+    '''
+    is_ready_int = 1 if is_ready else 0
+    log.info('Setting EPICS ak:cracoReady flag to %s', is_ready_int)
+    caput('ak:cracoReady', is_ready_int)
+    
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -405,14 +414,20 @@ def _main():
         comm = Ice.initialize(sys.argv)
         d = MetadataObsmanDriver(comm, obs)
         saver = MetadataSaver(comm, d)
+        set_craco_ready(True)
         try:
             comm.waitForShutdown()
         finally:
-            log.info('Desctroying comm')
+            log.info('Destroying comm')
             comm.destroy()
+            set_craco_ready(False)
     else:
         d = EpicsObsmanDriver(obs)
+        set_craco_ready(True)
         d.wait()
+        set_craco_ready(False)
+
+    
     
 
 if __name__ == '__main__':
