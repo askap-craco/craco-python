@@ -135,22 +135,22 @@ if os.path.exists(fname):
     global_output_buf = np.zeros_like(global_input_data)
     #output_mask = np.zeros_like(input_mask)
 
-values.dflag_tblk = 256
-values.dflag_fradius = 128
-values.dflag_cas_threshold = 5
+    values.dflag_tblk = 256
+    values.dflag_fradius = 128
+    values.dflag_cas_threshold = 5
 
-'''
-Ai = np.zeros((nbl, nf), dtype=np.complex64)
-Qi = np.zeros((nbl, nf), dtype=np.complex64)
-N = np.ones((nbl, nf), dtype=np.int16)
+    '''
+    Ai = np.zeros((nbl, nf), dtype=np.complex64)
+    Qi = np.zeros((nbl, nf), dtype=np.complex64)
+    N = np.ones((nbl, nf), dtype=np.int16)
 
-cas = np.zeros((nf, nt), dtype=np.float64)
-crs = np.zeros((nf, nt), dtype=np.float64)
-cas_N = np.zeros((nf, nt), dtype=np.int16)
-'''
-cal= calsoln.solarray.mean(axis=2).squeeze()
-calsoln_data = cal.data
-calsoln_mask = cal.mask
+    cas = np.zeros((nf, nt), dtype=np.float64)
+    crs = np.zeros((nf, nt), dtype=np.float64)
+    cas_N = np.zeros((nf, nt), dtype=np.int16)
+    '''
+    cal= calsoln.solarray.mean(axis=2).squeeze()
+    calsoln_data = cal.data
+    calsoln_mask = cal.mask
 
 
     
