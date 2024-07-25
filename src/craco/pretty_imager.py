@@ -300,8 +300,10 @@ def main():
 
 
                 if args.ogif is not None:
-                    images.append(make_PIL_images_from_array(imgout.real))
-                    images.append(make_PIL_images_from_array(imgout.imag))
+
+                    images.append(make_PIL_images_from_array(next_image))
+                    #images.append(make_PIL_images_from_array(imgout.real))
+                    #images.append(make_PIL_images_from_array(imgout.imag))
             timer.tick("post fft and stats image loop")
             print(timer)
 
