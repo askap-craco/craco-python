@@ -282,7 +282,7 @@ def exit_function():
             log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
         summarise_cands.run_with_tsp()
-        archive_location = obsparams.get('craco.archive.location', None)
+        archive_location = obsparams.get_value('craco.archive.location', None)
         log.info('craco.archive.location location is %s', archive_location)
 
 if __name__ == '__main__':
