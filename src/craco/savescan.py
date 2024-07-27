@@ -36,7 +36,36 @@ def mycaget(s):
 scandir = None # Yuck. 
 stopped = False
 do_calibration = None
+obsparams = None
 
+
+def calc_inttime_tscrunch(inttime_exp:int):
+    '''
+    For a given integration time of 864us*(2**inttime_exp) calculate the samples-per-integration parameter
+    and remaining tscrunch parameter to give you the desired inttime
+    samples per integration can be 16 (0.864ms), 32 (1.7ms) or 64 (3.4ms). Anything leftover is tscrunched
+    '''
+    assert isinstance(inttime_exp, int)
+    assert 0 <= inttime_exp, f'Invalid interagration time exponent {inttime_exp}'
+    inttime = 1<<inttime_exp # multiples of 864us
+    if inttime == 1: # 864us
+        spi = 16        
+    elif inttime == 2: # 1.7ms
+        spi = 32        
+    elif inttime == 4: # 3.4ms
+        spi = 64        
+    else:
+        spi = 64
+
+    tscrunch = (inttime)//(spi//16)
+    assert tscrunch >= 1
+    return (spi, tscrunch)
+
+
+class MyParams:
+    def __init__(self, values, obsparams):
+        self.values = values
+        self.obsparams = obsparams
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
@@ -56,8 +85,10 @@ def _main():
     parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
     parser.add_argument('--search-beams', help='Beams to search')
     parser.add_argument('--phase-center-filterbank', help='Phase center filterbank')
-    parser.add_argument('--trigger-threshold', help='Triggerr threshold', type=float, default=10)
+    parser.add_argument('--trigger-threshold', help='Trigger threshold', type=float, default=10)
     parser.add_argument('--update-uv-blocks', default=6, type=int, help='Update uv blocks')
+    parser.add_argument('--int-time-exp', type=int, default=4, help='Integration time as 864us*2**X')
+    parser.add_argument('--ndm', type=int, default=256, help='Number of DM trials')
     parser.add_argument(dest='extra', help='Extra arguments', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -78,6 +109,7 @@ def _main():
     scanid = prep.scan_id
     sbid = prep.sbid
     target = prep.targname
+    obsparams = prep.load_parset('params.parset')
 
     calfinder = auto_sched.CalFinder(sbid)
     calpath = calfinder.get_cal_path() # None if nothign available.
@@ -102,7 +134,6 @@ def _main():
     shutil.copy(hostfile, scandir)
     beam = values.beam # all beams, tscrucnh
 
-
     if values.transpose:
         cmdname = 'mpipipeline.sh'
     else:
@@ -119,13 +150,22 @@ def _main():
     else:
         pcb = ''
 
-    search_vis_tscrunch = '--vis-tscrunch 4' # if we're conservative
-    #search_vis_tscrunch = '--vis-tscrunch 2' # going to guns!
-    # tscrunch scrunches the packets
+
     calibration = '' if calpath is None else f'--calibration {calpath}'
-    spi = '--samples-per-integration 64' if beam == -1 else '--samples-per-integration 32' # spi64 for all beams, or spi32 for single beam
+    int_time_exp = int(obsparams.get_value('craco.uvfits.int_time_exp', values.int_time_exp)) # default is 13.8 ms
+    
+    if do_calibration:
+        int_time_exp = 7 # Do more averaging during calbration 110 ms
+
+    int_time = 0.864*2**(int_time_exp)
+    spi_val, tscrunch_val = calc_inttime_tscrunch(int_time_exp)
+    log.info('Using integration time=%sms spi=%s tscrunch=%s', int_time, spi_val, tscrunch_val)
+   
+    spi = f'--samples-per-integration {spi_val}'
+    vis_tscrunch = f'--vis-tscrunch {tscrunch_val}'
+
+    # only used if not transposing
     tscrunch = '--tscrunch 32' if beam == -1 else '' # tscrunch packets for all beams. Otherwise leave them alone. But tscrunc is only for non transposing
-    vis_tscrunch = '--vis-tscrunch 32' if do_calibration else search_vis_tscrunch # when calibrating make it 110ms in UVFITS file
 
     card  = f'--card {values.card}'
     block = f'--block {values.block}'
@@ -133,11 +173,10 @@ def _main():
     # 30 cards is about the limit for cardcap
     max_ncards = f'--max-ncards {values.max_ncards}'
 
-
     if do_calibration:
         scan_nminutes = values.calibration_scan_minutes
     else:
-        scan_nminutes = values.scan_minutes
+        scan_nminutes = float(obsparams.get_value('craco.scan_minutes', values.scan_minutes))
 
     nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
     num_msgs = f'-N {nmsg}'
@@ -146,7 +185,8 @@ def _main():
     num_blocks = '--num-blks 16'
     fcm = '--fcm /home/ban115/20220714.fcm'
     metafile = '--metadata {values.metadata}' if values.metadata else ''
-    ndm = '--ndm 256'
+    ndm_val = int(obsparams.get_value('craco.search.max_dm', values.ndm))
+    ndm = f'--ndm {ndm_val}'
 
     if values.search_beams and not do_calibration:
         search_beams = f'--search-beams {values.search_beams}'
@@ -240,6 +280,8 @@ def exit_function():
             log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
         summarise_cands.run_with_tsp()
+        archive_location = obsparams.get('craco.archive.location', None)
+        log.info('craco.archive.location location is %s', archive_location)
 
 if __name__ == '__main__':
     _main()
