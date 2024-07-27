@@ -290,7 +290,7 @@ class SearchPipelineSink:
             dumpfile = os.path.abspath(f'pipeline_sink_dump.npz')
             log.exception('Some error. saving data to %s', dumpfile)
             np.save(dumpfile, pipeline_data)
-            sz = os.getsize(dumpfile)
+            sz = os.path.getsize(dumpfile)
             log.info('Saved %d bytes to %s', sz, dumpfile)
             raise
 
