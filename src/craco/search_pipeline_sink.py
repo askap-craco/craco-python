@@ -264,6 +264,8 @@ class SearchPipelineSink:
         update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
         if update_now:
             pd = self._next_plan_data # comes from another MPI rank
+            if pd is None:
+                raise ValueError(f'Need to update but no plan available. iblk={self.iblk}')
             assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
             self.pipeline.update_plan_from_plan(pd['plan'])
             self._next_plan_data = None # set it to None ready for the next plan            
