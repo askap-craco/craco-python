@@ -109,6 +109,7 @@ def _main():
     scanid = prep.scan_id
     sbid = prep.sbid
     target = prep.targname
+    global obsparams
     obsparams = prep.load_parset('params.parset')
 
     calfinder = auto_sched.CalFinder(sbid)
@@ -270,6 +271,7 @@ def _main():
 def exit_function():
     global stopped
     global do_calibration
+    global obsparams
     if not stopped:
         stopped = True
         log.info('Stopping CRACO in exit_function. Do cal? %s', do_calibration)
