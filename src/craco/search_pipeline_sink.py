@@ -183,8 +183,10 @@ class SearchPipelineSink:
         Update the value of the next plan. It might not necssarily be used immediately, but
         we'll have it in hand just in case. The plan is a craco-plan that was made in a separate process
         '''
-        log.info('Got next plan %s', next_plan_data)
+        next_iblk = next_plan_data['iblk']
         self._next_plan_data = next_plan_data
+        log.info('Got next plan for iblk %d. Current iblk =%d. Advance=%d', next_iblk, self.iblk, next_iblk - self.iblk)
+
 
     @property
     def ready_for_next_plan(self):
