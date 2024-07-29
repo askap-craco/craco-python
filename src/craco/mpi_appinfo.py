@@ -422,7 +422,7 @@ class MpiPipelineInfo:
         populate_ranks(self, values)      
 
         self.mpi_app = MpiAppInfo(self, values.proc_type)
-        MpiTracefile.instance().tracefile.add_metadata(process_name=self.mpi_app.proc_name,
+        MpiTracefile.instance().add_metadata(process_name=self.mpi_app.proc_name,
                                                        process_labels=self.mpi_app.proc_labels,
                                                        process_sort_index=self.world_rank)
 
