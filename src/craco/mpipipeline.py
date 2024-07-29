@@ -900,6 +900,7 @@ def transpose_beam_run(proc):
 
 def proc_beam_run(proc):
     #set_scheduler(BEAM_PRIORITY)
+    t = Timer()
     pipe_info = proc.pipe_info
     info = proc.obs_info
 
@@ -909,35 +910,54 @@ def proc_beam_run(proc):
     nrx = info.nrx
     numprocs = pipe_info.mpi_app.app_size
     assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
-
-    pipeline_sink = SearchPipelineSink(info)
     iblk = 0
+    update_uv_blocks = pipe_info.values.update_uv_blocks
     # number of bytes in plan message. Otherwise we get an MPI Truncate error. 
     # Pickled an craco_plan and got to 4.1M, so 8M seems OK. 
     # see https://groups.google.com/g/mpi4py/c/AW26x6-fc-A
-    PLAN_MSG_SIZE = 64*1024*1024
 
+    PLAN_MSG_SIZE = 16*1024*1024
     planner_rank = pipe_info.mpi_app.PLANNER_RANK # rank of planner - probably should get from mpi_app
     transposer_rank = pipe_info.mpi_app.BEAMTRAN_RANK
     candproc_rank = pipe_info.mpi_app.CANDPROC_RANK
     beam_comm = pipe_info.mpi_app.beam_chain_comm
 
-    # requested block to planner to get moving
-    update_uv_blocks = pipe_info.values.update_uv_blocks
-    planner_iblk = update_uv_blocks # start at this iblk
-    log.info('Requesting iblk %d from planner %d', planner_iblk, planner_rank)
-    beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
-    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
 
+    # request plan from planner
+    planner_iblk = 0 # start at this iblk
+    log.info('Requesting iblk %d from planner %d', planner_iblk, planner_rank)
+    t.tick('Req plan0')
+    beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
+    t.tick('req plan0 sent')
+    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
+    t.tick('irecv plan0')
+    plan_data = req.wait()
+    t.tick('plan0 wait')
+    plan = plan_data['plan']
+    assert plan_data['iblk'] == 0, f'Expected plan for blk=. Was {plan_data}'
+    log.info('plan received')
+
+    # now get everything organised
+    pipeline_sink = SearchPipelineSink(info, plan)
+    t.tick('Make sink')
     nf = len(info.vis_channel_frequencies)
     nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
     nbl = info.nbl_flagged    
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
+    t.tick('Make visaccum')
     pipeline_data = vis_accum.pipeline_data
     
     # warumup recv
     beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+    t.tick('warmup recv')
     cand_buf = MpiCandidateBuffer.for_tx(beam_comm, candproc_rank)
+    t.tick('make cand buf')
+
+    # Now request next plan while we get organised
+    planner_iblk = update_uv_blocks
+    beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
+    req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
+    
 
     try:
         while True:
@@ -1057,27 +1077,28 @@ class PlannerProcessor(Processor):
         update_uv_blocks = self.pipe_info.values.update_uv_blocks
         iblk = 0
         adapter = VisInfoAdapter(self.obs_info, iblk)
-        plan = PipelinePlan(adapter, self.obs_info.values) # don't send this one. It was made once already when the beam processor made the pipeline
-        log.info('Completed initial plan')
+        plan = None # we'll make a plan in the first loop
         # Need to send initial plan to candidate pipeline, but not to beamproc, because beamproc made its own.
         # YUK this smells.
         self.dump_plans = True
         beamid = self.pipe_info.beamid
         self.plan_dout = f'beam{beamid:02d}/plans/'
         os.makedirs(self.plan_dout, exist_ok=True)
+        self._candproc_send_req = None
 
-        self.send_to_candproc(iblk, plan)
-
-        while True:     
-            iblk += update_uv_blocks
-
+        while True:
             log.info('Waiting for request from %d. Expect iblk=%d', app.BEAMPROC_RANK, iblk)
+            t = Timer(args={'iblk':iblk})
             req_iblk = comm.recv(source=app.BEAMPROC_RANK)
+            t.tick('recv')
             assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
             adapter = VisInfoAdapter(self.obs_info, iblk)
+            t.tick('adapter')
             log.info('Got request to make plan for iblk=%d. My count=%d adapter=%s', req_iblk, iblk, adapter)
             plan = PipelinePlan(adapter, self.obs_info.values, prev_plan=plan)
+            t.tick('make plan')
             plan.fdmt_plan # lazy evaluate fdmt_plan
+            t.tick('make fdmt plan')
             plan_data = {'count':count, 'iblk': iblk, 'plan':plan}
 
             # blocking send - it just sends the data. It continues whether or not the beam has received it.
@@ -1088,13 +1109,22 @@ class PlannerProcessor(Processor):
             plan.fdmt_plan.container2 = None
             comm.send(plan_data, dest=app.BEAMPROC_RANK)            
             self.send_to_candproc(iblk, plan)
+            t.tick('candproc')
             log.info('Plan sent count=%d iblk=%d', count, iblk)
 
             count += 1
+            iblk += update_uv_blocks
+
 
     def send_to_candproc(self, iblk, plan):
         wcs_data = {'iblk':iblk, 'hdr':plan.fits_header(iblk)}
-        self.comm.send(wcs_data, dest=self.app.CANDPROC_RANK)
+
+        if self._candproc_send_req is not None:
+            self._candproc_send_req.wait()
+            self._candproc_send_req = None
+
+
+        self._candproc_send_req = self.comm.isend(wcs_data, dest=self.app.CANDPROC_RANK)
         if self.dump_plans:                        
             fout =os.path.join(self.plan_dout, f'plan_iblk{iblk}.pkl')
             with open(fout, 'wb') as f:
