@@ -201,6 +201,7 @@ class DataPrepper:
         self.inttime_days = self.inttim / 86400
 
     def write(self, vis_block):
+        t = Timer()
         vis_data = vis_block.data
         vis_nt = vis_data.shape[3]
         assert self.vis_nt == vis_nt
@@ -210,7 +211,7 @@ class DataPrepper:
             ia2 = blinfo.ia2
             ibl = blinfo.blidx
             self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
-
+        t.tick('calc baselines')
 
         dout = self.dout
         # Bulk set these values. IT's eaiser and probably not to slow. 
@@ -221,11 +222,18 @@ class DataPrepper:
         dout['SOURCE'] = self.fits_sourceidx
         dout['BASELINE'] = self.blids[None,:]
         dout['INTTIM'] = self.inttim
+        t.tick('Set constants')
 
         prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
-        self.iblk += vis_nt
-        self.dout.view(np.float32).byteswap(inplace=True).tofile(self.uvfitsout.fout)
+        t.tick('prep fast')
+        v = self.dout.view(np.float32)
+        t.tick('view')
+        v.byteswap(inplace=True)
+        v.tick('byteswap')
+        v.tofile(self.uvfitsout.fout)
+        t.tick('tofile')
         self.uvfitsout.ngroups += self.dout.size
+        self.iblk += vis_nt
         return self.dout
 
     def compile(self, vis_data):
