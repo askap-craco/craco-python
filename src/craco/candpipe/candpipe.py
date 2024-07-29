@@ -263,6 +263,7 @@ class Pipeline:
             f'beam{self.beamno:02d}/plans/plan_iblk0.pkl', 
             f'../beam{self.beamno:02d}/plans/plan_iblk0.pkl', 
             f'plan_b{self.beamno:02d}_iblk0.pkl', 
+            f'../plan_b{self.beamno:02d}_iblk0.pkl', 
         ]
         for fname in psf_fnamelist:
             if os.path.isfile( self.get_file(fname) ):
