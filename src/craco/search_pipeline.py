@@ -1106,7 +1106,7 @@ class PipelineWrapper:
         self.plan = plan
 
         # reset dvice first Don't allocate a device becasue I think you get a bus error
-        reset_device(devid)
+        # reset_device(devid) resetting is also problematic. I'm not sure if we want to do that or not. Grrr.
         self.device = open_device(devid)
 
         self.xbin = pyxrt.xclbin(values.xclbin)
