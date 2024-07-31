@@ -28,6 +28,7 @@ threshold:
 filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius
 
 # location for pulsar/RACS/new sources catalogue csv
+# use the same catalogue for alias checking 
 catpath: ['/CRACO/DATA_00/craco/wan348/catalogues/atnf_psrcat_localized.csv',
           '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv',
           '/CRACO/DATA_00/craco/wan348/catalogues/craco_updated.csv']
@@ -35,13 +36,9 @@ catcols:
   ra: ['RAJD', 'RA', 'RAD']
   dec: ['DECJD', 'Dec', 'DECD']
   input_colname: ['PSRJ', 'Gaussian_ID', 'NAME']
-  output_prefix: ['PSR', 'RACS', 'NEW']
+  output_prefix: ['PSR', 'RACS', 'CUSTOM']
 
 threshold_crossmatch: [60, 60, 60] # in unit of arcsec
-
-# for aliasing
-catpath_alias: '/CRACO/DATA_00/craco/wan348/catalogues/cat_bright_for_alias.csv'
-threshold_alias: 60  # in unit of arcsec
 
 # for injection
 inject_tol:

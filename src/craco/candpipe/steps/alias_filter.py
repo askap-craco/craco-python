@@ -14,7 +14,7 @@ from craco.candpipe.candpipe import ProcessingStep
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy import units as u
-from astropy.coordinates import SkyCoord
+# from astropy.coordinates import SkyCoord
 import pandas as pd
 
 from craco.candpipe.steps import catalog_cross_match
@@ -77,27 +77,15 @@ class Step(ProcessingStep):
         # get mean ra and dec from candidates file for further clustering 
         ra, dec = ind['ra_deg'].median(), ind['dec_deg'].median()
 
-        # filetering catalogue
-        catdf, catcoord = catalog_cross_match.Step(p).filter_cat(ra=ra, 
-                                        dec=dec, 
-                                        catpath=config['catpath_alias'], 
-                                        radius=config['filter_radius'], 
-                                        racol='RA', 
-                                        deccol='Dec')
-
         # create a new catalogue contains all unknown objects, each with 8 possible alias location
         alias_df = self.get_possible_alias_candidates(df=ind, )
 
-        # run the crossmatch step!
-        alias_df = catalog_cross_match.Step(p).cross_matching(candidates=alias_df, 
-                                       catalogue=catdf, 
-                                       coord=catcoord, 
-                                       threshold=config['threshold_alias'], 
-                                       col_prefix='ALIAS', 
-                                       key='Name')
-
-        # save the candidates file
-        outd = self.save_back_candfile(ind, alias_df)
+        if len(alias_df) > 0:
+            alias_df = catalog_cross_match.Step(p).classify_cands(alias_df, ra, dec)
+            # save the candidates file
+            outd = self.save_back_candfile(ind, alias_df)
+        else:
+            outd = ind
         
         # apply command line argument for minimum S/N and only return those values
         #if self.pipeline.args.cluster_min_sn is not None:
@@ -148,9 +136,14 @@ class Step(ProcessingStep):
         '''
         df: input candidates catalogue 
         '''
-        # df['idx'] = range(len(df))
-        unknown_idx = (df['PSR_name'].isna()) & (df['RACS_name'].isna()) & (df['NEW_name'].isna())
+        # unknown_idx = (df['PSR_name'].isna()) & (df['RACS_name'].isna()) & (df['NEW_name'].isna())
+        unknown_idx = df['LABEL'].values == 'UNKNOWN'
         unknown_df = df[unknown_idx]
+
+        if len(unknown_df) == 0:
+            log.debug("%s candidates do not have cross-matched sources - skip alias filtering...", sum(unknown_idx))
+            return unknown_df
+
         log.debug("%s candidates do not have cross-matched sources - continue to alias filtering...", sum(unknown_idx))
         
         # calculate their alias location 
@@ -164,10 +157,10 @@ class Step(ProcessingStep):
         alias_df['ra_deg'] = ra_alias
         alias_df['dec_deg'] = dec_alias
 
-        if len(unknown_df) > 0: # KB - try to fix CRACO-286 urgently - but not sure if htis is right.
-            num_alias = len(ra_alias) / len(unknown_df)
-            log.debug("obtained %s possible alias position", num_alias)       
-            alias_df['idx'] = list(unknown_df.index) * int(num_alias)
+        # if len(unknown_df) > 0: # KB - try to fix CRACO-286 urgently - but not sure if htis is right.
+        num_alias = len(ra_alias) / len(unknown_df)
+        log.debug("obtained %s possible alias position", num_alias)       
+        alias_df['idx'] = list(unknown_df.index) * int(num_alias)
                 
         return alias_df
 
@@ -177,13 +170,11 @@ class Step(ProcessingStep):
         df: original candidates table
         alias_df: possible alias table 
         '''
-        alias_idx = (~alias_df['ALIAS_name'].isna())
+        # select unknown candidates for further alias filtering 
+        alias_idx = alias_df['LABEL'].values != 'UNKNOWN'
 
-        colname = 'ALIAS_name'
-        sepname = 'ALIAS_sep'
-
-        df[colname] = [None] * len(df)
-        df[sepname] = [None] * len(df)
+        colname = 'MATCH_name'
+        sepname = 'MATCH_sep'
 
         # if there's no alias at all...
         if alias_idx.sum() == 0:
@@ -195,9 +186,12 @@ class Step(ProcessingStep):
         # find unique idx with possible alias 
         alias_df = alias_df[alias_idx]
         
-        for idx, name, sep in zip(alias_df['idx'], alias_df[colname], alias_df[sepname]):
+        # for idx, name, sep, label in zip(alias_df['idx'], alias_df[colname], alias_df[sepname]):
+        for idx, name, sep, label in alias_df[['idx', colname, sepname, 'LABEL']].values:
             df.loc[idx, colname] = name
             df.loc[idx, sepname] = sep
+            df.loc[idx, 'LABEL'] = label
+            df.loc[idx, 'ALIASED'] = 1
 
         return df
 
