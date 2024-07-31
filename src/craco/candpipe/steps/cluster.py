@@ -135,7 +135,7 @@ class Step(ProcessingStep):
             data['total_sample_middle'] = data['total_sample'].copy()
             data['total_sample'] = save_ts            
 
-        if len(rescaled_data) > 0: # DBSCAN doesn't lik 0
+        if len(rescaled_data) > 0: # DBSCAN doesn't like 0
             cls = DBSCAN(eps=reference_eps_param, 
                          min_samples=self.pipeline.config['min_samples']).fit(rescaled_data)   
         
@@ -166,8 +166,27 @@ class Step(ProcessingStep):
             data = uncluster[uncluster['cluster_id'] == i]
             rescaled_data, reference_eps_param = self.rescale_data(data, config['eps2'])
             cls = DBSCAN(eps=reference_eps_param, min_samples=config['min_samples']).fit(rescaled_data)  
-            uncluster.loc[data.index, 'spatial_id'] = cls.labels_
+            # sort labels by snr 
+            # hmm need to think about a quick and elegent way! 
+            # ok - maybe make it easier: just find the brightest spatial and replace this to 0 
+            # and switch the original 0 spatial id to the original brightest spatial id) 
+            ind = data['snr'].idxmax() # data index
+            iloc = data.index.get_loc(ind) # data iloc 
+            brightest_spatial_idx = cls.labels_[iloc]
+            if brightest_spatial_idx != 0:
+                log.info('for cluster id %s: original brightest spatial idx %s -> will replace it to 0', i, brightest_spatial_idx)
+            else:
+                log.debug('for cluster id %s: original brightest spatial idx %s -> will replace it to 0', i, brightest_spatial_idx)
 
+            # switch spatial id - assign spatial id = 0 for the brightest spatial cluster 
+            labels = cls.labels_
+            mask_1 = labels==brightest_spatial_idx
+            mask_2 = labels==0
+            labels[ mask_1 ] = 0
+            labels[ mask_2 ] = brightest_spatial_idx
+
+            uncluster.loc[data.index, 'spatial_id'] = cls.labels_
+            
         # replace spatial clusters for all other clusters to -1
         # uncluster.fillna({'spatial_id': -1}, inplace=True)
         uncluster['spatial_id'] = uncluster['spatial_id'].astype(int)
