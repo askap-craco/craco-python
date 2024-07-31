@@ -183,8 +183,10 @@ class SearchPipelineSink:
         Update the value of the next plan. It might not necssarily be used immediately, but
         we'll have it in hand just in case. The plan is a craco-plan that was made in a separate process
         '''
-        log.info('Got next plan %s', next_plan_data)
+        next_iblk = next_plan_data['iblk']
         self._next_plan_data = next_plan_data
+        log.info('Got next plan for iblk %d. Current iblk =%d. Advance=%d', next_iblk, self.iblk, next_iblk - self.iblk)
+
 
     @property
     def ready_for_next_plan(self):
@@ -264,6 +266,8 @@ class SearchPipelineSink:
         update_now = update_uv_blocks > 0 and self.iblk % update_uv_blocks == 0 and self.iblk != 0
         if update_now:
             pd = self._next_plan_data # comes from another MPI rank
+            if pd is None:
+                raise ValueError(f'Need to update but no plan available. iblk={self.iblk}')
             assert pd['iblk'] == self.iblk, f'Got plan to apply at wrong time. my iblk={self.iblk} plan iblk={pd["iblk"]}'
             self.pipeline.update_plan_from_plan(pd['plan'])
             self._next_plan_data = None # set it to None ready for the next plan            
@@ -290,7 +294,7 @@ class SearchPipelineSink:
             dumpfile = os.path.abspath(f'pipeline_sink_dump.npz')
             log.exception('Some error. saving data to %s', dumpfile)
             np.save(dumpfile, pipeline_data)
-            sz = os.getsize(dumpfile)
+            sz = os.path.getsize(dumpfile)
             log.info('Saved %d bytes to %s', sz, dumpfile)
             raise
 

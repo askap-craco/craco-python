@@ -139,7 +139,8 @@ class Step(ProcessingStep):
 
                 # candidates.loc[j, 'lpix_rms'] = subgrouped.std()['lpix'].loc[spatial_id]
                 # candidates.loc[j, 'mpix_rms'] = subgrouped.std()['mpix'].loc[spatial_id]
-                candidates.loc[j, 'num_samps'] = subgrouped.count()['lpix'].loc[spatial_id]
+                # candidates.loc[j, 'num_samps'] = subgrouped.count()['lpix'].loc[spatial_id]
+                candidates.loc[j, 'num_samps'] = len(data) # number of samples in each cluster id 
                 # candidates.loc[j, 'centl'] = subgrouped.mean()['lpix'].loc[spatial_id]
                 # candidates.loc[j, 'centm'] = subgrouped.mean()['mpix'].loc[spatial_id]
                 candidates.loc[j, 'num_spatial'] = data['spatial_id'].max() + 1

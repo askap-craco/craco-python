@@ -21,6 +21,8 @@ from astropy import units as u
 from craco.metadatafile import MetadataFile
 from craco.calc_metafile import CalcMetafile
 import datetime
+from askap.parset import ParameterSet
+
 
 
 log = logging.getLogger(__name__)
@@ -112,6 +114,13 @@ class ScanPrep:
 
         return outfile
 
+    def add_parset(self, filename, parset):
+        outfile = os.path.join(self.outdir, filename)
+        parset.to_file(outfile)
+        return outfile
+
+    def load_parset(self, filename):
+        return ParameterSet(os.path.join(self.outdir, filename))
 
     @staticmethod
     def load(outdir):

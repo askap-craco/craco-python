@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import glob
+import os
+
 def format_sbid(sbid, padding=True, prefix=True):
     """
     format sbid into a desired format
@@ -29,7 +31,7 @@ def parse_candfile(candfile, sep="\t", skiprows=0, skipfooter = 0):
     df = pd.read_csv(candfile, skiprows=skiprows, skipfooter=skipfooter, sep=sep, header = 0, names = HDR_keys)
     return df
 
-def load_cands(sbid, beam=None):
+def load_cands(sbid, beam=None, runname="results"):
     sb = format_sbid(sbid)
     if beam is None:
         beam = "*"
@@ -38,18 +40,20 @@ def load_cands(sbid, beam=None):
         assert b <= 36, f"Request beam > 36 = {b}"
         beam = f"{b:02g}"
         
-    raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/results/candidates.b{beam}.txt"
-    clustered_raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/results/clustering_output/candidates.b{beam}.txt.rawcat.csv"
-    clustered_rfi_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/results/clustering_output/candidates.b{beam}.txt.rfi.csv"
-    clustered_uniq_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/results/clustering_output/candidates.b{beam}.txt.uniq.csv"    
+    raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/candidates.b{beam}.txt"
+    clustered_raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.rawcat.csv"
+    clustered_rfi_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.rfi.csv"
+    clustered_uniq_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.uniq.csv"
+    clustered_inj_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.inject.cand.csv"
     #TODO - add injection file here
     
     raw_candfiles = glob.glob(raw_candpath)
     clustered_raw_candfiles = glob.glob(clustered_raw_candpath)
     clustered_rfi_candfiles = glob.glob(clustered_rfi_candpath)
     clustered_uniq_candfiles = glob.glob(clustered_uniq_candpath)
+    clustered_inj_candfiles = glob.glob(clustered_inj_candpath)
 
-    return raw_candfiles, clustered_raw_candfiles, clustered_rfi_candfiles, clustered_uniq_candfiles
+    return raw_candfiles, clustered_raw_candfiles, clustered_rfi_candfiles, clustered_uniq_candfiles, clustered_inj_candfiles
     
 
 def parse_candpath(fname):
@@ -63,11 +67,11 @@ def parse_candpath(fname):
         final_parts = final.strip().split(".")
         beamid = final_parts[1].strip("b")
         if len(final_parts) == 3:
-            type = "raw"
+            filetype = "raw"
         elif len(final_parts) == 5:
-            type = "clustered_" + final_parts[3]
+            filetype = "clustered_" + final_parts[3]
 
-    return sbid, scanid, tstart, beamid, type
+    return sbid, scanid, tstart, beamid, filetype
 
 
 class Candfile:
@@ -101,20 +105,23 @@ class Candfile:
 class SBCandsManager:
     def __init__(self, sbname):
         self.sb = format_sbid(sbname)
-        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths = load_cands(self.sb)
+        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb)
         self._candfile_paths = self._raw_candfile_paths + \
                                 self._clustered_raw_candfile_paths +\
                                 self._clustered_rfi_candfile_paths + \
-                                self._clustered_uniq_candfile_paths
+                                self._clustered_uniq_candfile_paths +\
+                                self._clustered_inj_candfile_paths
         
         self.all_candfiles = []
         self.raw_candfiles = []
         self.clustered_raw_candfiles = []
         self.clustered_rfi_candfiles = []
         self.clustered_uniq_candfiles = []
+        self.clustered_inj_candfiles = []
         
         for f in self._candfile_paths:           
-            
+            if not os.path.exists(f):
+                continue
             if f in self._raw_candfile_paths:
                 cf = Candfile(f)
                 self.raw_candfiles.append(cf)
@@ -127,6 +134,8 @@ class SBCandsManager:
             if f in self._clustered_uniq_candfile_paths:
                 cf = Candfile(f)
                 self.clustered_uniq_candfiles.append(cf)
+            if f in self._clustered_inj_candfile_paths:
+                cf = Candfile(f)
 
             self.all_candfiles.append(cf)
 
@@ -150,6 +159,10 @@ class SBCandsManager:
     def n_clustereduniqcandfiles(self):
         return len(self.clustered_uniq_candfiles)
         
+    @property
+    def n_clusteredinjcandfiles(self):
+        return len(self.clustered_inj_candfiles)
+        
     def filter_candfiles(self, candfiles, scanid=None, tstart=None, beamid=None, selection='AND'):
         '''
         Returns a subset of candfiles which belong to the given scanid/tstart/beamid. 
@@ -164,17 +177,17 @@ class SBCandsManager:
         for i, f in enumerate(candfiles):
             if not scanid:
                 mask1[:] = True
-            elif f.scanid == scanid:
+            elif int(f.scanid) == int(scanid):
                 mask1[i] = True
                 
             if not tstart:
                 mask2[:] = True
-            elif f.tstart == tstart:
+            elif int(f.tstart) == int(tstart):
                 mask2[i] = True
 
             if not beamid:
                 mask3[:] = True
-            elif f.beamid == beamid:
+            elif int(f.beamid) == int(beamid):
                 mask3[i] = True
 
         if selection.upper() == "AND":

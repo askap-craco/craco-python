@@ -331,6 +331,8 @@ class MetadataObsmanDriver:
         else:
             if next_scan_running: # start new scan
                 info = ScanPrep.create_from_metafile(mgr.latest_good_metafile, self.ant_numbers)
+                info.add_parset('params.parset', self.obs_params)
+                info.add_parset('variables.parset', self.obs_variables)                           
                 self.obsman.scan_changed(info)
             else:
                 pass # continue not running a scan
@@ -355,6 +357,8 @@ class MetadataObsmanDriver:
             log.warning('No antennas for schedblock %d. sleeping.', sbid)
             time.sleep(1)
 
+        self.obs_params = ParameterSet(self.sb_service.getObsParameters(sbid))
+
         if 'schedblock.antennas' in self.obs_variables:           
             orig_ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
             self.ant_numbers = np.setdiff1d(orig_ant_numbers, self.ignore_ants_1based)
@@ -365,10 +369,19 @@ class MetadataObsmanDriver:
             log.warning('No antennas for schedblock %d. Waiting for next smetadata.', sbid)
             self.scan_manager = None
 
-        log.info('END get scan maanger %s sbid=%d', self.scan_manager, sbid)
+        log.info('END get scan manager %s sbid=%d', self.scan_manager, sbid)
         return self.scan_manager
 
 
+def set_craco_ready(is_ready:bool):
+    '''
+    Set craco ready flag in EPICSs
+    https://jira.csiro.au/browse/AXE-919
+    '''
+    is_ready_int = 1 if is_ready else 0
+    log.info('Setting EPICS ak:cracoReady flag to %s', is_ready_int)
+    caput('ak:cracoReady', is_ready_int)
+    
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
@@ -405,14 +418,20 @@ def _main():
         comm = Ice.initialize(sys.argv)
         d = MetadataObsmanDriver(comm, obs)
         saver = MetadataSaver(comm, d)
+        set_craco_ready(True)
         try:
             comm.waitForShutdown()
         finally:
-            log.info('Desctroying comm')
+            log.info('Destroying comm')
             comm.destroy()
+            set_craco_ready(False)
     else:
         d = EpicsObsmanDriver(obs)
+        set_craco_ready(True)
         d.wait()
+        set_craco_ready(False)
+
+    
     
 
 if __name__ == '__main__':
