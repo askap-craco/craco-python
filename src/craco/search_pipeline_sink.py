@@ -283,7 +283,15 @@ class SearchPipelineSink:
                      tf_weights.sum(), tf_weights.size)
             t.tick('Summarise input')
 
-            out_cands = self.pipeline.write(vis, bl_weights=bl_weights, input_tf_weights=tf_weights, candout_buffer=candidate_buffer) 
+            # Originally the dtype in the VisblockAccumulatorStruct was bool, but we
+            # had to numbafy it. Numba doesn't like bools, so I converted to uint8.
+            # I'm not sure that the search pipeline (inparticualr fast preprorcessor)
+            # likes np.uint8, so I send through a bool view here. 
+            # It might work without it but I can't face any more dumb bugs right now.
+            out_cands = self.pipeline.write(vis, 
+                                            bl_weights=bl_weights.view(dtype=bool), 
+                                              input_tf_weights=tf_weights.view(dtype=bool), 
+                                              candout_buffer=candidate_buffer) 
             t.tick('Pipeline write')
             self.t = 0
         except RuntimeError: # usuall XRT error
