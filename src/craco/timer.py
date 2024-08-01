@@ -8,6 +8,8 @@ import logging
 import time
 from collections import OrderedDict
 from craco.tracing import tracing
+from craco.mpi_tracefile import MpiTracefile
+
 
 log = logging.getLogger(__name__)
 
@@ -54,11 +56,10 @@ class Timer:
         self.init_ts = self.last_ts
         self.ticks = OrderedDict()
         try:
-            from craco.mpi_tracefile import MpiTracefile
-            self.tracefile = MpiTracefile.instance()
+            self.__tracefile = MpiTracefile.instance()
         except:
             log.info('Could not initialise MpiTracefile')
-            self.tracefile = None
+            self.__tracefile = None
 
         self.args = {} if args is None else args
 
@@ -73,13 +74,14 @@ class Timer:
         if args is not None:
             allargs.update(args)
 
-        if self.tracefile is not None:
+        if self.__tracefile is not None:
             complete_event = tracing.CompleteEvent(name, 
                 ts = self.last_ts.tai_ns //1e3, 
                 dur=int(tdiff.perf*1e6), 
                 tdur=int(tdiff.process*1e6),
                 args=allargs) # not sure if this should be process or perf?
-            self.tracefile.tracefile += complete_event
+
+            self.__tracefile += complete_event
         
         self.last_ts = ts        
         return tdiff
