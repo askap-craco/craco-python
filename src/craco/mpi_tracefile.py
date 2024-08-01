@@ -33,26 +33,46 @@ class MpiTracefile:
         comm = MPI.COMM_WORLD
         self.rank = comm.Get_rank()
         self.filename = f'rank_{self.rank:03d}_trace.json'
-        self.tracefile  = Tracefile(self.filename, 'array')
+        self.__tracefile  = Tracefile(self.filename, 'array')
         log.info('Opened tracefile %s', self.filename)
         atexit.register(self.close)
 
     @staticmethod
     def instance():
-        if not MpiTracefile._instance:
+        if MpiTracefile._instance is None:
             MpiTracefile._instance = MpiTracefile()
 
-        return MpiTracefile._instance
+        x = MpiTracefile._instance
+
+        assert isinstance(x, MpiTracefile)
+        return x
 
     def __iadd__(self, entry):
-        return self.tracefile.append(entry)
+        entry.pid = self.rank               
+        self.__tracefile.append(entry)
+        # OMG - I got so burnt with returning __tracefile. How insane.
+        return self
+    
+    append = __iadd__
+
+    def add_metadata(self, 
+                     pid=None,tid=None,
+                     process_name=None,
+                     process_labels=None,
+                     process_sort_index=None,
+                     thread_name=None,
+                     thread_sort_index=None):
+        if pid is None:
+            pid = self.rank
+
+        return self.__tracefile.add_metadata(pid, tid, process_name, process_labels, process_sort_index, thread_name, thread_sort_index)
     
     def now_ts(self):
-        return self.tracefile.now_ts()
+        return self.__tracefile.now_ts()
 
     def close(self):
-        if self.tracefile is not None:
-            self.tracefile.close()
+        if self.__tracefile is not None:
+            self.__tracefile.close()
 
 
 

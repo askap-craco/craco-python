@@ -1088,21 +1088,25 @@ def open_device(devid, nretry=10):
     return device
         
 class PipelineWrapper:
-    def __init__(self, planinfo, values, devid, startinfo=None, parallel_mode=True):
+    def __init__(self, planinfo, values, devid, startinfo=None, parallel_mode=True, plan=None):
         '''
         Create a pipeilne wrapper
-        :planinfo: Adapter containg observation info for the plan
+        :planinfo: Adapter containg observation info for the plan. If plan=None a new plan will be created.
         :values: command line arguments
         :device id: pyxrt device ID - I don't recal why this is seaparet
         :startinfo: Info adapter for the beginning of the file - we pull the tstart 
         :parallel_mode: True if you want to run in paralell (default). False for serial.
         from this because the planinfo might have a tstart in the future. If None then we use 
         planinfo
+        :plan: Already made plan if we don't have one already
         '''
-        self.plan = PipelinePlan(planinfo, values)
+        if plan is None:
+            plan = PipelinePlan(planinfo, values)
+            
+        self.plan = plan
 
         # reset dvice first Don't allocate a device becasue I think you get a bus error
-        reset_device(devid)
+        # reset_device(devid) resetting is also problematic. I'm not sure if we want to do that or not. Grrr.
         self.device = open_device(devid)
 
         self.xbin = pyxrt.xclbin(values.xclbin)
