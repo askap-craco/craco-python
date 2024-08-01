@@ -13,6 +13,7 @@ import sys
 import logging
 from craco.timer import Timer
 import mpi4py.util.dtlib
+from numba import njit
 
 
 log = logging.getLogger(__name__)
@@ -66,13 +67,66 @@ class VisblockAccumulatorMasked:
     def close(self):
         pass
 
+
+def write_slow(tstart:int, vis_data, blflags, pipeline_data):
+    '''
+    vis_data is (nrx,nbl, vis_nc, vis_nt)
+    bl_flags is lenght (nbl) bool
+    pipeline_data is see VisAccumulatorStruct
+    '''
+    nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+
+    blweights = ~ blflags # True = Good, False = bad
+    # If any baselines in the current block are bad, we make them bad for hte whole block
+    pipeline_data['bl_weights'] &= blweights    
+    tend = tstart + vis_nt
+
+    # loop through each card
+    for irx in range(nrx):
+        fstart = irx*vis_nc
+        fend = fstart + vis_nc
+        chan_weights = abs(vis_data[irx, ...]) != 0
+        pipeline_data['vis'][:,fstart:fend, tstart:tend] = vis_data[irx, ...]
+        pipeline_data['tf_weights'][fstart:fend, tstart:tend] = np.all(chan_weights == True, axis=0)
+
+@njit
+def write_fast(tstart:int, vis_data, blflags, pipeline_data):
+    nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+    # If any baselines in the current block are bad, we make them bad for hte whole block
+    pipeline_data['bl_weights'] &= ~ blflags    
+    tend = tstart + vis_nt
+
+    # loop through each card
+    for irx in range(nrx):
+        fstart = irx*vis_nc
+        fend = fstart + vis_nc
+        for ichan, chan in enumerate(range(fstart, fend)):
+            for itime, time in enumerate(range(tstart, tend)):
+                weight = np.uint8(1) # weight is True if all values are nonzero
+                for ibl in range(nbl):
+                    d = vis_data[irx, ibl, ichan, itime]
+                    # copy data in        
+
+                    pipeline_data['vis'][ibl, chan, time] = d
+                    weight &= ((d.real != 0) & (d.imag != 0))
+                
+                pipeline_data['tf_weights'][chan,time] = weight
+
+        
+        #pipeline_data['vis'][:,fstart:fend, tstart:tend] = vis_data[irx, ...]
+
+        # weight if true if all baselines for that cell are nonzero
+        #chan_weights = abs(vis_data[irx, ...]) != 0
+        #pipeline_data['tf_weights'][fstart:fend, tstart:tend] = np.all(chan_weights == True, axis=0)
+
+
 class VisblockAccumulatorStruct:
-    def __init__(self, nbl, nf, nt):
+    def __init__(self, nbl:int, nf:int, nt:int):
         shape = (nbl, nf, nt)
         dt = np.dtype([
             ('vis', np.complex64, (nbl,nf,nt)),
-            ('tf_weights', bool, (nf,nt)),
-            ('bl_weights', bool, (nbl,))
+            ('tf_weights', np.uint8, (nf,nt)),
+            ('bl_weights', np.uint8, (nbl,))
         ])
         self.pipeline_data_array = np.zeros((1), dtype=dt)
         self.pipeline_data = self.pipeline_data_array[0]
@@ -97,24 +151,15 @@ class VisblockAccumulatorStruct:
         assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
         assert vis_nc*nrx == vis_out.shape[1], f'Output NC should be {self.pipeline_data.shape[1]} but got {vis_nc*nrx} {vis_data.shape}'
         assert vis_out.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
-        blflags = vis_block.baseline_flags # True = Bad, False=Good
-        blweights = ~ blflags # True = Good, False = bad
-        # If any baselines in the current block are bad, we make them bad for hte whole block
-        self.pipeline_data['bl_weights'] &= blweights
-        
+
         tstart = self.t
-        tend = tstart + vis_nt
-
-        # loop through each card
-        for irx in range(nrx):
-            fstart = irx*vis_nc
-            fend = fstart + vis_nc
-            chan_weights = abs(vis_data[irx, ...]) != 0
-            self.pipeline_data['vis'][:,fstart:fend, tstart:tend] = vis_data[irx, ...]
-            self.pipeline_data['tf_weights'][fstart:fend, tstart:tend] = np.all(chan_weights == True, axis=0)
-
+        vis_data = vis_block.data
+        blflags = vis_block.baseline_flags # True = Bad, False=Good
+        #write_slow(tstart, vis_data, blflags, self.pipeline_data)
+        write_fast(tstart, vis_data, blflags, self.pipeline_data)
         self.t += vis_nt
         assert self.t <= self.nt, f'Wrote too many blocks without reset {self.t} {self.nt}'
+
 
     @property
     def msg_size(self):                

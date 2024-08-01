@@ -227,7 +227,7 @@ class VisBlock:
     @property
     def baseline_flags(self):
         '''
-        Returns  a length nbl array of bool. True if antenna is flagged
+        Returns  a length nbl array of bool. True if either antenna is flagged
         '''
         af = self.antflags
         blflags = np.array([af[blinfo.ia1] | af[blinfo.ia2] for blinfo in self.info.baseline_iter()])
