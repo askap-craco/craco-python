@@ -144,6 +144,9 @@ class UvfitsWriter:
         fout = fits.open(self.outname, 'append')
 
         for it, table in enumerate(uvsource.hdulist[1:]):
+            ### just in case uvfits is read only...
+            table = table.copy() # make a copy to remove read-only...
+            
             row = table.data[0]
             if table.name == 'AIPS SU' and row['SOURCE'].strip() == 'UNKNOWN':
                 row['SOURCE'] = uvsource.target_name
