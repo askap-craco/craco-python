@@ -2,6 +2,7 @@
 
 from craco import uvfits_meta, preprocess
 from craft import craco_plan
+from craco.cmdline import strrange
 from craco.uvfits_writer import UvfitsWriter, copy_visparams_to_visrow
 import numpy as np
 import argparse
@@ -28,6 +29,10 @@ def main(args):
                                 f.tsamp.value,
                                 dm_pccc = args.dedisp_pccc)
 
+    if args.flag_ants:
+        flagantlst = strrange(args.flag_ants)
+        print(f"will flag the following antennas - {flagantlst}")
+        f.set_flagants(flagantlst)
 
     if args.calib:
         print(f"Starting calibration using {args.calib}")
