@@ -7,10 +7,15 @@ import numpy as np
 import argparse
 
 def main(args):
+    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
+    if args.tend == -1: args.tend = f.nsamps - 1
+    print(f"change the tend to {args.tend}...")
+
     assert args.tend >= args.tstart
     nsamps_to_read = args.tend - args.tstart + 1
-    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
 
+    print(f"number of samples to read is {nsamps_to_read}...")
+    
     if args.outname:
         outname = args.outname
     else:
@@ -40,6 +45,9 @@ def main(args):
         data_block = f.convert_visrows_into_block(visout)
         # print(f"Shape of data_block is {data_block.shape}")
         #modified_data = data_block.copy()
+        if args.verbose: 
+            print(f"massaging block{iblk}... with a shape of {data_block.shape}")
+
         if args.calib:
             data_block = calibrator.apply_calibration(data_block[:, 0, 0, 0, :, 0, :])
         else:
@@ -83,6 +91,7 @@ if __name__ == '__main__':
     a.add_argument("-sky_subtract", action='store_true', help="Run sky subtraction on the data (def:False)", default=False)
     a.add_argument("--flag-ants", type=str, help="Flag these ants", default=None)
     a.add_argument("-outname", type=str, help="Name of the output file", default=None)
+    a.add_argument("-v", "--verbose", action='store_true', help="print out more information", default=False)
 
     args = a.parse_args()
     main(args)
