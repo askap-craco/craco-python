@@ -17,7 +17,7 @@ import warnings
 from astropy import wcs
 from astropy.io import fits
 from craco.candpipe.candpipe import ProcessingStep
-from astropy.coordinates import SkyCoord
+# from astropy.coordinates import SkyCoord
 from astropy import units
 
 log = logging.getLogger(__name__)
@@ -74,29 +74,8 @@ class Step(ProcessingStep):
         # get median ra and dec from candidates file for further clustering 
         ra, dec = ind['ra_deg'].median(), ind['dec_deg'].median()
         log.debug('Find median coordinates for this field is %s %s', ra, dec)
-        
-        # select catalogue objects located within the observation field of view 
-        for i, catpath in enumerate(config['catpath']):
-            log.debug('Selecting sources from existing catalogue %s', catpath)
-            filter_radius = config['filter_radius']
-            catdf, catcoord = self.filter_cat(ra=ra, 
-                                              dec=dec, 
-                                              catpath=catpath, 
-                                              radius=filter_radius, 
-                                              racol=config['catcols']['ra'][i], 
-                                              deccol=config['catcols']['dec'][i])
 
-            log.debug('Found %s sources within %s degree radius in %s', len(catdf), config['filter_radius'], catpath)
-            outd = self.cross_matching(candidates=ind, 
-                                       catalogue=catdf, 
-                                       coord=catcoord, 
-                                       threshold=config['threshold_crossmatch'][i], 
-                                       col_prefix=config['catcols']['output_prefix'][i], 
-                                       key=config['catcols']['input_colname'][i])
-
-            log.debug('Crossmatch finished for %s', catpath)
-            
-            ind = outd    
+        outd = self.classify_cands(ind, ra, dec)
         
         return outd
 
@@ -104,16 +83,36 @@ class Step(ProcessingStep):
     def angular_offset(self, ra1, dec1, ra2, dec2):
         # in unit of degree
         # just don't use stupid astropy separation - that's too slow!! 
-
         phi1 = ra1 * np.pi / 180
         phi2 = ra2 * np.pi / 180
         theta1 = dec1 * np.pi / 180
         theta2 = dec2 * np.pi / 180
 
         cos_sep_radian = np.sin(theta1) * np.sin(theta2) + np.cos(theta1) * np.cos(theta2) * np.cos(phi1-phi2)
+        # Clip values to the valid range for arccos to avoid numerical issues
+        cos_sep_radian = np.clip(cos_sep_radian, -1.0, 1.0) 
         sep = np.arccos(cos_sep_radian) * 180 / np.pi
 
-        return sep
+        return sep # unit of deg
+
+    def match_coords(self, ra1, dec1, ra2, dec2):
+        # in unit of degree
+        # works for a list of coord1 and coord2, they should be numpy array 
+        # return the closest coord2 for each coord1 
+        # replace the astropy match_to_catalog_sky function 
+        ra1, ra2 = np.meshgrid(ra1, ra2, indexing='ij')
+        dec1, dec2 = np.meshgrid(dec1, dec2, indexing='ij')
+
+        ra1 = ra1.astype(np.float64)
+        dec1 = dec1.astype(np.float64)
+        ra2 = ra2.astype(np.float64)
+        dec2 = dec2.astype(np.float64)
+
+        sep = self.angular_offset(ra1, dec1, ra2, dec2)
+        
+        min_sep_idx = np.argmin(sep, axis=1)
+        min_sep = np.min(sep, axis=1) * 3600 # unit of arcsec
+        return min_sep_idx, min_sep
 
     def load_catalog(self, catpath, racol, deccol):
         '''
@@ -144,7 +143,8 @@ class Step(ProcessingStep):
             catdf, catra, catdec = self.load_catalog(catpath, racol, deccol)
             sep = self.angular_offset(ra, dec, catra, catdec)
             select_bool = sep < radius
-            catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
+            # catcoord = SkyCoord(catra[select_bool], catdec[select_bool], unit=(units.degree))
+            catcoord = [catra[select_bool], catdec[select_bool]]
             d = catdf.iloc[select_bool], catcoord
 
             # cache the answer if the input was reasonable            
@@ -152,7 +152,7 @@ class Step(ProcessingStep):
             # if you cache it it will break forever. This would suck.
             if not np.isnan(ra):
                 self.catalogs[catpath] = d
-                log.info('Loaded %d sources from %s within %f of (%f, %f)', len(d), catpath, radius, ra, dec)
+                log.info('Loaded %d sources from %s within %f of (%f, %f)', sum(select_bool), catpath, radius, ra, dec)
                      
         else:        
             d = self.catalogs[catpath]
@@ -166,7 +166,7 @@ class Step(ProcessingStep):
         config = self.pipeline.config
         ra, dec = self.pipeline.get_current_phase_center()
         if len(self.catalogs) == 0:
-            log.info('Loading %d catalogs  for (%f,%f)', len(config['catpath']), ra, dec)
+            log.info('Loading %d catalogs for (%f,%f)', len(config['catpath']), ra, dec)
             for i, catpath in enumerate(config['catpath']):
                 log.debug('Selecting sources from existing catalogue %s', catpath)
                 filter_radius = config['filter_radius']
@@ -178,41 +178,72 @@ class Step(ProcessingStep):
                                                 deccol=config['catcols']['dec'][i])
 
 
-    def cross_matching(self, candidates, catalogue, coord, 
-                       threshold=30, 
-                       col_prefix='PSR', key='PSRJ'):
+    def cross_matching(self, candidates, catalogue, coord, threshold=30, key='PSRJ'):
         '''
-        @author: Yu Wing Joshua Lee
         Threshold is in arcsecond.
         Catalogue should be in csv format.
         '''
-        threshold = threshold * units.arcsec
-        
         # add column to candidate list and save as a new file
+        col_prefix = 'MATCH'
         colname = col_prefix + '_name'
         sepname = col_prefix + '_sep'
 
         if len(catalogue) == 0:
-            candidates[colname] = [None] * len(candidates)
-            candidates[sepname] = [None] * len(candidates)
-            return candidates
+            condition = np.full((len(candidates),), False, dtype=bool)
+            return candidates, condition
 
-        cand_radec = SkyCoord(ra=candidates['ra_deg'], dec=candidates['dec_deg'], unit=(units.degree, units.degree), frame='icrs')
+        # astropy version -> super slow 
+        # cand_radec = SkyCoord(ra=candidates['ra_deg'], dec=candidates['dec_deg'], unit=(units.degree, units.degree), frame='icrs')
+        # idx, sep2d, sep3d = cand_radec.match_to_catalog_sky(coord)
+        # sep2d = sep2d.arcsec
 
-        idx, sep2d, sep3d = cand_radec.match_to_catalog_sky(coord)
-        combined = [[idx, sep2d.arcsec] if sep2d<threshold else[None, None] for idx, sep2d in zip(idx, sep2d)]
+        # self-defined crossmatch -> works fine in most of cases, sometimes gives a slightly different result to astropy 
+        idx, sep2d = self.match_coords(candidates['ra_deg'].values, candidates['dec_deg'].values, coord[0], coord[1])
+        condition = sep2d < threshold 
 
-        colname_list = []
-        sepname_list = []
-
-        for index, pair in enumerate(combined):
-            pulsar_name, pulsar_distance = pair
-            colname_list.append(catalogue[key].iloc[pulsar_name] if pulsar_name is not None else None)
-            sepname_list.append(pulsar_distance)
-
-        candidates[colname] = colname_list
-        candidates[sepname] = sepname_list
+        candidates.loc[condition, colname] = catalogue[key].iloc[idx].values[condition]
+        candidates.loc[condition, sepname] = sep2d[condition]
         
+        return candidates, condition 
+
+
+    def classify_cands(self, candidates, ra, dec, ):
+        '''
+        LABEL
+            1. PSR 
+            2. RACS
+            3. CUSTOM
+            4. UNKNOWN 
+        ALIAS:
+            True
+            False 
+        '''
+        config = self.pipeline.config 
+        conditions = []
+        log.info('Total %s candidates waiting for crossmatch..', len(candidates))
+
+        for i, catpath in enumerate(config['catpath']):
+            filter_radius = config['filter_radius']
+            catdf, catcoord = self.filter_cat(ra=ra, 
+                                              dec=dec, 
+                                              catpath=catpath, 
+                                              radius=filter_radius, 
+                                              racol=config['catcols']['ra'][i], 
+                                              deccol=config['catcols']['dec'][i])
+
+            log.debug('Found %s sources within %s degree radius in %s', len(catdf), config['filter_radius'], catpath)
+            candidates, condition = self.cross_matching(candidates=candidates, 
+                                       catalogue=catdf, 
+                                       coord=catcoord, 
+                                       threshold=config['threshold_crossmatch'][i], 
+                                       key=config['catcols']['input_colname'][i])
+
+            conditions.append(condition)
+        
+        classes = config['catcols']['output_prefix']
+        candidates.loc[:, 'LABEL'] = np.select(conditions, classes, default='UNKNOWN')
+        candidates.loc[:, 'ALIASED'] = [0] * len(candidates)
+
         return candidates
 
 
