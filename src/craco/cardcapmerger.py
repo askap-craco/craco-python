@@ -64,7 +64,7 @@ def frame_id_iter(i, fid0):
             except StopIteration:
                 break
 
-        curr_bat = currblock['bat'][0]
+        curr_bat = currblock['bat'][0,0]
 
         # skipping frames earlier than fid0.
         # This lets us setup a time in advance so we can get settled before data starts
