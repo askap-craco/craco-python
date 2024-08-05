@@ -291,21 +291,15 @@ class CandMgrRankInfo(namedtuple('CandMgrRankInfo', ['rank','host','slot','core'
         return f'{self.host}'
     
 
-def populate_ranks(pipe_info, fpga_per_rx=3):
+def populate_ranks(pipe_info, total_cards):
     from craco import mpiutil
     values = pipe_info.values
     fpga_per_rx = values.nfpga_per_rx
     hosts = pipe_info.hosts
     
     log.debug("Hosts %s", hosts)
-    total_cards = len(values.block)*len(values.card)
-    
-    if values.max_ncards is not None:
-        total_cards = min(total_cards, values.max_ncards)
-
-    nrx = total_cards*len(values.fpga) // fpga_per_rx
     nbeams = values.nbeams
-    nranks = nrx + nbeams
+    nranks = total_cards + nbeams*3 + 1
     ncards_per_host = (total_cards + len(hosts) - 1)//len(hosts) if values.ncards_per_host is None else values.ncards_per_host
         
     nrx_per_host = ncards_per_host
@@ -321,7 +315,7 @@ def populate_ranks(pipe_info, fpga_per_rx=3):
     for block in values.block:
         for card in values.card:
             cardno += 1
-            if values.max_ncards is not None and cardno >= values.max_ncards + 1:
+            if cardno >=total_cards + 1:
                 break
             for fpga in values.fpga[::fpga_per_rx]:
                 hostidx = rxrank // nrx_per_host
@@ -398,15 +392,17 @@ class MpiPipelineInfo:
         #self.beam_cand_ranks = []
         #self.beam_mgr_ranks =[]
         self.all_ranks = OrderedDict()
-
-        if values.max_ncards is None:
-            ncards = len(values.block)*len(values.card)
-        else:
-            ncards = values.max_ncards
+        
+        ncards = len(values.block)*len(values.card)
+        
+        if values.max_ncards is not None:
+            ncards = min(ncards, values.max_ncards)
 
         nrx = ncards*len(values.fpga)//values.nfpga_per_rx
         self.nrx = nrx
         self.ncards = ncards
+
+        assert ncards == nrx, 'Im not sure we support receiving a weird number of FPGAs per process anymore. We might Im just not sure.'
 
         # yuck. This is just yuk.
         if values.beam is None:
@@ -419,7 +415,7 @@ class MpiPipelineInfo:
         self.world_comm = MPI.COMM_WORLD
         world = self.world_comm
         self.world_rank = world.Get_rank()
-        populate_ranks(self, values)      
+        populate_ranks(self, ncards)      
 
         self.mpi_app = MpiAppInfo(self, values.proc_type)
         MpiTracefile.instance().add_metadata(process_name=self.mpi_app.proc_name,

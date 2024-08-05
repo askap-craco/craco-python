@@ -2,15 +2,21 @@
 
 from craco import uvfits_meta, preprocess
 from craft import craco_plan
+from craco.cmdline import strrange
 from craco.uvfits_writer import UvfitsWriter, copy_visparams_to_visrow
 import numpy as np
 import argparse
 
 def main(args):
+    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
+    if args.tend == -1: args.tend = f.nsamps - 1
+    print(f"change the tend to {args.tend}...")
+
     assert args.tend >= args.tstart
     nsamps_to_read = args.tend - args.tstart + 1
-    f = uvfits_meta.open(args.uvpath, metadata_file = args.metadata, skip_blocks = args.tstart, mask=args.apply_metadata_masks)
 
+    print(f"number of samples to read is {nsamps_to_read}...")
+    
     if args.outname:
         outname = args.outname
     else:
@@ -23,6 +29,10 @@ def main(args):
                                 f.tsamp.value,
                                 dm_pccc = args.dedisp_pccc)
 
+    if args.flag_ants:
+        flagantlst = strrange(args.flag_ants)
+        print(f"will flag the following antennas - {flagantlst}")
+        f.set_flagants(flagantlst)
 
     if args.calib:
         print(f"Starting calibration using {args.calib}")
@@ -35,33 +45,39 @@ def main(args):
                                 block_dtype=np.ndarray,
                                 miriad_gains_file=args.calib,
                                 baseline_order=f.internal_baseline_order)
-    
-    for iblk, visout in enumerate(f.fast_raw_blocks(nsamp = nsamps_to_read, nt = 1, raw_date=True)):
-        data_block = f.convert_visrows_into_block(visout)
-        # print(f"Shape of data_block is {data_block.shape}")
-        #modified_data = data_block.copy()
-        if args.calib:
-            data_block = calibrator.apply_calibration(data_block[:, 0, 0, 0, :, 0, :])
-        else:
-            data_block = data_block.squeeze()[..., None]
-        if args.sky_subtract:
-            data_block = preprocess.normalise(data_block)
-        if args.dedisp_pccc:
-            data_block = preprocess.fill_masked_values(data_block, fill_value = 0)
-            data_block = ddp.dedisperse(iblk, inblock=data_block)
 
-        #print(f"Shape of data_block after processing is {data_block.shape}, type is {type(data_block)}")#, mask is {data_block.mask}")
-        modified_visdata = f.convert_block_into_visrows(data_block)
-        UU = visout['UU'].flatten()
-        VV = visout['VV'].flatten()
-        WW = visout['WW'].flatten()
-        DATE = visout['DATE'].flatten()
-        BASELINE = visout['BASELINE'].flatten()
-        FREQSEL = visout['FREQSEL'].flatten()
-        SOURCE = visout['SOURCE'].flatten()
-        INTTIM = visout['INTTIM'].flatten()
-        visout = copy_visparams_to_visrow(modified_visdata, UU, VV, WW, DATE, BASELINE, FREQSEL, SOURCE, INTTIM)
-        of.write_visrows_to_disk(visout)
+    try:
+        for iblk, visout in enumerate(f.fast_raw_blocks(nsamp = nsamps_to_read, nt = 1, raw_date=True)):
+            data_block = f.convert_visrows_into_block(visout)
+            # print(f"Shape of data_block is {data_block.shape}")
+            #modified_data = data_block.copy()
+            if args.verbose: 
+                print(f"massaging block {iblk}/{nsamps_to_read}... with a shape of {data_block.shape}")
+
+            if args.calib:
+                data_block = calibrator.apply_calibration(data_block[:, 0, 0, 0, :, 0, :])
+            else:
+                data_block = data_block.squeeze()[..., None]
+            if args.sky_subtract:
+                data_block = preprocess.normalise(data_block)
+            if args.dedisp_pccc:
+                data_block = preprocess.fill_masked_values(data_block, fill_value = 0)
+                data_block = ddp.dedisperse(iblk, inblock=data_block)
+
+            #print(f"Shape of data_block after processing is {data_block.shape}, type is {type(data_block)}")#, mask is {data_block.mask}")
+            modified_visdata = f.convert_block_into_visrows(data_block)
+            UU = visout['UU'].flatten()
+            VV = visout['VV'].flatten()
+            WW = visout['WW'].flatten()
+            DATE = visout['DATE'].flatten()
+            BASELINE = visout['BASELINE'].flatten()
+            FREQSEL = visout['FREQSEL'].flatten()
+            SOURCE = visout['SOURCE'].flatten()
+            INTTIM = visout['INTTIM'].flatten()
+            visout = copy_visparams_to_visrow(modified_visdata, UU, VV, WW, DATE, BASELINE, FREQSEL, SOURCE, INTTIM)
+            of.write_visrows_to_disk(visout)
+    except KeyboardInterrupt:
+        print(f"Interrupted at {iblk} sample... saving the file...")
 
     of.update_header()
     of.write_header()
@@ -83,6 +99,7 @@ if __name__ == '__main__':
     a.add_argument("-sky_subtract", action='store_true', help="Run sky subtraction on the data (def:False)", default=False)
     a.add_argument("--flag-ants", type=str, help="Flag these ants", default=None)
     a.add_argument("-outname", type=str, help="Name of the output file", default=None)
+    a.add_argument("-v", "--verbose", action='store_true', help="print out more information", default=False)
 
     args = a.parse_args()
     main(args)
