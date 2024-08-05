@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord 
 from astropy.wcs import WCS
 from astropy.nddata import Cutout2D
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astropy import units
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval, ImageNormalize
@@ -160,19 +160,31 @@ def get_survey_offset(
 
 
 def get_racs_catalogue(ra, dec, radius=1., maxtrial=3):
+    racs_raw = []
+
     ntrial = 1
     while ntrial <= maxtrial:
         try:
             tap = TapPlus(url="https://casda.csiro.au/casda_vo_tools/tap")
             job = tap.launch_job_async(f"SELECT * FROM AS110.racs_dr1_gaussians_galacticcut_v2021_08_v02 WHERE 1=CONTAINS(POINT('ICRS', ra, dec),CIRCLE('ICRS', {ra},{dec},{radius}))")
-            racs_raw = job.get_results()
+            racs_raw.append(job.get_results())
             break
         except:
             ntrial += 1
-    if ntrial > maxtrial:
-        racs_raw = None
-    
-    return racs_raw
+
+    ntrial = 1
+    while ntrial <= maxtrial:
+        try:
+            tap = TapPlus(url="https://casda.csiro.au/casda_vo_tools/tap")
+            job = tap.launch_job_async(f"SELECT * FROM AS110.racs_dr1_gaussians_galacticregion_v2021_08_v02 WHERE 1=CONTAINS(POINT('ICRS', ra, dec),CIRCLE('ICRS', {ra},{dec},{radius}))")
+            racs_raw.append(job.get_results())
+            break
+        except:
+            ntrial += 1
+
+    ### combine two tables...
+    if len(racs_raw) == 0: return None
+    return vstack(racs_raw)
 
 def _get_vizier_wise(centercoord, radius):
     v = Vizier(columns=['AllWISE', 'RAJ2000', 'DEJ2000', 'eeMaj', 'eeMin', 'eePA'], row_limit=-1)
