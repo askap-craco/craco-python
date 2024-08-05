@@ -66,8 +66,13 @@ if [[ -z $SCAN_DIR ]] ; then
 fi
 echo "Using SCAN_DIR $SCAN_DIR"
 
+export NUMBA_CACHE_DIR=/data/craco/craco/tmpdir/numba_cache
+mkdir -p $NUMBA_CACHE_DIR
+export NUMBA_DEBUG_CACHE=1
+
+
 # can add --report-bindings to be verbose
-commonargs="-x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCAN_DIR"
+commonargs="-x EPICS_CA_ADDR_LIST -x EPICS_CA_AUTO_ADDR_LIST -x PYTHONPATH -x XILINX_XRT -wdir $SCAN_DIR -x NUMBA_CACHE_DIR -x NUMBA_DEBUG_CACHE"
 
 # runwith the rankfile
 
