@@ -89,6 +89,7 @@ def _main():
     parser.add_argument('--update-uv-blocks', default=6, type=int, help='Update uv blocks')
     parser.add_argument('--int-time-exp', type=int, default=4, help='Integration time as 864us*2**X')
     parser.add_argument('--ndm', type=int, default=256, help='Number of DM trials')
+    parser.add_argument('--force-calibration', action='store_true', default=False, help='Make it do calibration even if one exists')
     parser.add_argument(dest='extra', help='Extra arguments', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -115,7 +116,7 @@ def _main():
     calfinder = auto_sched.CalFinder(sbid)
     calpath = calfinder.get_cal_path() # None if nothign available.
     global do_calibration
-    do_calibration = calpath is None # do a calibration scan if no calibration available.
+    do_calibration = calpath is None or values.force_calibration# do a calibration scan if no calibration available.
 
     # make soft link to calibration path for andy
     if calpath is not None:
@@ -152,7 +153,7 @@ def _main():
         pcb = ''
 
 
-    calibration = '' if calpath is None else f'--calibration {calpath}'
+    calibration = '' if do_calibration else f'--calibration {calpath}'
     int_time_exp = int(obsparams.get_value('craco.uvfits.int_time_exp', values.int_time_exp)) # default is 13.8 ms
     
     if do_calibration:
