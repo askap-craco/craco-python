@@ -50,8 +50,8 @@ def test_compare_slow_and_fast():
     vs1 = VisblockAccumulatorStruct(nbl, nchan, nt)
     vs2 = VisblockAccumulatorStruct(nbl, nchan, nt)
     block = MyVisBlock(nbl, nrx, vis_nc, vis_nt)
-    block.data[:].real = np.random.randn(*block.data.shape)
-    block.data[:].imag = np.random.randn(*block.data.shape)
+    block.data[:].real = np.rint(np.random.randn(*block.data.shape))
+    block.data[:].imag = np.rint(np.random.randn(*block.data.shape))
     block.baseline_flags[:] = np.random.randint(0,2, size=nbl)
 
     write_slow(0,block.data,block.baseline_flags,vs1.pipeline_data)
@@ -82,13 +82,15 @@ def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(description='Script description', formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
-    parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
     if values.verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
+
+    test_compare_slow_and_fast()
+
     
 
 if __name__ == '__main__':
