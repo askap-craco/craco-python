@@ -46,7 +46,8 @@ def load_default_config():
     return config
 
 def make_unknown_mask(df):
-    unknown_mask = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+    # unknown_mask = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+    unknown_mask = df['LABEL'] == 'UNKNOWN'
     return unknown_mask
 
 def filter_df_for_unknown(df):
