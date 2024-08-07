@@ -139,6 +139,14 @@ class VisblockAccumulatorStruct:
                         self.mpi_dtype]
         self.reset() # set bl_weights to True - otherwise preprocess fails with zerodivisionerror
 
+    def compile(self, vis_block):
+        '''
+        Run write once and reset
+        '''
+        assert self.t == 0
+        self.write(vis_block)
+        self.reset()
+
 
     def write(self, vis_block):
         vis_data = vis_block.data
