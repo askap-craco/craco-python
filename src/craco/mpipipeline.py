@@ -835,18 +835,24 @@ def transpose_beam_run(proc):
     nf = len(info.vis_channel_frequencies)
     nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
     nbl = info.nbl_flagged    
-    
+    iblk = 0 
+    transposer = proc.transposer
+
     cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
-    iblk = 0
+
+    # Make make fake data to get vis_accum to compile. *sig*
+    beam_data_complex = transposer.drx_complex # a view into the same data.
+    beam_data = transposer.drx
+    vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+    vis_accum.compile(vis_block_complex)
 
     beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
     beam_comm = pipe_info.mpi_app.beam_chain_comm
 
     # requested block to planner to get moving
-    transposer = proc.transposer
 
     # let the fits sink see some ddata so it can compile
     vis_file.compile(transposer.drx['vis'])
