@@ -1,7 +1,7 @@
 
 
-from craco.datadirs import SchedDir, ScanDir
-from craco.metadatafile import MetadataFile
+from craco.datadirs import SchedDir, ScanDir, format_sbid
+from craco.metadatafile import MetadataFile as MF
 from craco.candidate_manager import SBCandsManager
 import logging
 import os
@@ -60,6 +60,42 @@ def run_with_tsp():
         log.info(f"Queued summarise scan job - with command - {cmd}")
 
 
+def get_metadata_info(scan):
+    '''
+    Parses the metadata file for a given scan.
+    If found and parseable, it returns the list of source names as a string
+    If not, returns None
+
+    Arguments
+    ---------
+
+    scan: ScanDir() object
+
+    Returns
+    -------
+    source_names: str or None
+                  A string containing a list of source names observed in this scan
+                  None if it was unable to retrieve this info
+    '''
+
+    metapath = os.path.join(scan.scan_head_dir, "metafile.json")
+    if not os.path.exists(metapath):
+        emsg = f"Metafile not found at path - {metapath}"
+        log.critical(emsg)
+    else:
+        try:
+           mf = MF(metapath)
+           source_names = str(list(mf.sources(0).keys()))
+           return source_names
+           #msg = f"Beam 0 source names - {source_names}\n"
+        except Exception as E:
+            emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
+            log.critical(emsg)
+            pass
+            #msg = emsg
+    return None
+
+
 class ObsInfo:
 
     def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results'):
@@ -73,7 +109,7 @@ class ObsInfo:
 
         '''
         self.scandir = ScanDir(sbid, f"{scanid}/{tstart}")
-        self.sbid = self.scandir.scheddir.sbid
+        self.sbid = format_sbid(self.scandir.scheddir.sbid, padding=True, prefix=True)
         self.scanid = self.scandir.scan
         self.runname = runname
 
@@ -131,7 +167,7 @@ class ObsInfo:
         '''
         pass
 
-    def get_sbid_info(self):
+    def get_scan_info(self):
         '''
         SBID related info -
             SBID
@@ -141,6 +177,13 @@ class ObsInfo:
             Beamformer weights used by ASKAP
         
         '''
+        scan_info = {}
+        scan_info['sbid'] = self.sbid
+        scan_info['scan_id'] = self.scan_id
+        scan_info['tstart'] = self.tstart
+        
+
+
         pass
 
     def get_observation_params(self):
@@ -167,7 +210,7 @@ class ObsInfo:
         '''
 
     def run(self):
-        self.get_sbid_info()
+        self.get_scan_info()
         self.get_observation_params()
         self.get_candidates_info()
         self.get_rfi_stats()
