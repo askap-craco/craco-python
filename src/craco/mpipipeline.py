@@ -1008,7 +1008,7 @@ def proc_beam_run(proc):
 
 
     finally:
-        print(f'Closing beam files for {beamid}')
+        log.info(f'Closing search pipeline for beam {beamid}')
         beam_comm.send(-1, dest=planner_rank) # Tell planner to quit
         pipeline_sink.close()
 
