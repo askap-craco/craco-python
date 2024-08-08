@@ -137,6 +137,7 @@ class SBCandsManager:
                 self.clustered_uniq_candfiles.append(cf)
             if f in self._clustered_inj_candfile_paths:
                 cf = Candfile(f)
+                self.clustered_inj_candfiles.append(cf)
 
             self.all_candfiles.append(cf)
 
