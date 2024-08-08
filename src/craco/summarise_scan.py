@@ -3,10 +3,13 @@
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.metadatafile import MetadataFile as MF
 from craco.candidate_manager import SBCandsManager
+from craft.sigproc import SigprocFile as SF
 import logging
 import os
 import subprocess
 import argparse
+import numpy as np
+import sys
 
 log = logging.getLogger(__name__)
 logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log",
@@ -14,6 +17,65 @@ logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.
                     level=logging.DEBUG)
 stdout_handler = logging.StreamHandler(sys.stdout)
 log.addHandler(stdout_handler)
+
+
+
+def dec_to_dms(deg:float) -> str:
+    '''
+    Converts dec angle in degrees (float) to DD:MM:SS.ss (string)
+    '''
+    dd = int(deg)
+    signum = np.sign(deg)
+    if signum >= 0:
+        prefix = '+'
+    else:
+        prefix = '-'
+
+    rem = np.abs(deg - dd)
+    mm = int(rem * 60)
+    ss = (rem * 60  - mm) * 60
+    ss_int = int(ss)
+    ss_frac = int((ss - ss_int) * 100)
+
+    return f"{prefix}{np.abs(dd):02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
+
+def ra_to_hms(ha:float) -> str:
+    '''
+    Converts ra angle in ha (float) to HH:MM:SS.ss (string)
+    '''
+    ha /= 15
+    hh = int(ha)
+    rem = ha - hh
+    mm = int(rem * 60)
+    ss = (rem*60  - mm) * 60
+    ss_int = int(ss)
+    ss_frac = int((ss - ss_int) * 100)
+
+    return f"{hh:02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
+
+def read_filterbank_stats(filpath):
+    try:
+        f = SF(filpath)
+        dur = f.nsamples * f.tsamp / 60         #minutes
+        bw = np.abs(f.foff) * f.nchans
+        fcen = f.fch1 + bw / 2
+        ra = f.src_raj_deg
+        dec = f.src_dej_deg
+        #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
+        fil_info = {
+            'tobs': dur,
+            'BW': bw,
+            'fcen': fcen,
+            'beam0_coords_ra_hms': ra_to_hms(ra),
+            'beam0_coords_ra_deg': ra,
+            'beam0_coords_dec_dms': dec_to_dms(dec),
+            'beam0_coords_dec_deg': dec,
+        }
+    except:
+        log.critical(f"!Error: Could not read filterbank information from path - {filpath}!")
+        fil_info = {}
+    finally:
+        return fil_info
 
 
 def parse_scandir_env(path):
@@ -111,10 +173,12 @@ class ObsInfo:
         self.scandir = ScanDir(sbid, f"{scanid}/{tstart}")
         self.sbid = format_sbid(self.scandir.scheddir.sbid, padding=True, prefix=True)
         self.scanid = self.scandir.scan
+        self.tstart = tstart
         self.runname = runname
 
         self.cands_manager = SBCandsManager(self.sbid, runname=self.runname)
 
+        self.filterbank_stats = read_filterbank_stats()
         self._dict = {}
 
     def run_candpipe(self):
@@ -179,9 +243,9 @@ class ObsInfo:
         '''
         scan_info = {}
         scan_info['sbid'] = self.sbid
-        scan_info['scan_id'] = self.scan_id
+        scan_info['scanid'] = self.scanid
         scan_info['tstart'] = self.tstart
-        
+
 
 
         pass
