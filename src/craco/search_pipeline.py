@@ -1171,7 +1171,7 @@ class PipelineWrapper:
             cas_fil_hdr['nbits'] = 32
             cas_fil_fname = os.path.join(values.outdir, f"CAS_unnorm.b{beamid:02d}.fil")
             self.cas_fil_writer = sigproc.SigprocFile(cas_fil_fname, 'wb', cas_fil_hdr)
-        
+                
         # Create a pipeline
         alloc_device_only = values.dump_mainbufs is not None or \
                             values.dump_fdmt_hist_buf is not None or \
@@ -1201,6 +1201,7 @@ class PipelineWrapper:
                                                 p.cal_solution.solarray, 
                                                 values, 
                                                 self.fixed_freq_weights, 
+                                                beamid = beamid,
                                                 sky_sub = True, global_norm = True)
 
         self.pipeline = p
@@ -1344,6 +1345,7 @@ class PipelineWrapper:
         logstr = f'# Run {cmdstr} finished on {now}\n'
         candout.write_log(logstr)
         candout.close()
+        self.fast_preprocessor.close()
         logging.info('Wrote %s candidates to %s', self.total_candidates, values.cand_file)
         
         if pc_filterbank is not None:

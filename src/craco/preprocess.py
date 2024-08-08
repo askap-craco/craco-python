@@ -997,7 +997,7 @@ class FastPreprocess:
 
     #TODO -- add the capacity to write filterbank out for the masked values
 
-    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, sky_sub = True, global_norm = True):
+    def __init__(self, blk_shape, cal_soln_array, values, fixed_freq_weights, beamid = 0, sky_sub = True, global_norm = True):
         self.cal_soln_array = self.make_averaged_cal_sol(cal_soln_array)
         self.dflag_nt = values.dflag_tblk
         self.dflag_fradius = values.dflag_fradius
@@ -1007,13 +1007,15 @@ class FastPreprocess:
         self.global_norm = global_norm
         self.target_input_rms = values.target_input_rms
         self.sky_sub = sky_sub
-        self.stats_log_fout = None
+        self.beamid = beamid
 
         self.blk_shape = blk_shape
         self._initialise_internal_buffers()
         self._send_dummy_block()
         self._initialise_internal_buffers()
 
+        
+    
     def _initialise_internal_buffers(self):
         nbl, nf, nt = self.blk_shape
         self.interim_means = np.zeros((nbl, nf), dtype=np.complex128)
@@ -1034,9 +1036,8 @@ class FastPreprocess:
 
         self.num_nblks = 0
 
-        if self.stats_log_fout is None:
-            self.stats_log_fout = open("flagging_logs.csv", 'w')
-            self.stats_log_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\n")
+        self.flagging_stats_fout = open(f"flagging_stats_log_b{self.beamid:02d}.csv", 'w')    
+        self.flagging_stats_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\n")
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
@@ -1065,17 +1066,17 @@ class FastPreprocess:
         good_bls_post, good_cells_post = self.postflagging_stats
 
         out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\n"
-        self.stats_log_fout.write(out_str)
+        self.flagging_stats_fout.write(out_str)
 
     def close(self):
-        if self.stats_log_fout is not None:
-            self.stats_log_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}\n")
-            self.stats_log_fout.write("#num_good_bl_pre_cumul =  no of good baselines before flagging\n")
-            self.stats_log_fout.write("#num_good_cells_pre_cumul =  no of good cells before flagging\n")
-            self.stats_log_fout.write("#num_good_bl_post_cumul =  no of good baselines after flagging\n")
-            self.stats_log_fout.write("#num_good_cells_post_cumul =  no of good cells after flagging\n")
-            self.stats_log_fout.write("#All quantities are averaged by the no of blocks seen. So to get the true cumulative value, multiply by the corresponding nblks\n")
-            self.stats_log_fout.close()
+        if self.flagging_stats_fout is not None:
+            self.flagging_stats_fout.write(f"#expected_blk_shape=({self.blk_shape}), num_fixed_good_chans = {self.fixed_freq_weights.sum()}\n")
+            self.flagging_stats_fout.write("#num_good_bl_pre_cumul =  no of good baselines before flagging\n")
+            self.flagging_stats_fout.write("#num_good_cells_pre_cumul =  no of good cells before flagging\n")
+            self.flagging_stats_fout.write("#num_good_bl_post_cumul =  no of good baselines after flagging\n")
+            self.flagging_stats_fout.write("#num_good_cells_post_cumul =  no of good cells after flagging\n")
+            self.flagging_stats_fout.write("#All quantities are averaged by the no of blocks seen. So to get the true cumulative value, multiply by the corresponding nblks\n")
+            self.flagging_stats_fout.close()
             
     @property
     def preflagging_stats(self):
