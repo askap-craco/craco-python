@@ -3,6 +3,62 @@
 from craco.datadirs import SchedDir, ScanDir
 from craco.metadatafile import MetadataFile
 from craco.candidate_manager import SBCandsManager
+import logging
+import os
+import subprocess
+import argparse
+
+log = logging.getLogger(__name__)
+logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log",
+                    format='[%(asctime)s] %(levelname)s: %(message)s',
+                    level=logging.DEBUG)
+stdout_handler = logging.StreamHandler(sys.stdout)
+log.addHandler(stdout_handler)
+
+
+def parse_scandir_env(path):
+    parts = path.strip().split("/")
+    if len(parts) > 0:
+        for ip, part in enumerate(parts):
+            if part.startswith("SB0"):
+                sbid = part
+                scanid = parts[ip + 2]
+                tstart = parts[ip + 3]
+                
+                if len(sbid) == 8 and len(scanid) == 2 and len(tstart) == 14:
+                    return sbid, scanid, tstart
+
+    raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
+
+
+def run_with_tsp():
+    log.info(f"Queuing up summarise scan")
+    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
+    TMPDIR = "/data/craco/craco/tmpdir"
+    environment = {
+        "TS_SOCKET": EOS_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""summarise_scan -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued summarise scan job - with command - {cmd}")
+
 
 class ObsInfo:
 
@@ -30,13 +86,7 @@ class ObsInfo:
         YM: implement calling of the candpipe from this function       
         from craco.cadpipe import Candpipe, get_parser() etc
         '''
-
-
-    def run_with_tsp(self):
-        '''
-        VG: implement a job that can be scheduled via TSP
-
-        '''
+        pass
 
 
     def get_candidates_info(self):
@@ -107,6 +157,38 @@ class ObsInfo:
                 Coordinates of sun
                 Guest science data requested (True/False)
         '''
-
-        
         pass
+
+
+    def post_slack_message(self):
+        '''
+        Compose a nice slack message using the self._dict and the plot
+                
+        '''
+
+    def run(self):
+        self.get_sbid_info()
+        self.get_observation_params()
+        self.get_candidates_info()
+        self.get_rfi_stats()
+        self.get_search_pipeline_params()
+        self.plot_candidates()
+        self.post_slack_message()
+
+def main(args):
+    obsinfo = ObsInfo(sbid = args.sbid,
+                      scanid = args.scanid,
+                      tstart = args.tstart)
+    obsinfo.run()
+
+
+
+
+if __name__ == '__main__':
+    a = argparse.ArgumentParser()
+    a.add_argument("-sbid", type=str, help="SBID", required=True)
+    a.add_argument("-scanid", type=str, help="scanid", required=True)
+    a.add_argument("-tstart", type=str, help="tstart", required=True)
+
+    args = a.parse_args()
+    main(args)
