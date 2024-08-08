@@ -94,6 +94,7 @@ class CardCapNetworkSource:
         cardno = 0
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
+        self.pipe_info = pipe_info
         self.skip_frames = 10*50 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
@@ -139,9 +140,9 @@ class CardCapNetworkSource:
         
         return self.fid0
 
-    def packet_iter(self):
+    def packet_iter(self, nframes):
         assert self.fid0 is not None, 'Havent called start'
-        iters = [frame_id_iter(cap.packet_iterator(), self.init_fid0) for cap in self.ctrl.ccap.fpga_cap]
+        iters = [frame_id_iter(cap.packet_iterator(65536), self.init_fid0, nframes) for cap in self.ctrl.ccap.fpga_cap]
         # We need to keep looping over all FPGAs otehrwise we just get stuck on one.
         # so all FPGAs start at the original planned start bat.
         # we loop through and only yield when all FPGAs have an FID >= the origianllly specified fid0

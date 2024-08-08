@@ -447,25 +447,31 @@ class FpgaCapturer:
 
         self.issue_requests()
 
-    def real_packet_iterator(self):
-        nblk = 0
-        while nblk < self.values.num_msgs:
+    def real_packet_iterator(self, nblk=None):
+        iblk = 0
+        if nblk is None:
+            nblk = self.values.num_msgs
+
+        while iblk < nblk:
             for fid, d in self.get_data(): # loop through completions
                 yield fid, d
-                nblk += 1
-                if nblk >= self.values.num_msgs:
+                iblk += 1
+                if iblk >= self.values.num_msgs:
                     break
 
             self.issue_requests()
 
-    def fake_packet_iterator(self):
-        nblk = 0
+    def fake_packet_iterator(self, nblk=None):
+        iblk = 0
         start_bat = 0
         sync_bat = 0
         sampint = self.ccap.hdr['SAMPINT'][0]
         pol_sum = self.ccap.hdr['POLSUM'][0]
         fid = get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint)
-        while nblk < self.values.num_msgs:
+        if nblk is None:
+            nblk = self.values.num_msgs
+
+        while iblk < nblk:
             block_index = 0
             message_index = 0
             d = self.rdma_buffers[block_index][message_index]
@@ -476,12 +482,13 @@ class FpgaCapturer:
             fid += NSAMP_PER_FRAME
             
             yield fid, d
+            iblk += 1
 
-    def packet_iterator(self):
+    def packet_iterator(self, nblk=None):
         if self.values.fake_cardcap_data:
-            it = self.fake_packet_iterator()
+            it = self.fake_packet_iterator(nblk=None)
         else:
-            it = self.real_packet_iterator()
+            it = self.real_packet_iterator(nblk=None)
 
         return it
             
