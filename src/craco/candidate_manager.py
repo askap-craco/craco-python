@@ -58,6 +58,7 @@ def load_cands(sbid, beam=None, runname="results"):
 
 def parse_candpath(fname):
     sections = fname.strip().split("/")
+    print(sections)
     assert sections[0] == "" and sections[1] == "CRACO" and sections[3] == "craco", f"Doesn't look like a correction path - {fname}"
     sbid = sections[4]
     scanid = sections[6]
@@ -68,7 +69,7 @@ def parse_candpath(fname):
         beamid = final_parts[1].strip("b")
         if len(final_parts) == 3:
             filetype = "raw"
-        elif len(final_parts) == 5:
+        elif len(final_parts) > 3:
             filetype = "clustered_" + final_parts[3]
 
     return sbid, scanid, tstart, beamid, filetype
@@ -103,9 +104,9 @@ class Candfile:
 
 
 class SBCandsManager:
-    def __init__(self, sbname):
+    def __init__(self, sbname, runname = "results"):
         self.sb = format_sbid(sbname)
-        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb)
+        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb, runname=runname)
         self._candfile_paths = self._raw_candfile_paths + \
                                 self._clustered_raw_candfile_paths +\
                                 self._clustered_rfi_candfile_paths + \
@@ -136,6 +137,7 @@ class SBCandsManager:
                 self.clustered_uniq_candfiles.append(cf)
             if f in self._clustered_inj_candfile_paths:
                 cf = Candfile(f)
+                self.clustered_inj_candfiles.append(cf)
 
             self.all_candfiles.append(cf)
 
