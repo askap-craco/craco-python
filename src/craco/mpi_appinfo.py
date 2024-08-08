@@ -422,6 +422,18 @@ class MpiPipelineInfo:
                                                        process_labels=self.mpi_app.proc_labels,
                                                        process_sort_index=self.world_rank)
 
+        # calculate number of beamformer frame and number of search frames to process
+        nframe = values.num_msgs # this can be an arbitrary number. From the command line. Should last about 110ms x this number
+        nint_per_frame = 2048//(values.samples_per_integration*values.vis_tscrunch)
+        total_nint = nint_per_frame*nframe
+        nint_per_search = 256
+        requested_nsearch = total_nint // nint_per_search
+        requested_nframe = requested_nsearch*nint_per_search // nint_per_frame
+        log.info('Requested %d frames = %d integrations. Will do %d search blocks which is only %d beamformer frames', 
+                 nframe, total_nint, requested_nsearch, requested_nframe)
+        self.requested_nsearch = requested_nsearch
+        self.requested_nframe = requested_nframe               
+
 
     def add_rank(self, rankinfo):
         self.all_ranks[rankinfo.rank] = rankinfo
@@ -483,6 +495,8 @@ class MpiPipelineInfo:
     @property
     def cardid(self):
         return self.mpi_app.cardid
+
+    
 
 
 def _main():
