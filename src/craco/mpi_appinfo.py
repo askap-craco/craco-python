@@ -217,15 +217,15 @@ class MpiAppInfo:
         return c
 
 
-class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slot','core','block','card','fpga'])):
+class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slot','core','block','card','fpga', 'net_dev'])):
     APP_ID = MpiAppInfo.RX_APPNUM
     @property
     def rank_file_str(self):
-        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga}'
+        s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga} on {self.net_dev}'
         return s
     
     def __str__(self):
-        return f"Rx {self.block}/{self.card}/{self.fpga}"
+        return f"Rx {self.block}/{self.card}/{self.fpga} on {self.net_dev}"
 
     @property
     def labels(self):
@@ -311,6 +311,9 @@ def populate_ranks(pipe_info, total_cards):
     cardno = 0
     ncores_per_socket = 16
     nslots_per_host = 2
+    
+    # dev mlx5_0 is on socket 0, and mlx5_2 is on socket 1
+    net_devices = values.devices.split(',')
 
     for block in values.block:
         for card in values.card:
@@ -322,19 +325,24 @@ def populate_ranks(pipe_info, total_cards):
                 hostrank = rxrank % nrx_per_host                
                 host = hosts[hostidx]
                 ncores_per_proc = 1
-                slot = (hostrank // nslots_per_host) % nslots_per_host
+                net_dev_idx = cardno % len(net_devices) # this is the same logic as cardcap.py - ideally we'd pass it down.
+                net_dev = net_devices[net_dev_idx]
+                slot = net_dev_idx # dev 0 is on slot 0 and dev1 is on slot 1
                 icore = hostrank % nslots_per_host
                 #icore = (slotrank*ncores_per_proc) % ncores_per_socket 
                 #core='0-9'
                 core = f'{icore}-{icore+ncores_per_proc-1}'
-                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga)
+                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga, net_dev)
                 pipe_info.add_rank(rank_info)
                 rank += 1
                 rxrank += 1
 
     host_search_beams = {}
-    devices = (0,1)
-    host_cards = parse_host_devices(hosts, values.dead_cards, devices)
+    # device 0,1 are on socket 0. Device 2,3 are on socket 1.
+    # see https://jira.csiro.au/browse/CRACO-305 for deatils.
+
+    xrt_devices = (0,2) 
+    host_cards = parse_host_devices(hosts, values.dead_cards, xrt_devices)
 
     pipe_info.add_rank(CandMgrRankInfo(rank, 'skadi-00', slot, core))
     rank += 1
@@ -343,9 +351,7 @@ def populate_ranks(pipe_info, total_cards):
         hostidx = beam % len(hosts)
         assert hostidx < len(hosts), f'Invalid hostidx beam={beam} hostidx={hostidx} lenhosts={len(hosts)}'
         host = hosts[hostidx]
-        nslots = 2
-        slot = beam % nslots  # put on the U280 slot. If you put in slot1 it runs about 20% 
-        devices = host_cards[host]
+        xrt_devices = host_cards[host]
         this_host_search_beams = host_search_beams.get(host,[])
         host_search_beams[host] = this_host_search_beams
         if beam in values.search_beams:
@@ -353,11 +359,19 @@ def populate_ranks(pipe_info, total_cards):
             
         devid = None
         if beam in this_host_search_beams:
-            devid = this_host_search_beams.index(beam)
-            if devid not in devices:
-                devid = None
+            devindex = this_host_search_beams.index(beam)            
+            devid = xrt_devices[devindex] if devindex < len(xrt_devices) else None
 
-        log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, devices, host, this_host_search_beams)
+        # dev 0,1 on slot 0. dev 2,3 on slot 1. 
+        if devid in (0,1):
+            slot = 0
+        elif devid in (2,3):
+            slot = 1
+        else:
+            slot = 0 # just put it there for now.
+
+
+        log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, xrt_devices, host, this_host_search_beams)
         pipe_info.add_rank(BeamTranRankInfo(beam, rank, host, slot, core='13'))
         rank += 1
         pipe_info.add_rank(BeamProcRankInfo(beam, rank, host, slot, core='9-12', xrt_device_id=devid)) # extra cores for prepare step multi-threading
@@ -417,10 +431,12 @@ class MpiPipelineInfo:
         self.world_rank = world.Get_rank()
         populate_ranks(self, ncards)      
 
+        log.info('My app info for rank %d/%d is %s', self.world_rank, world.Get_size(), self.my_rank_info)
         self.mpi_app = MpiAppInfo(self, values.proc_type)
         MpiTracefile.instance().add_metadata(process_name=self.mpi_app.proc_name,
                                                        process_labels=self.mpi_app.proc_labels,
                                                        process_sort_index=self.world_rank)
+                
 
         # calculate number of beamformer frame and number of search frames to process
         nframe = values.num_msgs # this can be an arbitrary number. From the command line. Should last about 110ms x this number
@@ -437,6 +453,10 @@ class MpiPipelineInfo:
 
     def add_rank(self, rankinfo):
         self.all_ranks[rankinfo.rank] = rankinfo
+
+    @property
+    def my_rank_info(self):
+        return self.all_ranks[self.world_rank]
 
     def get_ranks_for_app(self, appid):
         return list(filter(lambda r:r.APP_ID == appid, self.all_ranks.values()))
