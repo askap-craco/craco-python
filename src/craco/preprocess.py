@@ -1067,6 +1067,7 @@ class FastPreprocess:
 
         out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\n"
         self.flagging_stats_fout.write(out_str)
+        self.flagging_stats_fout.flush()
 
     def close(self):
         if self.flagging_stats_fout is not None:
@@ -1203,6 +1204,8 @@ class FastPreprocess:
 
         self.update_postflagging_statistics(input_tf_weights, bl_weights)
         self.num_nblks += 1
+
+        self.log_flagging_stats()
 
         fast_preprocess_sos(input_data=input_data,
                             bl_weights=bl_weights,
