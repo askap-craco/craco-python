@@ -674,7 +674,7 @@ def proc_rx_run(proc):
     transposer = proc.transposer
     cardidx = proc.pipe_info.mpi_app.cardid
     
-    pktiter = ccap.packet_iter()
+    pktiter = ccap.packet_iter(proc.pipe_info.requested_nframe)
 
     # receive dummy value and discard??
     packets, fids = next(pktiter)
@@ -862,7 +862,7 @@ def transpose_beam_run(proc):
 
 
     try:
-        while True:
+       for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
             beam_data = transposer.recv()
             if iblk == 0:
@@ -892,7 +892,6 @@ def transpose_beam_run(proc):
             if t.total.perf > 0.120 and iblk > 0:
                 log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
 
-            iblk += 1
 
 
 
@@ -966,7 +965,7 @@ def proc_beam_run(proc):
     
 
     try:
-        while True:
+        for iblk in range(pipe_info.requested_nsearch):
             t = Timer(args={'iblk':iblk})
             # recieve from transposer rank
             beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
@@ -1010,8 +1009,8 @@ def proc_beam_run(proc):
 
     finally:
         print(f'Closing beam files for {beamid}')
+        beam_comm.send(-1, dest=planner_rank) # Tell planner to quit
         pipeline_sink.close()
-
 
 
 class Processor:
@@ -1097,6 +1096,8 @@ class PlannerProcessor(Processor):
             t = Timer(args={'iblk':iblk})
             req_iblk = comm.recv(source=app.BEAMPROC_RANK)
             t.tick('recv')
+            if req_iblk == -1:
+                break
             assert iblk == req_iblk, f'My count of iblk={iblk} but requested was {req_iblk}'        
             adapter = VisInfoAdapter(self.obs_info, iblk)
             t.tick('adapter')
@@ -1177,7 +1178,7 @@ class BeamCandProcessor(Processor):
         # make request for next wcs data
         wcs_req = rx_comm.irecv(source=app.PLANNER_RANK)
 
-        while True:
+        for my_iblk in range(self.pipe_info.requested_nsearch):
             # async receive as we want to async transmit so the pipeeline
             # isn't slowed by the beam cand processor       
             t = Timer(args={'iblk':self.iblk})
@@ -1250,7 +1251,7 @@ class CandMgrProcessor(Processor):
         from craco.craco_run.auto_sched import SlackPostManager
 
         self.slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
-        while True:
+        for iblk in range(self.pipe_info.requested_nsearch):
             t = Timer(args={'iblk':iblk})
             valid_cands = cands.gather()
             t.tick('Gather')
@@ -1258,7 +1259,6 @@ class CandMgrProcessor(Processor):
                 self.multi_beam_process(valid_cands)
 
             t.tick('Multi process')
-            iblk += 1
 
     def multi_beam_process(self, valid_cands):
         '''
