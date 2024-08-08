@@ -41,7 +41,7 @@ def empty_iter(fid0):
         yield (fid, None)
         fid += fidoff
 
-def frame_id_iter(i, fid0):
+def frame_id_iter(i, fid0, maxnframes=None):
     '''
     Generator that yields blocks of data
     It will yield a block with the given frame id startign at fid0 and incrementing
@@ -57,7 +57,12 @@ def frame_id_iter(i, fid0):
     last_bat = 0
     curr_frameid = np.uint64(0)
     trace_file =  MpiTracefile.instance()
+    nframes = 0
     while True:
+        if maxnframes is not None and nframes >= maxnframes:
+            log.info('Finished %s frames. Quitting', maxnframes)
+            break
+
         if curr_frameid < expected_frame_id:
             try:
                 curr_frameid, currblock = next(i)
@@ -99,6 +104,7 @@ def frame_id_iter(i, fid0):
         
         last_frameid = curr_frameid
         last_bat = curr_bat
+        nframes += 1
 
 
 def make_iterator(ccap, beam, start_fid):

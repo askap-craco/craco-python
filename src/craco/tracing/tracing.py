@@ -204,6 +204,9 @@ class Tracefile:
         ts = int(time.clock_gettime_ns(time.CLOCK_TAI)//1000)
         return ts
 
+    def flush(self):
+        self.fout.flush()
+
     def append(self, d):
         s = json.dumps(d, cls=TrivialEncoder)
         fout = self.fout
@@ -212,6 +215,7 @@ class Tracefile:
             
         fout.write(s)
         self._nevents += 1
+        #fout.flush()
 
         return self
 
