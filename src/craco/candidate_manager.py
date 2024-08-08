@@ -76,16 +76,18 @@ def parse_candpath(fname):
 
 
 class Candfile:
-    def __init__(self, candfile, raw = False):
+    def __init__(self, candfile):
         self.fname = candfile
-        if raw:
+        self.sbid, self.scanid, self.tstart, self.beamid, self.type = parse_candpath(self.fname)
+        if self.type == "raw":
             self.sep = "\t"
             self.skipfooter = 1
         else:
             self.sep = ","
             self.skipfooter = 0
+        
         self.cands = parse_candfile(self.fname, sep=self.sep, skipfooter=self.skipfooter)
-        self.sbid, self.scanid, self.tstart, self.beamid, self.type = parse_candpath(self.fname)
+        
 
 
     def __str__(self):
