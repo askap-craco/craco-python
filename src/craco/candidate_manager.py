@@ -102,6 +102,10 @@ class Candfile:
     @property
     def header(self):
         return list(self.cands.keys())
+
+    @property
+    def nclusters(self):
+        return self.cands['cluster_id'].nunique()
         
 
 
