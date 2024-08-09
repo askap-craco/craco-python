@@ -656,6 +656,7 @@ def proc_rx_get_fid0(proc):
 
     # Do dummy transpose to warm up and make connections
     transposer.send(averager.output)
+    log.info('Transpose warmup complete')
 
     proc.transposer = transposer
     proc.averager = averager
@@ -679,6 +680,7 @@ def proc_rx_run(proc):
     # receive dummy value and discard??
     packets, fids = next(pktiter)
     averaged = averager.accumulate_packets(packets)
+    log.info('Recieved dummy packet')
  
     best_avg_time = 1e6
     
@@ -687,6 +689,8 @@ def proc_rx_run(proc):
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         timer.tick('read')
+        if ibuf == 0:
+            log.info('Received ibuf 0')
         
         expected_fid = info.fid_of_block(ibuf) 
 
