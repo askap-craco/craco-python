@@ -159,6 +159,121 @@ def get_metadata_info(scan):
     return None
 
 
+def get_num_candidates(candfiles, snr=None):
+    '''
+    Get number of candidates 
+
+    Arguments
+    ---------
+    candfiles: list
+        a list of Candfile() object 
+    snr: float or None
+        snr lower limit, return all candidates if None
+        return number of candidates brighter than this value if float 
+
+    Returns
+    -------
+    num_cands: int
+        total number of candidates for the whole list 
+    num_cands_per_beam: dict 
+        number of candidates for each beam/Candfile() with beamid as keys 
+    '''
+    num_cands = 0
+    num_cands_per_beam = {}
+
+    for candfile in candfiles:
+        if snr is None:
+            num_cands += candfile.ncands
+            num_cands_per_beam[candfile.beamid] = candfile.ncands
+        else:
+            try:
+                ncands = sum( candfile.cands['snr'] >= snr )
+            except KeyError:
+                ncands = sum( candfile.cands['SNR'] >= snr )
+            num_cands += ncands
+            num_cands_per_beam[candfile.beamid] = ncands
+            
+    return num_cands, num_cands_per_beam
+
+
+def get_num_clusters(candfiles, snr=None):
+    '''
+    Get number of clusters for candfiles 
+
+    Arguments
+    ---------
+    candfiles: list
+        a list of Candfile() object 
+    snr: float or None
+        snr lower limit, return all candidates if None
+        return number of candidates brighter than this value if float 
+
+    Returns
+    -------
+    num_clusters: int
+        total number of clusters for the whole Candfile() list 
+    num_clusters_per_beam: dict 
+        number of clusters for each beam/Candfile() with beamid as keys 
+    '''
+    num_clusters = 0
+    num_clusters_per_beam = {}
+
+    for candfile in candfiles:
+        if snr is None:
+            num_clusters += candfile.nclusters
+            num_clusters_per_beam[candfile.beamid] = candfile.nclusters
+        else:
+            try:
+                cands = candfile.cands[ candfile.cands['snr'] >= snr ]
+            except KeyError:
+                cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
+            nclusters = cands['cluster_id'].nunique()
+            num_clusters += nclusters
+            num_clusters_per_beam[candfile.beamid] = nclusters
+            
+    return num_clusters, num_clusters_per_beam
+
+
+def get_num_classified_candidates(candfiles, snr=None):
+    '''
+    Get a list of candidates names for a specific class (label)
+
+    Arguments
+    ---------
+    candfiles: list
+        a list of Candfile() object, clustered_uniq_candfile (with labels)
+    snr: float or None
+        snr lower limit, return all candidates if None
+        return candidates brighter than this value if float 
+
+    Returns
+    -------
+    num_classified_cands: dict
+        number of classified candidates for each category/label  
+    num_classified_cands_per_beam: dict
+        number of classified candidates for each category/label per beam (with beamid as keys) 
+    '''
+    num_classified_cands = defaultdict(int)
+    num_classified_cands_per_beam = {}
+    
+    for candfile in candfiles:
+        if snr is None:
+            cands = candfile.cands
+        else:
+            try:
+                cands = candfile.cands[ candfile.cands['snr'] >= snr ]
+            except KeyError:
+                cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
+
+        value_counts = cands['LABEL'].value_counts()
+        num_classified_cands_per_beam[candfile.beamid] = value_counts.to_dict()
+        for key, count in value_counts.items():
+            num_classified_cands[key] += count
+        
+    return dict(num_classified_cands), num_classified_cands_per_beam
+
+
+
 class ObsInfo:
 
     def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results'):
@@ -190,40 +305,97 @@ class ObsInfo:
         '''
         pass
 
-    def _get_num_candidates(self, candfiles, snr=None):
-        num_cands = 0
-        num_cands_per_beam = {}
+    def _form_url(self, cands, beamid):
+        '''
+        example url:
+        http://localhost:8024/candidate?
+        sbid=64401
+        &beam=17
+        &scan=00
+        &tstart=20240805162545
+        &runname=results
+        &dm=46.16743469238281
+        &boxcwidth=1
+        &lpix=182
+        &mpix=167
+        &totalsample=11090
+        &ra=268.24566650390625
+        &dec=-28.110868453979492
+        
+        General urls based on candidates 
 
+        Arguments
+        ---------
+        cands: pandas.DataFrame
+            a pandas table of candidates that needs to general url 
+
+        Returns
+        -------
+        urls: list
+            a list of urls based on input 
+        '''
+        urls = 'http://localhost:8024/candidate?' + \
+                'sbid=' + format_sbid(self.sbid, padding=False, prefix=False) + \
+                '&beam=' + str(beamid) + \
+                '&scan=' + str(self.scanid) + \
+                '&tstart=' + str(self.tstart) + \
+                '&runname=' + str(self.runname) + \
+                '&dm=' + cands['dm_pccm3'].astype(str) + \
+                '&boxcwidth=' + cands['boxc_width'].astype(str) + \
+                '&lpix=' + cands['lpix'].astype(str) + \
+                '&mpix=' + cands['mpix'].astype(str) + \
+                '&totalsample=' + cands['total_sample'].astype(str) + \
+                '&ra=' + cands['ra_deg'].astype(str) + \
+                '&dec=' + cands['dec_deg'].astype(str) 
+
+        return urls.tolist()
+
+
+    def _get_classified_candidates(self, candfiles, label='PSR', snr=None):
+        '''
+        Get a list of candidates names for a specific class (label)
+
+        Arguments
+        ---------
+        candfiles: list
+            a list of Candfile() object, clustered_uniq_candfile (with labels)
+        snr: float or None
+            snr lower limit, return all candidates if None
+            return candidates brighter than this value if float 
+        label: str
+            classification name, will return candidates matches this label 
+            can be PSR, CUSTOM, RACS, UNKNOWN 
+
+        Returns
+        -------
+        classified_cands: list
+            a list of unique classified (crossmatched) names  
+        classified_cands_per_beam: dict
+            a list of unique classified (crossmatched) names for each beam with beamid as keys 
+        '''
+        classified_cands = []
+        classified_cands_per_beam = {}
+        
         for candfile in candfiles:
             if snr is None:
-                num_cands += candfile.ncands
-                num_cands_per_beam[candfile.beamid] = candfile.ncands
+                cands = candfile.cands
             else:
                 try:
-                    ncands = sum( candfile.cands['snr'] >= snr )
+                    cands = candfile.cands[ candfile.cands['snr'] >= snr ]
                 except KeyError:
-                    ncands = sum( candfile.cands['SNR'] >= snr )
-                num_cands += ncands
-                num_cands_per_beam[candfile.beamid] = ncands
-                
-        return num_cands, num_cands_per_beam
+                    cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
 
-    
-    def _get_classified_candidates(self, candfiles, label='PSR', snr=None):
-        pulsar_cands = []
-        pulsar_cands_per_beam = {}
-        
-        for clustered_uniq_candfile in self.cands_manager.clustered_uniq_candfiles:
-            if snr is None:
-                cands = clustered_uniq_candfile.cands
+            classified_rows = cands[ cands['LABEL'] == label ]
+            if label != 'UNKNOWN':
+                # return crossmatched names for known objects 
+                classified_cands_per_beam[candfile.beamid] = classified_rows['MATCH_name'].unique().tolist()
+                classified_cands += classified_rows['MATCH_name'].unique().tolist()
             else:
-                cands = clustered_uniq_candfile.cands[ clustered_uniq_candfile.cands['snr'] >= snr ]
-
-            psr_rows = cands[ cands['LABEL'] == label ]
-            pulsar_cands_per_beam[clustered_uniq_candfile.beamid] = psr_rows['MATCH_name'].unique().tolist()
-            pulsar_cands += psr_rows['MATCH_name'].unique().tolist()
+                # return a list of urls for unknown candidates 
+                classified_cands_per_beam[candfile.beamid] = self._form_url(classified_rows, candfile.beamid)
+                classified_cands += self._form_url(classified_rows, candfile.beamid)
             
-        return list(set(pulsar_cands)), pulsar_cands_per_beam
+        return list(set(classified_cands)), classified_cands_per_beam
         
 
     def get_candidates_info(self, snr=9):
@@ -241,56 +413,56 @@ class ObsInfo:
         Add all these values to the self._dict
         '''
         candidates_info = {}
+
         # total number of raw candidates (and in each beam)
-        num_raw_cands, num_raw_cands_per_beam   = self._get_num_candidates(self.cands_manager.raw_candfiles)
+        num_raw_cands, num_raw_cands_per_beam   = get_num_candidates(self.cands_manager.raw_candfiles)
         candidates_info['num_raw_cands']             = num_raw_cands
         candidates_info['num_raw_cands_per_beam']    = num_raw_cands_per_beam
 
         # total number of bright raw candidates (and in each beam)
-        num_raw_cands_bright, num_raw_cands_bright_per_beam = self._get_num_candidates(self.cands_manager.raw_candfiles, snr=snr)
+        num_raw_cands_bright, num_raw_cands_bright_per_beam = get_num_candidates(self.cands_manager.raw_candfiles, snr=snr)
         candidates_info['num_raw_cands_bright']          = num_raw_cands_bright
         candidates_info['num_raw_cands_bright_per_beam'] = num_raw_cands_bright_per_beam
 
         # total number of clustered unique candidates (and in each beam)
-        num_clustered_uniq_cands, num_clustered_uniq_cands_per_beam = self._get_num_candidates(self.cands_manager.clustered_uniq_candfiles)
+        num_clustered_uniq_cands, num_clustered_uniq_cands_per_beam = get_num_candidates(self.cands_manager.clustered_uniq_candfiles)
         candidates_info['num_clustered_uniq_cands']          = num_clustered_uniq_cands
         candidates_info['num_clustered_uniq_cands_per_beam'] = num_clustered_uniq_cands_per_beam
 
         # total number of bright clustered unique candidates (and in each beam)
-        num_clustered_uniq_cands_bright, num_clustered_uniq_cands_bright_per_beam = self._get_num_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
+        num_clustered_uniq_cands_bright, num_clustered_uniq_cands_bright_per_beam = get_num_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
         candidates_info['num_clustered_uniq_cands_bright']          = num_clustered_uniq_cands_bright
         candidates_info['num_clustered_uniq_cands_bright_per_beam'] = num_clustered_uniq_cands_bright_per_beam
 
         # total number of clustered unique candidates (and in each beam)
-        num_clustered_rfi_cands, num_clustered_rfi_cands_per_beam = self._get_num_candidates(self.cands_manager.clustered_rfi_candfiles)
+        num_clustered_rfi_cands, num_clustered_rfi_cands_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles)
         candidates_info['num_clustered_rfi_cands']          = num_clustered_rfi_cands
         candidates_info['num_clustered_rfi_cands_per_beam'] = num_clustered_rfi_cands_per_beam
 
         # total number of bright clustered unique candidates (and in each beam)
-        num_clustered_rfi_cands_bright, num_clustered_rfi_cands_bright_per_beam = self._get_num_candidates(self.cands_manager.clustered_rfi_candfiles, snr=snr)
+        num_clustered_rfi_cands_bright, num_clustered_rfi_cands_bright_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles, snr=snr)
         candidates_info['num_clustered_rfi_cands_bright']          = num_clustered_rfi_cands_bright
         candidates_info['num_clustered_rfi_cands_bright_per_beam'] = num_clustered_rfi_cands_bright_per_beam
 
         # total number of clustered candidates (and in each beam) 
-        num_clustered_cands = 0
-        num_clustered_cands_per_beam = {}
-        for clustered_raw_candfile in self.cands_manager.clustered_raw_candfiles:
-            num_clustered_cands += clustered_raw_candfile.nclusters
-            num_clustered_cands_per_beam[clustered_raw_candfile.beamid] = clustered_raw_candfile.nclusters
+        num_clustered_cands, num_clustered_cands_per_beam = get_num_clusters(self.cands_manager.clustered_raw_candfiles)
         candidates_info['num_clustered_cands']          = num_clustered_cands
         candidates_info['num_clustered_cands_per_beam'] = num_clustered_cands_per_beam
 
+        # total number of bright clustered candidates (and in each beam) 
+        num_clustered_cands_bright, num_clustered_cands_bright_per_beam = get_num_clusters(self.cands_manager.clustered_raw_candfiles, snr=snr)
+        candidates_info['num_clustered_cands_bright']          = num_clustered_cands_bright
+        candidates_info['num_clustered_cands_bright_per_beam'] = num_clustered_cands_bright_per_beam
+
         # total number of candidates for each classification 
-        num_classified_cands = defaultdict(int)
-        num_classified_cands_per_beam = {}
-        for clustered_uniq_candfile in self.cands_manager.clustered_uniq_candfiles:
-            value_counts = clustered_uniq_candfile.cands['LABEL'].value_counts()
-            num_classified_cands_per_beam[clustered_uniq_candfile.beamid] = value_counts.to_dict()
-            for key, count in value_counts.items():
-                num_classified_cands[key] += count
-            
-        candidates_info['num_classified_cands'] = dict(num_classified_cands)
+        num_classified_cands, num_classified_cands_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles)
+        candidates_info['num_classified_cands'] = num_classified_cands
         candidates_info['num_classified_cands_per_beam'] = num_classified_cands_per_beam
+
+        # total number of bright candidates for each classification 
+        num_classified_cands_bright, num_classified_cands_bright_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
+        candidates_info['num_classified_cands_bright'] = num_classified_cands_bright
+        candidates_info['num_classified_cands_bright_per_beam'] = num_classified_cands_bright_per_beam
 
         # total of PSR (names) detected in obs 
         pulsar_cands, pulsar_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='PSR')
@@ -311,8 +483,17 @@ class ObsInfo:
         custom_cands_bright, custom_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='CUSTOM', snr=snr)
         candidates_info['custom_cands_bright'] = custom_cands_bright
         candidates_info['custom_cands_bright_per_beam'] = custom_cands_bright_per_beam
+
+        # total of UNKNOWN sources (urls)
+        unknown_cands, unknown_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='UNKNOWN')
+        candidates_info['unknown_cands'] = unknown_cands 
+        candidates_info['unknown_cands_per_beam'] = unknown_cands_per_beam
+
+        # total of bright UNKNOWN sources (urls)
+        unknown_cands_bright, unknown_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='UNKNOWN', snr=snr)
+        candidates_info['unknown_cands_bright'] = unknown_cands_bright
+        candidates_info['unknown_cands_bright_per_beam'] = unknown_cands_bright_per_beam
             
-        
         self._dict['candidates_info'] = candidates_info
         pass
 
