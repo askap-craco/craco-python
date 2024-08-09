@@ -865,6 +865,7 @@ def transpose_beam_run(proc):
     beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
 
 
+    vis_accum_send_req = None
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
@@ -882,13 +883,23 @@ def transpose_beam_run(proc):
             t.tick('visblock')
             vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
             t.tick('visfile')
+            # We have to complete teh send request before writing to the vis_accum
+            if vis_accum_send_req is not None:
+                req_finished, _ = vis_accum_send_req.test()
+                t.tick('Send req test')
+                if req_finished:
+                    vis_accum.reset()
+                    t.tick('vis reset')
+                    vis_accum_send_req = None
+                else:
+                    raise RuntimeError(f'VisAccum isend for blk {iblk-1} not complete. It should be done! finished={freq_finished}')
+
             vis_accum.write(vis_block_complex)
             t.tick('accumulate')
             if vis_accum.is_full:
-                beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
-                t.tick('Send')
-                vis_accum.reset()
-                t.tick('vis reset')
+                # Send asynchronously. It should finish by the time we get the next frame.
+                vis_accum_send_req = beam_comm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
+                t.tick('Isend')
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
