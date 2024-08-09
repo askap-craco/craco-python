@@ -1069,7 +1069,7 @@ class FastPreprocess:
         bad_cells_pre = self.num_bad_cells_pre_current
         bad_cells_post = self.num_bad_cells_post_current
 
-        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\t{bad_cells_pre:g}\t{bad_cells_post:g}\t{self.blk_shape}\t{self.total_num_cells:g}\t{self.num_fixed_good_chans:g}\n"
+        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\t{bad_cells_pre:g}\t{bad_cells_post:g}\t{self.blk_shape}\t{self.total_num_cells:.2f}\t{self.num_fixed_good_chans:g}\n"
         self.flagging_stats_fout.write(out_str)
         self.flagging_stats_fout.flush()
 
