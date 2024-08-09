@@ -51,6 +51,7 @@ class MpiTracefile:
         entry.pid = self.rank               
         self.__tracefile.append(entry)
         # OMG - I got so burnt with returning __tracefile. How insane.
+        self.__tracefile.flush() # I think we need this to chase up some nasty lockup problems.
         return self
     
     append = __iadd__
