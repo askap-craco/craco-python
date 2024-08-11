@@ -11,6 +11,8 @@ import argparse
 import numpy as np
 import sys
 from collections import defaultdict
+import glob
+import traceback
 
 log = logging.getLogger(__name__)
 logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log",
@@ -288,22 +290,47 @@ class ObsInfo:
         '''
         self.scandir = ScanDir(sbid, f"{scanid}/{tstart}")
         self.sbid = format_sbid(self.scandir.scheddir.sbid, padding=True, prefix=True)
-        self.scanid = self.scandir.scan
+        self.scan = self.scandir.scan
+        self.scanid = scanid 
         self.tstart = tstart
         self.runname = runname
         self.tstart = tstart
 
         self.cands_manager = SBCandsManager(self.sbid, runname=self.runname)
 
-        self.filterbank_stats = read_filterbank_stats()
+        # self.filterbank_stats = read_filterbank_stats()
         self._dict = {}
+
 
     def run_candpipe(self):
         '''
         YM: implement calling of the candpipe from this function       
         from craco.cadpipe import Candpipe, get_parser() etc
         '''
+        from craco.candpipe import candpipe
+
+        for scandir in self.scandir.scan_data_dirs:
+            candout_dir = os.path.join(scandir, 'results/clustering_output')
+            rundir = os.path.join(scandir, 'results')
+            cand_fnames = glob.glob(os.path.join(rundir, 'candidates.*.txt'))
+            log.debug('candidate output dir %s', candout_dir)
+            os.makedirs(candout_dir, exist_ok=True)
+
+            candpipe_args = candpipe.get_parser().parse_args(['-s', '--save-rfi', '-o', candout_dir])
+            config = candpipe.load_default_config()
+            log.debug('candpipe_args %s', candpipe_args)
+
+            for cand_fname in cand_fnames:
+                try:
+                    log.info('run candpipe for %s', cand_fname)
+                    pipe = candpipe.Pipeline(cand_fname, candpipe_args, config, src_dir=rundir, anti_alias=True)
+                    pipe.run()
+                except:
+                    log.error(traceback.format_exc())
+                    log.error(f"failed to run candpipe on {cand_fname}... aborted...")
+                
         pass
+
 
     def _form_url(self, cands, beamid):
         '''
