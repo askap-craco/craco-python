@@ -70,9 +70,10 @@ class Step(ProcessingStep):
 
         # save the raw uncluster file - intermediate products
         if self.pipeline.args.save_intermediate:
-            cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
-            log.info('Saving raw candfile with cluster id to file %s.rawcat.csv', cand_fname)
-            uncluster.to_csv(cand_fname + ".rawcat.csv")
+            # cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname)
+            outname = os.path.join(self.pipeline.args.outdir, f"candidates.b{self.pipeline.beamno:02d}.rawcat.csv")
+            log.info('Saving raw candfile with cluster id to file %s', outname)
+            uncluster.to_csv(outname)
         
         return uncluster
 

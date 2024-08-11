@@ -260,6 +260,7 @@ class Pipeline:
 
     def check_psf_fmt_exists(self, ):
         psf_fnamelist = [
+            f'results/psf.beam{self.beamno:02d}.iblk0.fits', 
             f'psf.beam{self.beamno:02d}.iblk0.fits', 
             
             f'results/beam{self.beamno:02d}/plans/plan_iblk0.pkl', 
@@ -271,9 +272,10 @@ class Pipeline:
             f'../plan_b{self.beamno:02d}_iblk0.pkl', 
         ]
         for fname in psf_fnamelist:
-            if os.path.isfile( self.get_file(fname) ):
+            full_path_fname = self.get_file(fname)
+            if os.path.isfile( full_path_fname ):
                 log.info('psf format %s', fname)
-                self.psf_fname = fname
+                self.psf_fname = full_path_fname
                 return True
 
         log.info('Do not find psf files')
@@ -325,8 +327,8 @@ class Pipeline:
         self.create_dir()
         cand_out = self.process_block(cand_in)
         log.info('Produced %s candidates in total', len(cand_out))
-        fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
-        log.info('Saving final candidates to %s', fout)
+        # fout = os.path.join(self.args.outdir, self.cand_fname+'.uniq.csv')
+        fout = os.path.join(self.args.outdir, f"candidates.b{self.beamno:02d}.uniq.csv")
         cand_out.to_csv(fout)
         log.debug('Saved final candidates to %s', fout)
 

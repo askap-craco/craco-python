@@ -161,9 +161,10 @@ class Step(ProcessingStep):
 
         # save sidelobes 
         if self.pipeline.args.save_rfi:
-            cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname + '.sidelobes.csv')
-            log.info('Saving sidelobes to file %s', cand_fname)
-            sidelobes.to_csv(cand_fname)
+            # cand_fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname + '.sidelobes.csv')
+            outname = os.path.join(self.pipeline.args.outdir, f"candidates.b{self.pipeline.beamno:02d}.sidelobes.csv")
+            log.info('Saving sidelobes to file %s', outname)
+            sidelobes.to_csv(outname)
 
         return candidates 
 
@@ -269,9 +270,10 @@ class Step(ProcessingStep):
             # for all non-candidates, put them into rfi dataframe and do further classification 
             candidates_rfi = candidates[~cand_ind_fin]
             candidates_rfi = self.classify_rfi(candidates_rfi)
-            fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname + '.rfi.csv')
-            log.info('Saving selected rfi to file %s', fname)
-            candidates_rfi.to_csv(fname)
+            # fname = os.path.join(self.pipeline.args.outdir, self.pipeline.cand_fname + '.rfi.csv')
+            outname = os.path.join(self.pipeline.args.outdir, f"candidates.b{self.pipeline.beamno:02d}.rfi.csv")
+            log.info('Saving selected rfi to file %s', outname)
+            candidates_rfi.to_csv(outname)
 
         # final candidates
         candidates_fin = candidates[cand_ind_fin]
