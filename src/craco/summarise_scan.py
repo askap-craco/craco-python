@@ -959,9 +959,9 @@ class ObsInfo:
         msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
         msg += f"- Sampling time: {self.filtered_obs_info['sampling_time_ms']:.3f} ms\n"
         msg += f"- Guest science obs?: {self.filtered_obs_info['guest_science_proposal']}\n"
-        msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms']}, {self.filtered_obs_info['coords_dec_dms']}\n"
-        msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg']:.5f}, {self.filtered_obs_info['coords_dec_deg']:.5f}\n"
-        msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg']:.5f}, {self.filtered_obs_info['coords_gb_deg']:.5f}\n"
+        msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms_beam00']}, {self.filtered_obs_info['coords_dec_dms_beam00']}\n"
+        msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg_beam00']:.5f}, {self.filtered_obs_info['coords_dec_deg_beam00']:.5f}\n"
+        msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg_beam00']:.5f}, {self.filtered_obs_info['coords_gb_deg_beam00']:.5f}\n"
         msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg"
 
         msg += "----------------\n"
