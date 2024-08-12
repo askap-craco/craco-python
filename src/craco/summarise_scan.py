@@ -290,9 +290,9 @@ def read_plan_info(scandir):
 
             wcsinfo = {}
             wcsinfo['coords_ra_deg'] = plan0.ra.deg
-            wcsinfo['coords_ra_hms'] = plan0.ra.to_string(sep=":", precision=2)
+            wcsinfo['coords_ra_hms'] = ra_to_hms(plan0.ra.deg)
             wcsinfo['coords_dec_deg'] = plan0.dec.deg
-            wcsinfo['coords_dec_dms'] = plan0.dec.to_string(sep=":", precision=2)
+            wcsinfo['coords_dec_dms'] = dec_to_dms(plan0.dec.deg)
             wcsinfo['gl_deg'] = plan0.phase_center.galactic.l.deg
             wcsinfo['gb_deg'] = plan0.phase_center.galactic.b.deg
             wcsinfo['az_deg'] = plan0.craco_wcs.altaz.az.deg
@@ -837,13 +837,13 @@ class ObsInfo:
         search_params = {}
         search_params['num_dm_trials'] = planinfo['values']['ndm']
         search_params['dm_samps_min'] = 0
-        search_params['dm_samps_max'] = planinfo['values']['ndm']
+        search_params['dm_samps_max'] = planinfo['values']['ndm'] - 1
         search_params['dm_trial_steps'] = 'linear'
         search_params['dm_trial_spacing'] = 1
         search_params['num_boxcar_width_trials'] = planinfo['values']['nbox']
-        search_params['boxcar_width_samps_min'] = 2**0
-        search_params['boxcar_width_samps_max'] = 2**planinfo['values']['nbox']
-        search_params['boxcar_trial_steps'] = 'powers_of_2'
+        search_params['boxcar_width_samps_min'] = 1
+        search_params['boxcar_width_samps_max'] = planinfo['values']['nbox']
+        search_params['boxcar_trial_steps'] = 'linear'
         search_params['boxcar_trial_spacing'] = 1
         search_params['num_antennas'] = planinfo['nant']
         search_params['num_baselines'] = planinfo['nbl']
@@ -962,7 +962,7 @@ class ObsInfo:
         msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms_beam00']}, {self.filtered_obs_info['coords_dec_dms_beam00']}\n"
         msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg_beam00']:.5f}, {self.filtered_obs_info['coords_dec_deg_beam00']:.5f}\n"
         msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg_beam00']:.5f}, {self.filtered_obs_info['coords_gb_deg_beam00']:.5f}\n"
-        msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg"
+        msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg\n"
 
         msg += "----------------\n"
         msg += "Search info ->\n"
@@ -973,12 +973,12 @@ class ObsInfo:
         msg += f"Ndm: {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']})\n"
         msg += f"Nboxcar: {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']})\n"
         msg += f"FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
-        msg += f"Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['fov2_deg_beam00']} deg\n"
+        msg += f"Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
         msg += f"Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
 
         msg += "----------------\n"
         msg += "Candidate info -> \n"
-        msg += f"TO BE IMPLEMENTED"
+        msg += f"TO BE IMPLEMENTED\n"
 
         msg += "----------------\n"
         msg += "Data quality info ->\n"
@@ -997,6 +997,7 @@ class ObsInfo:
         self.filtered_search_info = self.get_search_pipeline_params()
         #self.plot_candidates()
         self.post_slack_message()
+
 
 def main(args):
     obsinfo = ObsInfo(sbid = args.sbid,
