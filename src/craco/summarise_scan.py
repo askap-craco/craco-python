@@ -892,6 +892,8 @@ class ObsInfo:
         scan_info['tstart'] = self.tstart
         scan_info['target_beam00'] = self.plan_info['beam_00']['target']
 
+        return scan_info
+
     def get_observation_params(self):
         '''
         Observation params -
