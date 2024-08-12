@@ -14,13 +14,43 @@ import sys
 from collections import defaultdict
 import glob
 import traceback
+import IPython
 
 log = logging.getLogger(__name__)
-logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log",
+logname = "/tmp/tmp.tmp"
+#logname = "/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log"
+logging.basicConfig(filename=logname,
                     format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
 stdout_handler = logging.StreamHandler(sys.stdout)
 log.addHandler(stdout_handler)
+
+'''
+        spatial_pixels_beam0 = planinfo['beam_00']['wcs']['npix']
+        spatial_pixels_min = min(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
+        spatial_pixels_max = max(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
+
+'''
+
+def search_dict(d, key):
+    if key in d:
+        return d[key]
+    for k, v in d.items():
+        if isinstance(v, dict):
+            return search_dict(v, key)
+    return None
+    
+def find_beam0_min_max_values(d, key):
+    values = []
+
+    beam0_val = search_dict(d['beam_00'], key)
+    for beamid in range(36):
+        val = search_dict(d[f'beam_{beamid:0>2}'], key)
+        if val:
+            values.append(val)
+
+    return beam0_val, min(values), max(values)
+
 
 def pcb_path_to_beamid(pcb_path):
     pcb_name = os.path.basename(pcb_path)
@@ -68,17 +98,62 @@ def parse_flagging_statistics_line(line):
     parts = line.strip().split("\t")
     info = {}
     info['nblks']= float(parts[0])
-    info['num_good_bls_pre'] = float(parts[1])
-    info['num_good_cells_pre'] = float(parts[2])
-    info['num_good_bls_post'] = float(parts[3])
-    info['num_good_cells_post'] = float(parts[4])
+    info['avg_num_good_bls_pre_flagging'] = float(parts[1])
+    info['avg_num_good_cells_pre_flagging'] = float(parts[2])
+    info['avg_num_good_bls_post_flagging'] = float(parts[3])
+    info['avg_num_good_cells_post_flagging'] = float(parts[4])
     #num_bad_cells_pre = float(parts[5])    We don't need these two values
     #num_bad_cells_post = float(parts[6])
-    info['blk_shape'] = tuple(int(x) for x in parts[7][1::-1].split(','))
-    info['tot_num_cells'] = float(parts[8])
-    info['num_fixed_good_chans'] = float(parts[9])
+    info['blk_shape'] = tuple(int(x) for x in parts[7][1:-1].split(','))
+    info['tot_num_cells_per_blk'] = float(parts[8])
+    info['num_fixed_good_chans_per_blk'] = float(parts[9])
+    info['avg_dropped_packets_frac'] = float(parts[10])
     return info
     
+
+def read_rfi_stats_info(scandir):
+    '''
+    Loops through all beams in given scandir and reads the RFI statistics logfile, parsing some useful info
+
+    Arguments
+    ---------
+    scandir: Object of datadirs.ScanDir() class
+
+    Returns
+    -------
+    rfiinfo: dict
+        Dictionary containing the RFI statistics keyed by beamid
+    '''
+
+    rfiinfo = {}
+    for beamid in range(36):
+        beaminfo = {}
+        rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
+        try:
+            last_line = get_last_uncommented_line(rfi_stats_path)
+            final_values = parse_flagging_statistics_line(last_line)
+            nbl, nf, nt = final_values['blk_shape']
+
+            beaminfo['frac_bls_good'] = final_values['avg_num_good_bls_pre_flagging'] / nbl
+            beaminfo['frac_bls_bad'] = 1 - beaminfo['frac_bls_good']
+
+            beaminfo['frac_fixed_good_chans'] = final_values['num_fixed_good_chans_per_blk'] / nf
+            beaminfo['frac_fixed_bad_chans'] = 1 - beaminfo['frac_fixed_good_chans']
+
+            beaminfo['frac_good_cells_post_flagging'] = final_values['avg_num_good_cells_post_flagging'] / final_values['tot_num_cells_per_blk']
+            beaminfo['frac_good_cells_pre_flagging'] = final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk']
+            beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
+            beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
+
+        except Exception as E:
+            log.critical(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
+            IPython.embed()
+        finally:
+            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
+
+    return rfiinfo
+
+
 
 def dec_to_dms(deg:float) -> str:
     '''
@@ -146,11 +221,11 @@ def read_pcb_stats(scandir):
                 'coords_dec_dms': dec_to_dms(dec),
                 'coords_dec_deg': dec,
             }
-        except:
-            log.critical(f"!Error: Could not read filterbank information from path - {filpath}!")
+        except Exception as E:
+            log.critical(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
             beaminfo = {}
         finally:
-            pcbinfo[beamid] = beaminfo
+            pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
 
     return pcbinfo
 
@@ -173,8 +248,8 @@ def read_plan_info(scandir):
 
     planinfo = {}
     for beamid in range(36):
+        planfile = scandir.beam_plan0_path(beamid)
         try:
-            planfile = scandir.beam_plan0_path(beamid)
             plan0 = np.load(planfile, allow_pickle=True)
             
             if beamid == 0:
@@ -228,47 +303,11 @@ def read_plan_info(scandir):
             planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         except Exception as E:
             beaminfo = {}
+            log.critical(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
         finally:
             planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         
     return planinfo
-
-
-def read_rfi_stats_info(scandir):
-    '''
-    Loops through all beams in given scandir and reads the RFI statistics logfile, parsing some useful info
-
-    Arguments
-    ---------
-    scandir: Object of datadirs.ScanDir() class
-
-    Returns
-    -------
-    rfiinfo: dict
-        Dictionary containing the RFI statistics keyed by beamid
-    '''
-
-    rfiinfo = {}
-    for beamid in range(36):
-        beaminfo = {}
-        try:
-            rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
-            last_line = get_last_uncommented_line(rfi_stats_path)
-            final_values = parse_flagging_statistics_line(last_line)
-            nbl, nf, nt = final_values['blk_shape']
-
-            beaminfo['avg_frac_good_cells'] = final_values['num_good_cells_post'] / final_values['tot_num_cells']
-            beaminfo['frac_fixed_good_chans'] = final_values['num_fixed_good_chans'] / nf
-            beaminfo['avg_frac_good_pre_flagging'] = final_values['num_good_cells_pre'] / final_values['tot_num_cells']
-            beaminfo['avg_flagging_frac'] = (final_values['num_good_cells_pre'] - final_values['num_good_cells_post']) / final_values['tot_num_cells']
-
-        except Exception as E:
-            pass
-        finally:
-            rfiinfo[beamid] = beaminfo
-
-    return rfiinfo
-
 
 
 def parse_scandir_env(path):
@@ -490,6 +529,8 @@ class ObsInfo:
 
         self.pcb_stats = read_pcb_stats(self.scandir)
         self.plan_info = read_plan_info(self.scandir)
+        self.rfi_info = read_rfi_stats_info(self.scandir)
+
         self._dict = {}
 
 
@@ -725,15 +766,59 @@ class ObsInfo:
         pass
 
 
-    def get_rfi_stats(self):
+    def get_data_quality_stats(self):
         '''
         To be implemented by VG
         Diagnostics -
             RFI statistics
             Dropped packet statistics
 
-        '''
+        '''       
         
+        data_quality_diagnostics = {}
+        rfiinfo = self.rfi_info
+        
+        dp_stats = find_beam0_min_max_values(rfiinfo, 'dropped_packets_frac')
+        data_quality_diagnostics['dropped_packets_fraction_beam00'] = dp_stats[0]
+        data_quality_diagnostics['dropped_packets_fraction_min'] = dp_stats[1]
+        data_quality_diagnostics['dropped_packets_fraction_max'] = dp_stats[2]
+
+        blg_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_good')
+        data_quality_diagnostics['good_baselines_fraction_beam00'] = blg_stats[0]
+        data_quality_diagnostics['good_baselines_fraction_min'] = blg_stats[1]
+        data_quality_diagnostics['good_baselines_fraction_max'] = blg_stats[2]
+
+        blb_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_bad')
+        data_quality_diagnostics['bad_baselines_fraction_beam00'] = blb_stats[0]
+        data_quality_diagnostics['bad_baselines_fraction_min'] = blb_stats[1]
+        data_quality_diagnostics['bad_baselines_fraction_max'] = blb_stats[2]
+
+        fc_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_good_chans')
+        data_quality_diagnostics['good_channels_fraction_beam00'] = fc_stats[0]
+        data_quality_diagnostics['good_channels_fraction_min'] = fc_stats[1]
+        data_quality_diagnostics['good_channels_fraction_max'] = fc_stats[2]
+
+        fcb_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_bad_chans')
+        data_quality_diagnostics['bad_channels_fraction_beam00'] = fcb_stats[0]
+        data_quality_diagnostics['bad_channels_fraction_min'] = fcb_stats[1]
+        data_quality_diagnostics['bad_channels_fraction_max'] = fcb_stats[2]
+
+        fcp_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_pre_flagging')
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_beam00'] = fcp_stats[0]
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_min'] = fcp_stats[1]
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_max'] = fcp_stats[2]
+
+        fcpo_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_post_flagging')
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_beam00'] = fcpo_stats[0]
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_min'] = fcpo_stats[1]
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_max'] = fcpo_stats[2]
+
+        ff_stats = find_beam0_min_max_values(rfiinfo, 'flagging_frac')
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_beam00'] = ff_stats[0]
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_min'] = ff_stats[1]
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_max'] = ff_stats[2]
+
+        return data_quality_diagnostics
 
 
     def get_search_pipeline_params(self):
@@ -741,26 +826,64 @@ class ObsInfo:
         To be implemented by Keith And VG 
         
         '''
-        pass
+        planinfo = self.plan_info
+        search_params = {}
+        search_params['num_dm_trials'] = planinfo['values']['ndm']
+        search_params['dm_samps_min'] = 0
+        search_params['dm_samps_max'] = planinfo['values']['ndm']
+        search_params['dm_trial_steps'] = 'linear'
+        search_params['dm_trial_spacing'] = 1
+        search_params['num_boxcar_width_trials'] = planinfo['values']['nbox']
+        search_params['boxcar_width_samps_min'] = 2**0
+        search_params['boxcar_width_samps_max'] = 2**planinfo['values']['nbox']
+        search_params['boxcar_trial_steps'] = 'powers_of_2'
+        search_params['boxcar_trial_spacing'] = 1
+        search_params['num_antennas'] = planinfo['nant']
+        search_params['num_baselines'] = planinfo['nbl']
+        search_params['num_beams_planned'] = len(planinfo['values']['search_beams'])
+        search_params['num_beams_actual'] = sum(key.startswith('beam_') for key in planinfo)
 
+        npix_b0_min_max = find_beam0_min_max_values(planinfo, 'npix')
+        search_params['num_spatial_pixels_beam00'] = npix_b0_min_max[0]
+        search_params['num_spatial_pixels_min'] = npix_b0_min_max[1]
+        search_params['num_spatial_pixels_max'] = npix_b0_min_max[2]
+
+        fov1_b0_min_max = find_beam0_min_max_values(planinfo, 'fov1_deg')
+        search_params['fov1_deg_beam00'] = fov1_b0_min_max[0]
+        search_params['fov1_deg__min'] = fov1_b0_min_max[1]
+        search_params['fov1_deg_max'] = fov1_b0_min_max[2]
+
+        fov2_b0_min_max = find_beam0_min_max_values(planinfo, 'fov2_deg')
+        search_params['fov2_deg_beam00'] = fov2_b0_min_max[0]
+        search_params['fov2_deg_min'] = fov2_b0_min_max[1]
+        search_params['fov2_deg_max'] = fov2_b0_min_max[2]
+
+        cellsize1_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize1_deg')
+        search_params['cellsize1_deg_beam00'] = cellsize1_b0_min_max[0]
+        search_params['cellsize1_deg_min'] = cellsize1_b0_min_max[1]
+        search_params['cellsize1_deg_max'] = cellsize1_b0_min_max[2]
+
+        cellsize2_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize2_deg')
+        search_params['cellsize2_deg_beam00'] = cellsize2_b0_min_max[0]
+        search_params['cellsize2_deg_min'] = cellsize2_b0_min_max[1]
+        search_params['cellsize2_deg_max'] = cellsize2_b0_min_max[2]
+    
+        search_params['calibration_file'] = planinfo['values']['calibration']
+
+        return search_params
+    
     def get_scan_info(self):
         '''
         SBID related info -
             SBID
             Scan ID
-            Tstart
-            Tobs
-            Beamformer weights used by ASKAP
-        
+            Tstart        
         '''
         scan_info = {}
         scan_info['sbid'] = self.sbid
         scan_info['scanid'] = self.scanid
         scan_info['tstart'] = self.tstart
-
-
-
-        pass
+        scan_info['target_beam00'] = self.plan_info['beam_00']['target']
 
     def get_observation_params(self):
         '''
@@ -770,28 +893,100 @@ class ObsInfo:
                 Bandwidth
                 Time resolution
                 Number of channels
-                RA, DEC of every beam center
-                Alt, Az of all antenna (mean)
-                Gl, Gb of every beam center
+                RA, DEC of beam0
+                Alt, Az of beam0
+                Gl, Gb of beam0
                 Coordinates of sun
                 Guest science data requested (True/False)
         '''
-        pass
+        obs_params = {}
+        obs_params['beam_footprint'] = "TO BE IMPLEMENTED"
+        obs_params['central_freq_MHz'] = self.pcb_stats['beam_00']['fcen']
+        obs_params['bandwidth_MHz'] = self.pcb_stats['beam_00']['BW']
+        obs_params['num_channels'] = self.plan_info['freq_info']['nchan']
+        obs_params['sampling_time_ms'] = self.plan_info['tsamp_s'] * 1e3
+        obs_params['guest_science_proposal'] = "TO BE IMPLEMENTED"
 
+        sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
+        obs_params['solar_elong_deg_beam00'] = sol[0]
+        obs_params['solar_elong_deg_min'] = sol[1]
+        obs_params['solar_elong_deg_max'] = sol[2]
 
+        lun = find_beam0_min_max_values(self.plan_info, 'lunar_elong_deg')
+        obs_params['lunar_elong_deg_beam00'] = lun[0]
+        obs_params['lunar_elong_deg_min'] = lun[1]
+        obs_params['lunar_elong_deg_max'] = lun[2]
+
+        obs_params['coords_ra_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_deg']
+        obs_params['coords_dec_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_deg']
+        obs_params['coords_ra_hms_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_hms']
+        obs_params['coords_dec_dms_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_dms']
+
+        obs_params['coords_gl_beam00'] = self.plan_info['beam_00']['wcs']['gl_deg']
+        obs_params['coords_gb_beam00'] = self.plan_info['beam_00']['wcs']['gb_deg']
+
+        obs_params['coords_az_beam00'] = self.plan_info['beam_00']['wcs']['az_deg']
+        obs_params['coords_alt_beam00'] = self.plan_info['beam_00']['wcs']['alt_deg']
+
+        return obs_params
+        
     def post_slack_message(self):
         '''
         Compose a nice slack message using the self._dict and the plot
                 
         '''
+        msg = f"End of scan: {self.sbid}/{self.scanid}/{self.tstart}, runname={self.runname}\n"
+        msg += f"Scan head dir: {self.scandir.scan_head_dir}\n"
+        
+        msg += "----------------\n"
+        msg += "Scan info -> \n"
+        msg += f"- Target [Beam 0]: {self.filtered_scan_info['target_beam00']}\n"
+        
+        msg += "----------------\n"
+        msg += "Obs info ->\n"
+        msg += f"- Beam footprint: {self.filtered_obs_info['beam_footprint']}\n"
+        msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
+        msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
+        msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
+        msg += f"- Sampling time: {self.filtered_obs_info['sampling_time_ms']:.3f} ms\n"
+        msg += f"- Guest science obs?: {self.filtered_obs_info['guest_science_proposal']}\n"
+        msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms']}, {self.filtered_obs_info['coords_dec_dms']}\n"
+        msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg']:.5f}, {self.filtered_obs_info['coords_dec_deg']:.5f}\n"
+        msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg']:.5f}, {self.filtered_obs_info['coords_gb_deg']:.5f}\n"
+        msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg"
+
+        msg += "----------------\n"
+        msg += "Search info ->\n"
+        msg += f"Nant: {self.filtered_search_info['num_antennas']}\n"
+        msg += f"Nbl: {self.filtered_search_info['num_baselines']}\n"
+        msg += f"Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
+        msg += f"Cal: {self.filtered_search_info['calibration_file']}\n"
+        msg += f"Ndm: {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']})\n"
+        msg += f"Nboxcar: {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']})\n"
+        msg += f"FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
+        msg += f"Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['fov2_deg_beam00']} deg\n"
+        msg += f"Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
+
+        msg += "----------------\n"
+        msg += "Candidate info -> \n"
+        msg += f"TO BE IMPLEMENTED"
+
+        msg += "----------------\n"
+        msg += "Data quality info ->\n"
+        msg += f"Dropped packets fraction avg [Beam 0/min/max]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+        msg += f"Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
+        msg += f"Flagged baselines fraction [Beam 0/min/max]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
+        msg += f"Dynamic rfi flagging fraction [Beam 0/min/max]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
+
+        return msg
 
     def run(self):
-        self.get_scan_info()
-        self.get_observation_params()
-        self.get_candidates_info()
-        self.get_rfi_stats()
-        self.get_search_pipeline_params()
-        self.plot_candidates()
+        self.filtered_scan_info = self.get_scan_info()
+        self.filtered_obs_info = self.get_observation_params()
+        self.filtered_cands_info = self.get_candidates_info()
+        self.filtered_dq_info = self.get_data_quality_stats()
+        self.filtered_search_info = self.get_search_pipeline_params()
+        #self.plot_candidates()
         self.post_slack_message()
 
 def main(args):
