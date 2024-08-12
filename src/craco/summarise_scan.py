@@ -17,8 +17,15 @@ import traceback
 import IPython
 
 log = logging.getLogger(__name__)
-logname = "/tmp/tmp.tmp"
-#logname = "/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log"
+username = os.environ['USER']
+
+if username == 'gup037':
+    logname = "/tmp/tmp.tmp"
+elif username == 'craftop':
+    logname = "/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log"
+else:
+    raise RuntimeError("Oi - what are you doing with my code -- shoo!")
+
 logging.basicConfig(filename=logname,
                     format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
@@ -46,7 +53,7 @@ def find_beam0_min_max_values(d, key):
     beam0_val = search_dict(d['beam_00'], key)
     for beamid in range(36):
         val = search_dict(d[f'beam_{beamid:0>2}'], key)
-        if val:
+        if val is not None:
             values.append(val)
 
     return beam0_val, min(values), max(values)
