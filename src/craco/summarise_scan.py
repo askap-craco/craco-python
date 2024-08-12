@@ -4,6 +4,7 @@ from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.metadatafile import MetadataFile as MF
 from craco.candidate_manager import SBCandsManager
 from craft.sigproc import SigprocFile as SF
+from astropy.coordinates import get_sun, get_body
 import logging
 import os
 import subprocess
@@ -19,7 +20,63 @@ logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.
 stdout_handler = logging.StreamHandler(sys.stdout)
 log.addHandler(stdout_handler)
 
+def pcb_path_to_beamid(pcb_path):
+    pcb_name = os.path.basename(pcb_path)
+    beamid = int(pcb_name.strip("pcbb").strip(".fil"))
+    return beamid
 
+def get_last_uncommented_line(file_path):
+    '''
+    Reads the last uncommented line from the file without looping through all lines
+    Thanks Chat-GPT
+    '''
+    with open(file_path, 'rb') as file:
+        file.seek(0, 2)  # Move the pointer to the end of the file
+        buffer = b''
+        while file.tell() > 0:
+            file.seek(-2, 1)  # Move the pointer back two characters
+            new_byte = file.read(1)
+            if new_byte == b'\n' and buffer:
+                line = buffer[::-1].decode().strip()
+                if line and not line.startswith("#"):
+                    return line
+                buffer = b''
+            else:
+                buffer += new_byte
+        # Check the first line in case it’s uncommented
+        line = buffer[::-1].decode().strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+def parse_flagging_statistics_line(line):
+    '''
+    Parses the values in a given line of the flagging statistics file
+
+    Arguments
+    ---------
+    line: str
+        The contents of the line 
+    
+    Returns
+    -------
+    flagging_stats: dict
+        A dict containing useful info derived from that line
+    '''
+    parts = line.strip().split("\t")
+    info = {}
+    info['nblks']= float(parts[0])
+    info['num_good_bls_pre'] = float(parts[1])
+    info['num_good_cells_pre'] = float(parts[2])
+    info['num_good_bls_post'] = float(parts[3])
+    info['num_good_cells_post'] = float(parts[4])
+    #num_bad_cells_pre = float(parts[5])    We don't need these two values
+    #num_bad_cells_post = float(parts[6])
+    info['blk_shape'] = tuple(int(x) for x in parts[7][1::-1].split(','))
+    info['tot_num_cells'] = float(parts[8])
+    info['num_fixed_good_chans'] = float(parts[9])
+    return info
+    
 
 def dec_to_dms(deg:float) -> str:
     '''
@@ -54,29 +111,162 @@ def ra_to_hms(ha:float) -> str:
 
     return f"{hh:02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
 
-def read_filterbank_stats(filpath):
-    try:
-        f = SF(filpath)
-        dur = f.nsamples * f.tsamp / 60         #minutes
-        bw = np.abs(f.foff) * f.nchans
-        fcen = f.fch1 + bw / 2
-        ra = f.src_raj_deg
-        dec = f.src_dej_deg
-        #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
-        fil_info = {
-            'tobs': dur,
-            'BW': bw,
-            'fcen': fcen,
-            'beam0_coords_ra_hms': ra_to_hms(ra),
-            'beam0_coords_ra_deg': ra,
-            'beam0_coords_dec_dms': dec_to_dms(dec),
-            'beam0_coords_dec_deg': dec,
-        }
-    except:
-        log.critical(f"!Error: Could not read filterbank information from path - {filpath}!")
-        fil_info = {}
-    finally:
-        return fil_info
+def read_pcb_stats(scandir):
+    '''
+    Loops over all beam nodes in a scan, and parses the information in each of the pcb filterbank
+
+    Arguments
+    ---------
+    scandir: Object of datadirs.Scandir() class
+    
+    Returns
+    -------
+    filinfo: dict
+        A dictionary containing information extracted from pcb headers - keyed by beamid
+    '''
+    pcbinfo = {}
+    for beamid in range(36):
+        try:
+            filpath = scandir.beam_pcb_path(beamid)
+            f = SF(filpath)
+            dur = f.nsamples * f.tsamp / 60         #minutes
+            bw = np.abs(f.foff) * f.nchans
+            fcen = f.fch1 + bw / 2
+            ra = f.src_raj_deg
+            dec = f.src_dej_deg
+            #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
+            beaminfo = {
+                'tobs': dur,
+                'BW': bw,
+                'fcen': fcen,
+                'coords_ra_hms': ra_to_hms(ra),
+                'coords_ra_deg': ra,
+                'coords_dec_dms': dec_to_dms(dec),
+                'coords_dec_deg': dec,
+            }
+        except:
+            log.critical(f"!Error: Could not read filterbank information from path - {filpath}!")
+            beaminfo = {}
+        finally:
+            pcbinfo[beamid] = beaminfo
+
+    return pcbinfo
+
+
+def read_plan_info(scandir):
+    '''
+    Reads pickled plans for all beams in the given scan and extract all the relevant info
+
+    Arguments
+    ---------
+    scandir: Object of datadir.Scandir() class
+
+    Returns
+    -------
+
+    planinfo: dict
+        A dictionary containing relevant info from plans of all beams - keyed by beamid
+    
+    '''
+
+    planinfo = {}
+    for beamid in range(36):
+        try:
+            planfile = scandir.beam_plan0_path(beamid)
+            plan0 = np.load(planfile, allow_pickle=True)
+            
+            if beamid == 0:
+                planinfo['values'] = vars(plan0.values)
+                
+                freq_info = {}
+                freq_info['fmin'] = plan0.fmin
+                freq_info['fmax'] = plan0.fmax
+                freq_info['nchan'] = plan0.nf
+                freq_info['foff'] = plan0.foff
+                freq_info['fch1'] = plan0.freqs[0]
+
+                planinfo['freq_info'] = freq_info
+
+                uf = plan0.useful_info()
+                planinfo['tsamp_s'] = uf['TSAMP']
+                planinfo['nant'] = uf['NANT']
+                planinfo['nbl'] = uf['NBL']
+                planinfo['start_mjd'] = uf['STARTMJD']
+                planinfo['epoch'] = uf['EPOCH']
+                planinfo['nowtai'] = uf['NOWTAI']
+
+                planinfo['tstart'] = plan0.tstart
+            
+            
+            beaminfo = {}
+            beaminfo['beamid'] = plan0.beamid
+            beaminfo['target'] = plan0.target_name
+            beaminfo['solar_elong_deg'] = plan0.phase_center.separation(get_sun(plan0.tstart)).deg
+            beaminfo['lunar_elong_deg'] = plan0.phase_center.separation(get_body("moon", plan0.tstart)).deg
+
+            wcsinfo = {}
+            wcsinfo['coords_ra_deg'] = plan0.ra.deg
+            wcsinfo['coords_ra_hms'] = plan0.ra.to_string(sep=":", precision=2)
+            wcsinfo['coords_dec_deg'] = plan0.dec.deg
+            wcsinfo['coords_dec_dms'] = plan0.dec.to_string(sep=":", precision=2)
+            wcsinfo['gl_deg'] = plan0.phase_center.galactic.l.deg
+            wcsinfo['gb_deg'] = plan0.phase_center.galactic.b.deg
+            wcsinfo['az_deg'] = plan0.craco_wcs.altaz.az.deg
+            wcsinfo['alt_deg'] = plan0.craco_wcs.altaz.alt.deg
+            wcsinfo['npix'] = plan0.craco_wcs.npix
+            wcsinfo['cellsize1_deg'] = plan0.craco_wcs.cellsize[0].deg
+            wcsinfo['cellsize2_deg'] = plan0.craco_wcs.cellsize[1].deg
+            wcsinfo['fov1_deg'] = (plan0.craco_wcs.cellsize[0] * plan0.craco_wcs.npix).deg
+            wcsinfo['fov2_deg'] = (plan0.craco_wcs.cellsize[1] * plan0.craco_wcs.npix).deg
+            wcsinfo['hourangle_hr'] = plan0.craco_wcs.hour_angle.hour
+            wcsinfo['lst_hr'] = plan0.craco_wcs.lst.hour
+
+            beaminfo['wcs'] = wcsinfo
+
+            planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
+        except Exception as E:
+            beaminfo = {}
+        finally:
+            planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
+        
+    return planinfo
+
+
+def read_rfi_stats_info(scandir):
+    '''
+    Loops through all beams in given scandir and reads the RFI statistics logfile, parsing some useful info
+
+    Arguments
+    ---------
+    scandir: Object of datadirs.ScanDir() class
+
+    Returns
+    -------
+    rfiinfo: dict
+        Dictionary containing the RFI statistics keyed by beamid
+    '''
+
+    rfiinfo = {}
+    for beamid in range(36):
+        beaminfo = {}
+        try:
+            rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
+            last_line = get_last_uncommented_line(rfi_stats_path)
+            final_values = parse_flagging_statistics_line(last_line)
+            nbl, nf, nt = final_values['blk_shape']
+
+            beaminfo['avg_frac_good_cells'] = final_values['num_good_cells_post'] / final_values['tot_num_cells']
+            beaminfo['frac_fixed_good_chans'] = final_values['num_fixed_good_chans'] / nf
+            beaminfo['avg_frac_good_pre_flagging'] = final_values['num_good_cells_pre'] / final_values['tot_num_cells']
+            beaminfo['avg_flagging_frac'] = (final_values['num_good_cells_pre'] - final_values['num_good_cells_post']) / final_values['tot_num_cells']
+
+        except Exception as E:
+            pass
+        finally:
+            rfiinfo[beamid] = beaminfo
+
+    return rfiinfo
+
 
 
 def parse_scandir_env(path):
@@ -295,7 +485,8 @@ class ObsInfo:
 
         self.cands_manager = SBCandsManager(self.sbid, runname=self.runname)
 
-        self.filterbank_stats = read_filterbank_stats()
+        self.pcb_stats = read_pcb_stats(self.scandir)
+        self.plan_info = read_plan_info(self.scandir)
         self._dict = {}
 
     def run_candpipe(self):
@@ -434,12 +625,12 @@ class ObsInfo:
         candidates_info['num_clustered_uniq_cands_bright']          = num_clustered_uniq_cands_bright
         candidates_info['num_clustered_uniq_cands_bright_per_beam'] = num_clustered_uniq_cands_bright_per_beam
 
-        # total number of clustered unique candidates (and in each beam)
+        # total number of clustered rfi candidates (and in each beam)
         num_clustered_rfi_cands, num_clustered_rfi_cands_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles)
         candidates_info['num_clustered_rfi_cands']          = num_clustered_rfi_cands
         candidates_info['num_clustered_rfi_cands_per_beam'] = num_clustered_rfi_cands_per_beam
 
-        # total number of bright clustered unique candidates (and in each beam)
+        # total number of bright clustered rfi candidates (and in each beam)
         num_clustered_rfi_cands_bright, num_clustered_rfi_cands_bright_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles, snr=snr)
         candidates_info['num_clustered_rfi_cands_bright']          = num_clustered_rfi_cands_bright
         candidates_info['num_clustered_rfi_cands_bright_per_beam'] = num_clustered_rfi_cands_bright_per_beam
@@ -515,7 +706,8 @@ class ObsInfo:
             Dropped packet statistics
 
         '''
-        pass
+        
+
 
     def get_search_pipeline_params(self):
         '''
