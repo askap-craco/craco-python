@@ -931,11 +931,11 @@ class ObsInfo:
         obs_params['coords_ra_hms_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_hms']
         obs_params['coords_dec_dms_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_dms']
 
-        obs_params['coords_gl_beam00'] = self.plan_info['beam_00']['wcs']['gl_deg']
-        obs_params['coords_gb_beam00'] = self.plan_info['beam_00']['wcs']['gb_deg']
+        obs_params['coords_gl_deg_beam00'] = self.plan_info['beam_00']['wcs']['gl_deg']
+        obs_params['coords_gb_deg_beam00'] = self.plan_info['beam_00']['wcs']['gb_deg']
 
-        obs_params['coords_az_beam00'] = self.plan_info['beam_00']['wcs']['az_deg']
-        obs_params['coords_alt_beam00'] = self.plan_info['beam_00']['wcs']['alt_deg']
+        obs_params['coords_az_deg_beam00'] = self.plan_info['beam_00']['wcs']['az_deg']
+        obs_params['coords_alt_deg_beam00'] = self.plan_info['beam_00']['wcs']['alt_deg']
 
         return obs_params
         
