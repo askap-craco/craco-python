@@ -214,7 +214,7 @@ class ScanCandsManager:
     def __init__(self, sbname, scanid, tstart, runname = "results"):
         self.sb = format_sbid(sbname, padding=True, prefix=True)
         self.scandir = ScanDir(self.sb, f"{scanid}/{tstart}")
-        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb, runname=runname)
+        self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb, scanid, tstart, runname=runname)
         self._candfile_paths = self._raw_candfile_paths + \
                                 self._clustered_raw_candfile_paths +\
                                 self._clustered_rfi_candfile_paths + \
