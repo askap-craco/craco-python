@@ -760,8 +760,8 @@ class ObsInfo:
         candidates_info['unknown_cands_bright'] = unknown_cands_bright
         candidates_info['unknown_cands_bright_per_beam'] = unknown_cands_bright_per_beam
             
-        self._dict['candidates_info'] = candidates_info
-        pass
+        #self._dict['candidates_info'] = candidates_info
+        return candidates_info
 
 
     def plot_candidates(self):
@@ -966,26 +966,26 @@ class ObsInfo:
 
         msg += "----------------\n"
         msg += "Search info ->\n"
-        msg += f"Nant: {self.filtered_search_info['num_antennas']}\n"
-        msg += f"Nbl: {self.filtered_search_info['num_baselines']}\n"
-        msg += f"Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
-        msg += f"Cal: {self.filtered_search_info['calibration_file']}\n"
-        msg += f"Ndm: {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']})\n"
-        msg += f"Nboxcar: {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']})\n"
-        msg += f"FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
-        msg += f"Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
-        msg += f"Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
+        msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
+        msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
+        msg += f"- Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
+        msg += f"- Cal: {self.filtered_search_info['calibration_file']}\n"
+        msg += f"- Ndm: {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']})\n"
+        msg += f"- Nboxcar: {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']})\n"
+        msg += f"- FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
+        msg += f"- Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
+        msg += f"- Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
 
         msg += "----------------\n"
         msg += "Candidate info -> \n"
-        msg += f"TO BE IMPLEMENTED\n"
+        msg += f"- TO BE IMPLEMENTED\n"
 
         msg += "----------------\n"
         msg += "Data quality info ->\n"
-        msg += f"Dropped packets fraction avg [Beam 0/min/max]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
-        msg += f"Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
-        msg += f"Flagged baselines fraction [Beam 0/min/max]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
-        msg += f"Dynamic rfi flagging fraction [Beam 0/min/max]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
+        msg += f"- Dropped packets fraction avg [Beam 0/min/max]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+        msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
+        msg += f"- Flagged baselines fraction [Beam 0/min/max]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
+        msg += f"- Dynamic rfi flagging fraction [Beam 0/min/max]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
 
         return msg
 
