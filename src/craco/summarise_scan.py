@@ -154,7 +154,8 @@ def read_rfi_stats_info(scandir):
 
         except Exception as E:
             log.critical(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
-            IPython.embed()
+            log.critical(traceback.format_exc())
+            #IPython.embed()
         finally:
             rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
 
@@ -230,6 +231,7 @@ def read_pcb_stats(scandir):
             }
         except Exception as E:
             log.critical(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
+            log.critical(traceback.format_exc())
             beaminfo = {}
         finally:
             pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
@@ -311,6 +313,7 @@ def read_plan_info(scandir):
         except Exception as E:
             beaminfo = {}
             log.critical(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
+            log.critical(traceback.format_exc())
         finally:
             planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         
@@ -392,6 +395,7 @@ def get_metadata_info(scan):
         except Exception as E:
             emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
             log.critical(emsg)
+            log.critical(traceback.format_exc())
             pass
             #msg = emsg
     return None
@@ -422,14 +426,14 @@ def get_num_candidates(candfiles, snr=None):
     for candfile in candfiles:
         if snr is None:
             num_cands += candfile.ncands
-            num_cands_per_beam[candfile.beamid] = candfile.ncands
+            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.ncands
         else:
             try:
                 ncands = sum( candfile.cands['snr'] >= snr )
             except KeyError:
                 ncands = sum( candfile.cands['SNR'] >= snr )
             num_cands += ncands
-            num_cands_per_beam[candfile.beamid] = ncands
+            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = ncands
             
     return num_cands, num_cands_per_beam
 
@@ -459,7 +463,7 @@ def get_num_clusters(candfiles, snr=None):
     for candfile in candfiles:
         if snr is None:
             num_clusters += candfile.nclusters
-            num_clusters_per_beam[candfile.beamid] = candfile.nclusters
+            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.nclusters
         else:
             try:
                 cands = candfile.cands[ candfile.cands['snr'] >= snr ]
@@ -467,7 +471,7 @@ def get_num_clusters(candfiles, snr=None):
                 cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
             nclusters = cands['cluster_id'].nunique()
             num_clusters += nclusters
-            num_clusters_per_beam[candfile.beamid] = nclusters
+            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = nclusters
             
     return num_clusters, num_clusters_per_beam
 
@@ -504,7 +508,7 @@ def get_num_classified_candidates(candfiles, snr=None):
                 cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
 
         value_counts = cands['LABEL'].value_counts()
-        num_classified_cands_per_beam[candfile.beamid] = value_counts.to_dict()
+        num_classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = value_counts.to_dict()
         for key, count in value_counts.items():
             num_classified_cands[key] += count
         
@@ -514,7 +518,7 @@ def get_num_classified_candidates(candfiles, snr=None):
 
 class ObsInfo:
 
-    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results'):
+    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results', runcandpipe=True):
         '''
         sbid: str, SBIDs - Can accept SB0xxxxx, 0xxxxx, xxxx formats
         scanid: str, scanid - needs to be in 00 format
@@ -531,16 +535,18 @@ class ObsInfo:
         self.tstart = tstart
         self.runname = runname
         self.tstart = tstart
+        self._dict = {}
+        self.run(runcandpipe = runcandpipe)
 
-        self.run_candpipe()
-        self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
-
+    def run(self, runcandpipe=True):
         self.pcb_stats = read_pcb_stats(self.scandir)
         self.plan_info = read_plan_info(self.scandir)
         self.rfi_info = read_rfi_stats_info(self.scandir)
 
-        self._dict = {}
-
+        if runcandpipe:
+            self.run_candpipe()
+        
+        self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
 
     def run_candpipe(self):
         '''
@@ -655,11 +661,11 @@ class ObsInfo:
             classified_rows = cands[ cands['LABEL'] == label ]
             if label != 'UNKNOWN':
                 # return crossmatched names for known objects 
-                classified_cands_per_beam[candfile.beamid] = classified_rows['MATCH_name'].unique().tolist()
+                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = classified_rows['MATCH_name'].unique().tolist()
                 classified_cands += classified_rows['MATCH_name'].unique().tolist()
             else:
                 # return a list of urls for unknown candidates 
-                classified_cands_per_beam[candfile.beamid] = self._form_url(classified_rows, candfile.beamid)
+                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
                 classified_cands += self._form_url(classified_rows, candfile.beamid)
             
         return list(set(classified_cands)), classified_cands_per_beam
@@ -740,6 +746,16 @@ class ObsInfo:
         pulsar_cands_bright, pulsar_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='PSR', snr=snr)
         candidates_info['pulsar_cands_bright'] = pulsar_cands_bright 
         candidates_info['pulsar_cands_bright_per_beam'] = pulsar_cands_bright_per_beam
+
+        # total of RACS (names) detected in obs 
+        racs_cands, racs_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS')
+        candidates_info['racs_cands'] = racs_cands 
+        candidates_info['racs_cands_per_beam'] = racs_cands_per_beam
+
+        # total of bright RACS (names) detected in obs 
+        racs_cands_bright, racs_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS', snr=snr)
+        candidates_info['racs_cands_bright'] = racs_cands_bright 
+        candidates_info['racs_cands_bright_per_beam'] = racs_cands_bright_per_beam
         
         # total of CUSTOM sources (names)
         custom_cands, custom_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='CUSTOM')
@@ -971,26 +987,36 @@ class ObsInfo:
         msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
         msg += f"- Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
         msg += f"- Cal: {self.filtered_search_info['calibration_file']}\n"
-        msg += f"- Ndm: {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']})\n"
-        msg += f"- Nboxcar: {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']})\n"
+        msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
+        msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
         msg += f"- FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
         msg += f"- Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
         msg += f"- Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
 
         msg += "----------------\n"
         msg += "Candidate info -> \n"
-        msg += f"- TO BE IMPLEMENTED\n"
+        
+        msg += f"- Num raw (incl. subthreshold): {self.filtered_cands_info['num_raw_cands_bright']} ({self.filtered_cands_info['num_raw_cands']})\n"
+        msg += f"- Num raw clustered (incl. subthreshold): {self.filtered_cands_info['num_clustered_cands_bright']} ({self.filtered_cands_info['num_clustered_cands']})\n"
 
+        msg += f"- Num RFI (incl. subthreshold): {self.filtered_cands_info['num_clustered_rfi_cands_bright']} ({self.filtered_cands_info['num_clustered_rfi_cands']})\n"
+        msg += f"- Num localised (incl. subthreshold): {self.filtered_cands_info['num_clustered_uniq_cands_bright']} ({self.filtered_cands_info['num_clustered_uniq_cands']})\n"
+        msg += f"- List of source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']} ({self.filtered_cands_info['num_classified_cands']})\n"
+        msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
+        msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
+        msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
+        msg += f"- List of unknwon sources detected (URLs): {self.filtered_cands_info['unknown_cands_bright']}\n"
+        
         msg += "----------------\n"
         msg += "Data quality info ->\n"
-        msg += f"- Dropped packets fraction avg [Beam 0/min/max]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+        msg += f"- Dropped packets fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
         msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
-        msg += f"- Flagged baselines fraction [Beam 0/min/max]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
-        msg += f"- Dynamic rfi flagging fraction [Beam 0/min/max]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
+        msg += f"- Flagged baselines fraction [Beam 0 (min-max)]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
+        msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
 
         return msg
 
-    def run(self):
+    def filter_info(self):
         self.filtered_scan_info = self.get_scan_info()
         self.filtered_obs_info = self.get_observation_params()
         self.filtered_cands_info = self.get_candidates_info()
