@@ -41,10 +41,10 @@ def load_cands(sbid, beam=None, runname="results"):
         beam = f"{b:02g}"
         
     raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/candidates.b{beam}.txt"
-    clustered_raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.rawcat.csv"
-    clustered_rfi_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.rfi.csv"
-    clustered_uniq_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.uniq.csv"
-    clustered_inj_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.txt.inject.cand.csv"
+    clustered_raw_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.*rawcat.csv"
+    clustered_rfi_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.*rfi.csv"
+    clustered_uniq_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.*uniq.csv"
+    clustered_inj_candpath = f"/CRACO/DATA_??/craco/{sb}/scans/??/2*/{runname}/clustering_output/candidates.b{beam}.*inject.cand.csv"
     #TODO - add injection file here
     
     raw_candfiles = glob.glob(raw_candpath)
