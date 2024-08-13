@@ -892,7 +892,7 @@ def transpose_beam_run(proc):
                     t.tick('vis reset')
                     vis_accum_send_req = None
                 else:
-                    raise RuntimeError(f'VisAccum isend for blk {iblk-1} not complete. It should be done! finished={freq_finished}')
+                    raise RuntimeError(f'VisAccum isend for blk {iblk-1} not complete. It should be done! finished={req_finished}')
 
             vis_accum.write(vis_block_complex)
             t.tick('accumulate')
