@@ -2,7 +2,7 @@
 
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.metadatafile import MetadataFile as MF
-from craco.candidate_manager import SBCandsManager
+from craco.candidate_manager import SBCandsManager, ScanCandsManager
 from craft.sigproc import SigprocFile as SF
 from astropy.coordinates import get_sun, get_body
 import logging
@@ -532,7 +532,8 @@ class ObsInfo:
         self.runname = runname
         self.tstart = tstart
 
-        self.cands_manager = SBCandsManager(self.sbid, runname=self.runname)
+        self.run_candpipe()
+        self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
 
         self.pcb_stats = read_pcb_stats(self.scandir)
         self.plan_info = read_plan_info(self.scandir)
