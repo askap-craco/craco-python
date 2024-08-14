@@ -3,6 +3,7 @@
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.metadatafile import MetadataFile as MF
 from craco.candidate_manager import SBCandsManager, ScanCandsManager
+from craco.craco_run.auto_sched import SlackPostManager
 from craft.sigproc import SigprocFile as SF
 from astropy.coordinates import get_sun, get_body
 import logging
@@ -15,6 +16,9 @@ from collections import defaultdict
 import glob
 import traceback
 import IPython
+import warnings
+
+warnings.filterwarnings("ignore")
 
 log = logging.getLogger(__name__)
 username = os.environ['USER']
@@ -40,6 +44,10 @@ log.addHandler(stdout_handler)
 '''
 
 def search_dict(d, key):
+    '''
+    Traverses through the dictionary d and finds the value for key key.
+    If not found, returns None
+    '''
     if key in d:
         return d[key]
     for k, v in d.items():
@@ -48,6 +56,15 @@ def search_dict(d, key):
     return None
     
 def find_beam0_min_max_values(d, key):
+    '''
+    Takes a dictionary d and a key and finds the value of key for beam0,
+    and its min and max values across all beams
+
+    Assumes that all beam sub-dicts are indexed using the pattern beam_00, beam_24, etc
+
+    If a certain beam is not found, it simply ignores it
+    If beam 0 is not found, it reports None for the beam 0 value
+    '''
     values = []
 
     beam0_val = search_dict(d['beam_00'], key)
@@ -55,6 +72,9 @@ def find_beam0_min_max_values(d, key):
         val = search_dict(d[f'beam_{beamid:0>2}'], key)
         if val is not None:
             values.append(val)
+
+    if len(values) == 0:
+        return None, None, None
 
     return beam0_val, min(values), max(values)
 
@@ -153,11 +173,12 @@ def read_rfi_stats_info(scandir):
             beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
 
         except Exception as E:
-            log.critical(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
-            log.critical(traceback.format_exc())
+            log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
+            raise E
+            #log.critical(traceback.format_exc())
             #IPython.embed()
-        finally:
-            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
+        #finally:
+        #    rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
 
     return rfiinfo
 
@@ -230,11 +251,11 @@ def read_pcb_stats(scandir):
                 'coords_dec_deg': dec,
             }
         except Exception as E:
-            log.critical(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
-            log.critical(traceback.format_exc())
-            beaminfo = {}
-        finally:
-            pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+            log.exception(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
+            raise E
+            #beaminfo = {}
+        #finally:
+        #    pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
 
     return pcbinfo
 
@@ -312,10 +333,10 @@ def read_plan_info(scandir):
             planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         except Exception as E:
             beaminfo = {}
-            log.critical(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
-            log.critical(traceback.format_exc())
-        finally:
-            planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
+            log.exception(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
+            raise E
+        #finally:
+        #    planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         
     return planinfo
 
@@ -334,35 +355,39 @@ def parse_scandir_env(path):
 
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
+def extract_values_from_url(url):
+    # Split the URL to get the query string part
+    query_string = url.split('?')[1]
 
-def run_with_tsp():
-    log.info(f"Queuing up summarise scan")
-    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
-    TMPDIR = "/data/craco/craco/tmpdir"
-    environment = {
-        "TS_SOCKET": EOS_TS_SOCKET,
-        "TMPDIR": TMPDIR,
-    }
-    ecopy = os.environ.copy()
-    ecopy.update(environment)
+    # Split the query string into individual key-value pairs
+    parameters = query_string.split('&')
 
-    try:
-        scan_dir = os.environ['SCAN_DIR']
-        sbid, scanid, tstart = parse_scandir_env(scan_dir)
-    except Exception as KE:
-        log.critical(f"Could not fetch the scan directory from environment variables!!")
-        log.critical(KE)
-        return
-    else:
-        sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""summarise_scan -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+    # Initialize variables to store the values of beam and totalsample
+    beam = None
+    totalsample = None
 
-        subprocess.run(
-            [f"tsp {cmd}"], shell=True, capture_output=True,
-            text=True, env=ecopy,
-        )
-        log.info(f"Queued summarise scan job - with command - {cmd}")
+    # Iterate through the parameters and find the required values
+    for param in parameters:
+        key, value = param.split('=')
+        if key == 'beam':
+            beam = value
+        elif key == 'totalsample':
+            totalsample = value
 
+    return beam, totalsample
+
+
+def convert_urls_to_readable_links(url_list):
+    '''
+    Takes a list of URLs and converts them into markdown text with hyperlinked text that is more readable
+    Returns a list    
+    '''
+    converted_urls = []
+    for url in url_list:
+        beam, totalsample = extract_values_from_url(url)
+        converted_urls.append(f"[Beam {beam} Totalsample {totalsample}]({url})")
+
+    return converted_urls
 
 def get_metadata_info(scan):
     '''
@@ -516,6 +541,36 @@ def get_num_classified_candidates(candfiles, snr=None):
 
 
 
+def run_with_tsp():
+    log.info(f"Queuing up summarise scan")
+    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
+    TMPDIR = "/data/craco/craco/tmpdir"
+    environment = {
+        "TS_SOCKET": EOS_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""summarise_scan -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued summarise scan job - with command - {cmd}")
+
+
+
 class ObsInfo:
 
     def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results', runcandpipe=True):
@@ -539,14 +594,46 @@ class ObsInfo:
         self.run(runcandpipe = runcandpipe)
 
     def run(self, runcandpipe=True):
-        self.pcb_stats = read_pcb_stats(self.scandir)
-        self.plan_info = read_plan_info(self.scandir)
-        self.rfi_info = read_rfi_stats_info(self.scandir)
+        try:
+            log.debug("Reading pcb info")
+            self.pcb_stats = read_pcb_stats(self.scandir)
+            log.debug("Reading plan info")
+            self.plan_info = read_plan_info(self.scandir)
+            log.debug("Reading flagging stats")
+            self.rfi_info = read_rfi_stats_info(self.scandir)
 
-        if runcandpipe:
-            self.run_candpipe()
+            if runcandpipe:
+                log.debug("Starting candpipe execution")
+                self.run_candpipe()
+            
+            log.debug("Reading candidate files")
+            self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
+
+            self._dict['raw_pcb_info_dict'] = self.pcb_stats
+            self._dict['raw_plan_info_dict'] = self.plan_info
+            self._dict['raw_rfi_info_dict'] = self.rfi_info
+
+            self.filter_info()
+        except Exception as e:
+            msg = f"Could not generate useful info due to error:\n{e}"
+        else:
+            try:
+                msg = self.gen_slack_msg()
+            except Exception as e:
+                msg = f"Could not create message from filtered info due to :\n{e}"
+        finally:
+            self.post_on_slack(msg)
+            
+
         
-        self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
+        self.dump_json()
+
+    def dump_json(self):
+        import json
+        outname = os.path.join(self.scandir.scan_head_dir, "scan_summary.json")
+        log.info(f"Dumping the info as a json file - {outname}")
+        with open(outname, 'w') as fp:
+            json.dump(self._dict, fp, sort_keys=True, indent=4)
 
     def run_candpipe(self):
         '''
@@ -574,8 +661,6 @@ class ObsInfo:
                 except:
                     log.error(traceback.format_exc())
                     log.error(f"failed to run candpipe on {cand_fname}... aborted...")
-                
-        pass
 
 
     def _form_url(self, cands, beamid):
@@ -893,9 +978,23 @@ class ObsInfo:
         search_params['cellsize2_deg_max'] = cellsize2_b0_min_max[2]
     
         search_params['calibration_file'] = planinfo['values']['calibration']
+        search_params['calibration_age_days'] = self.get_time_delay(planinfo['values']['calibration'])
 
         return search_params
     
+    def get_time_delay(self, calpath):
+        '''
+        Extract the tstart of the observation used to generate a cal soln, and compare it with the tstart of self
+        Return the time difference in days
+        '''
+        from datetime import datetime as DT
+        timeformat="%Y%m%d%H%M%S"
+        cal_time = DT.strptime(os.path.realpath(os.path.join(calpath, "00", "b00.uvfits")).strip().split("/")[-2], timeformat)
+        obs_time = DT.strptime(self.tstart, timeformat)
+        diff = (obs_time - cal_time).total_seconds() / 86400     #days
+        return diff
+
+
     def get_scan_info(self):
         '''
         SBID related info -
@@ -932,6 +1031,12 @@ class ObsInfo:
         obs_params['num_channels'] = self.plan_info['freq_info']['nchan']
         obs_params['sampling_time_ms'] = self.plan_info['tsamp_s'] * 1e3
         obs_params['guest_science_proposal'] = "TO BE IMPLEMENTED"
+        
+        tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
+        obs_params['tobs_beam00'] = tobs[0]
+        obs_params['tobs_min'] = tobs[1]
+        obs_params['tobs_max'] = tobs[2]
+        obs_params['tobs_sum'] = sum(beam['tobs'] for beam in self.pcb_stats if beam.startswith('beam_'))
 
         sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
         obs_params['solar_elong_deg_beam00'] = sol[0]
@@ -956,7 +1061,7 @@ class ObsInfo:
 
         return obs_params
         
-    def post_slack_message(self):
+    def gen_slack_msg(self):
         '''
         Compose a nice slack message using the self._dict and the plot
                 
@@ -971,6 +1076,7 @@ class ObsInfo:
         msg += "----------------\n"
         msg += "Obs info ->\n"
         msg += f"- Beam footprint: {self.filtered_obs_info['beam_footprint']}\n"
+        msg += f"- Duration [Beam 0 (min-max)]: {self.filtered_obs_info['tobs_beam00']:.2f} ({self.filtered_obs_info['tobs_min']} - {self.filtered_obs_info['tobs_max']})"
         msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
         msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
         msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
@@ -986,7 +1092,8 @@ class ObsInfo:
         msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
         msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
         msg += f"- Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
-        msg += f"- Cal: {self.filtered_search_info['calibration_file']}\n"
+        msg += f"- Calib: {self.filtered_search_info['calibration_file']}\n"
+        msg += f"- Calib age: {self.filtered_search_info['calibration_age_days']:.2f} days\n"
         msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
         msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
         msg += f"- FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
@@ -1001,11 +1108,11 @@ class ObsInfo:
 
         msg += f"- Num RFI (incl. subthreshold): {self.filtered_cands_info['num_clustered_rfi_cands_bright']} ({self.filtered_cands_info['num_clustered_rfi_cands']})\n"
         msg += f"- Num localised (incl. subthreshold): {self.filtered_cands_info['num_clustered_uniq_cands_bright']} ({self.filtered_cands_info['num_clustered_uniq_cands']})\n"
-        msg += f"- List of source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']} ({self.filtered_cands_info['num_classified_cands']})\n"
+        msg += f"- Num source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']}   ({self.filtered_cands_info['num_classified_cands']})\n"
         msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
         msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
         msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
-        msg += f"- List of unknwon sources detected (URLs): {self.filtered_cands_info['unknown_cands_bright']}\n"
+        msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
         
         msg += "----------------\n"
         msg += "Data quality info ->\n"
@@ -1015,25 +1122,31 @@ class ObsInfo:
         msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
 
         return msg
+    
+    def post_on_slack(self, msg):
+        log.debug(f"Posting message - \n{msg}")
+        slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+        slack_poster.post_message(msg)
 
     def filter_info(self):
+        log.debug("Filtering relevant information")
         self.filtered_scan_info = self.get_scan_info()
         self.filtered_obs_info = self.get_observation_params()
         self.filtered_cands_info = self.get_candidates_info()
         self.filtered_dq_info = self.get_data_quality_stats()
         self.filtered_search_info = self.get_search_pipeline_params()
-        #self.plot_candidates()
-        self.post_slack_message()
 
+        self._dict['filtered_scan_info_dict'] = self.filtered_scan_info
+        self._dict['filtered_obs_info_dict'] = self.filtered_obs_info
+        self._dict['filtered_cands_info_dict'] = self.filtered_cands_info
+        self._dict['filtered_dq_info_dict'] = self.filtered_dq_info
+        self._dict['filtered_search_info_dict'] = self.filtered_search_info
 
 def main(args):
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
                       tstart = args.tstart)
     obsinfo.run()
-
-
-
 
 if __name__ == '__main__':
     a = argparse.ArgumentParser()
