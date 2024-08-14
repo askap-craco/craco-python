@@ -1151,17 +1151,21 @@ class ObsInfo:
         self._dict['filtered_dq_info_dict'] = self.filtered_dq_info
         self._dict['filtered_search_info_dict'] = self.filtered_search_info
 
-def _main(args):
+def _main():
+    args = get_parser()
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
                       tstart = args.tstart)
     obsinfo.run()
 
-if __name__ == '__main__':
+def get_parser():
     a = argparse.ArgumentParser()
     a.add_argument("-sbid", type=str, help="SBID", required=True)
     a.add_argument("-scanid", type=str, help="scanid", required=True)
     a.add_argument("-tstart", type=str, help="tstart", required=True)
 
     args = a.parse_args()
-    _main(args)
+    return args
+
+if __name__ == '__main__':
+    _main()
