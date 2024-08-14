@@ -181,7 +181,7 @@ def read_rfi_stats_info(scandir):
             beaminfo['frac_good_cells_pre_flagging'] = final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk']
             beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
             beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
-            
+
             rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
         except Exception as E:
             log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
@@ -1047,7 +1047,7 @@ class ObsInfo:
         obs_params['tobs_beam00'] = tobs[0]
         obs_params['tobs_min'] = tobs[1]
         obs_params['tobs_max'] = tobs[2]
-        obs_params['tobs_sum'] = sum(beam['tobs'] for beam in self.pcb_stats if beam.startswith('beam_'))
+        obs_params['tobs_sum'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_'))
 
         sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
         obs_params['solar_elong_deg_beam00'] = sol[0]
@@ -1159,7 +1159,7 @@ def _main():
                       scanid = args.scanid,
                       tstart = args.tstart,
                       runcandpipe = args.run_candpipe)
-    obsinfo.run()
+    #obsinfo.run()
 
 def get_parser():
     a = argparse.ArgumentParser()
