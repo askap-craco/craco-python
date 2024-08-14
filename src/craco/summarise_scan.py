@@ -185,7 +185,7 @@ def read_rfi_stats_info(scandir):
         except Exception as E:
             log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
             raise E
-            #log.critical(traceback.format_exc())
+            #log.critical(traceback.format_stack())
             #IPython.embed()
         #finally:
         #    rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
@@ -430,7 +430,7 @@ def get_metadata_info(scan):
         except Exception as E:
             emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
             log.critical(emsg)
-            log.critical(traceback.format_exc())
+            log.critical(traceback.format_stack())
             pass
             #msg = emsg
     return None
@@ -625,12 +625,12 @@ class ObsInfo:
 
             self.filter_info()
         except Exception as e:
-            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.print_exc()}"
+            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.format_stack()}"
         else:
             try:
                 msg = self.gen_slack_msg()
             except Exception as e:
-                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.print_exc()}"
+                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.format_stack()}"
         finally:
             self.post_on_slack(msg)
             
@@ -668,7 +668,7 @@ class ObsInfo:
                     pipe = candpipe.Pipeline(cand_fname, candpipe_args, config, src_dir=rundir, anti_alias=True)
                     pipe.run()
                 except:
-                    log.error(traceback.format_exc())
+                    log.error(traceback.format_stack())
                     log.error(f"failed to run candpipe on {cand_fname}... aborted...")
 
 
