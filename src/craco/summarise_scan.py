@@ -1087,7 +1087,7 @@ class ObsInfo:
         msg += "----------------\n"
         msg += "Obs info ->\n"
         msg += f"- Beam footprint: {self.filtered_obs_info['beam_footprint']}\n"
-        msg += f"- Duration [Beam 0 (min-max)]: {self.filtered_obs_info['tobs_beam00']:.2f} ({self.filtered_obs_info['tobs_min']} - {self.filtered_obs_info['tobs_max']})"
+        msg += f"- Duration [Beam 0 (min-max,sum)]: {self.filtered_obs_info['tobs_beam00']:.2f} ({self.filtered_obs_info['tobs_min']:.2f} - {self.filtered_obs_info['tobs_max']:.2f}, {self.filtered_obs_info['tobs_sum']:.2f})\n"
         msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
         msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
         msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
