@@ -6,6 +6,7 @@ from craco.candidate_manager import SBCandsManager, ScanCandsManager
 from craco.craco_run.auto_sched import SlackPostManager
 from craft.sigproc import SigprocFile as SF
 from astropy.coordinates import get_sun, get_body
+from astropy import time as T
 import logging
 import os
 import subprocess
@@ -17,6 +18,7 @@ import glob
 import traceback
 import IPython
 import warnings
+import json
 
 warnings.filterwarnings("ignore")
 
@@ -42,6 +44,14 @@ log.addHandler(stdout_handler)
         spatial_pixels_max = max(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
 
 '''
+
+class TrivialEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, T.Time):
+            d = o.iso
+        else:
+            d = super().default(o)
+        return d
 
 def search_dict(d, key):
     '''
@@ -615,12 +625,12 @@ class ObsInfo:
 
             self.filter_info()
         except Exception as e:
-            msg = f"Could not generate useful info due to error:\n{e}"
+            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.print_exc()}"
         else:
             try:
                 msg = self.gen_slack_msg()
             except Exception as e:
-                msg = f"Could not create message from filtered info due to :\n{e}"
+                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.print_exc()}"
         finally:
             self.post_on_slack(msg)
             
@@ -629,11 +639,10 @@ class ObsInfo:
         self.dump_json()
 
     def dump_json(self):
-        import json
         outname = os.path.join(self.scandir.scan_head_dir, "scan_summary.json")
         log.info(f"Dumping the info as a json file - {outname}")
         with open(outname, 'w') as fp:
-            json.dump(self._dict, fp, sort_keys=True, indent=4)
+            json.dump(self._dict, fp, sort_keys=True, indent=4, cls=TrivialEncoder)
 
     def run_candpipe(self):
         '''
