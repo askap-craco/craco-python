@@ -185,7 +185,7 @@ def read_rfi_stats_info(scandir):
         except Exception as E:
             log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
             raise E
-            #log.critical(traceback.format_stack())
+            #log.critical(traceback.format_exc())
             #IPython.embed()
         #finally:
         #    rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
@@ -430,7 +430,7 @@ def get_metadata_info(scan):
         except Exception as E:
             emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
             log.critical(emsg)
-            log.critical(traceback.format_stack())
+            log.critical(traceback.format_exc())
             pass
             #msg = emsg
     return None
@@ -625,12 +625,12 @@ class ObsInfo:
 
             self.filter_info()
         except Exception as e:
-            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.format_stack()}"
+            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.format_exc()}"
         else:
             try:
                 msg = self.gen_slack_msg()
             except Exception as e:
-                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.format_stack()}"
+                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.format_exc()}"
         finally:
             self.post_on_slack(msg)
             
@@ -668,7 +668,7 @@ class ObsInfo:
                     pipe = candpipe.Pipeline(cand_fname, candpipe_args, config, src_dir=rundir, anti_alias=True)
                     pipe.run()
                 except:
-                    log.error(traceback.format_stack())
+                    log.error(traceback.format_exc())
                     log.error(f"failed to run candpipe on {cand_fname}... aborted...")
 
 
@@ -1151,7 +1151,7 @@ class ObsInfo:
         self._dict['filtered_dq_info_dict'] = self.filtered_dq_info
         self._dict['filtered_search_info_dict'] = self.filtered_search_info
 
-def main(args):
+def _main(args):
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
                       tstart = args.tstart)
@@ -1164,4 +1164,4 @@ if __name__ == '__main__':
     a.add_argument("-tstart", type=str, help="tstart", required=True)
 
     args = a.parse_args()
-    main(args)
+    _main(args)
