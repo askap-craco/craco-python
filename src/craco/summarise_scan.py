@@ -181,7 +181,8 @@ def read_rfi_stats_info(scandir):
             beaminfo['frac_good_cells_pre_flagging'] = final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk']
             beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
             beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
-
+            
+            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
         except Exception as E:
             log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
             raise E
@@ -260,6 +261,7 @@ def read_pcb_stats(scandir):
                 'coords_dec_dms': dec_to_dms(dec),
                 'coords_dec_deg': dec,
             }
+            pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
         except Exception as E:
             log.exception(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
             raise E
@@ -1155,7 +1157,8 @@ def _main():
     args = get_parser()
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
-                      tstart = args.tstart)
+                      tstart = args.tstart,
+                      runcandpipe = args.run_candpipe)
     obsinfo.run()
 
 def get_parser():
@@ -1163,6 +1166,7 @@ def get_parser():
     a.add_argument("-sbid", type=str, help="SBID", required=True)
     a.add_argument("-scanid", type=str, help="scanid", required=True)
     a.add_argument("-tstart", type=str, help="tstart", required=True)
+    a.add_argument("-no_candpipe", dest='run_candpipe', action='store_false', help="Don't run candpipe (def:False)", default=True)
 
     args = a.parse_args()
     return args
