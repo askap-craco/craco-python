@@ -1012,6 +1012,7 @@ class FastPreprocess:
         self.blk_shape = blk_shape
         self.num_fixed_good_chans = fixed_freq_weights.sum()
         self.total_num_cells = blk_shape[0] * blk_shape[1] * blk_shape[2]
+        self.tf_num_cells = blk_shape[1] * blk_shape[2]
         self._initialise_internal_buffers()
         self._send_dummy_block()
         self._initialise_internal_buffers()
@@ -1034,10 +1035,12 @@ class FastPreprocess:
         self.num_good_nbl_post = 0
         self.num_good_cells_post = 0
 
+        self.num_dropped_cells_cumul = 0
+
         self.num_nblks = 0
 
         self.flagging_stats_fout = open(f"flagging_stats_log_b{self.beamid:02d}.csv", 'w')    
-        self.flagging_stats_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\tnum_bad_cells_pre\tnum_bad_cells_post\texpected_block_shape\ttot_num_cells\tnum_fixed_good_chans\n")
+        self.flagging_stats_fout.write("#nblks\tnum_good_bl_pre_cumul\tnum_good_cells_pre_cumul\tnum_good_bl_post_cumul\tnum_good_cells_post_cumul\tnum_bad_cells_pre\tnum_bad_cells_post\texpected_block_shape\ttot_num_cells\tnum_fixed_good_chans\tdropped_packets_cumul\n")
         #self.output_buf = np.zeros((nrun, nuv, ncin, 2), dtype=np.int16)
         #self.lut = fast_bl2uv_mapping(nbl, nchan)       #nbl, nf, 3 - irun, iuv, ichan
 
@@ -1056,6 +1059,7 @@ class FastPreprocess:
         self.num_bad_cells_pre_current = self.total_num_cells - num_good_cells
         self.num_good_cells_pre += num_good_cells
         self.num_good_nbl_pre += num_good_nbl
+        self.num_dropped_cells_cumul += self.tf_num_cells - tf_weights.sum()
 
     def update_postflagging_statistics(self, tf_weights, bl_weights):
         num_good_cells, num_good_nbl = calculate_num_good_cells(tf_weights, bl_weights, self.fixed_freq_weights)
@@ -1068,8 +1072,9 @@ class FastPreprocess:
         good_bls_post, good_cells_post = self.postflagging_stats
         bad_cells_pre = self.num_bad_cells_pre_current
         bad_cells_post = self.num_bad_cells_post_current
+        dropped_cells_cumul = self.num_dropped_cells_cumul / self.num_nblks
 
-        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\t{bad_cells_pre:g}\t{bad_cells_post:g}\t{self.blk_shape}\t{self.total_num_cells:.2f}\t{self.num_fixed_good_chans:g}\n"
+        out_str = f"{self.num_nblks:g}\t{good_bls_pre:.2f}\t{good_cells_pre:.2f}\t{good_bls_post:.2f}\t{good_cells_post:.2f}\t{bad_cells_pre:.2f}\t{bad_cells_post:.2f}\t{self.blk_shape}\t{self.total_num_cells:.2f}\t{self.num_fixed_good_chans:g}\t{dropped_cells_cumul:.2f}\n"
         self.flagging_stats_fout.write(out_str)
         self.flagging_stats_fout.flush()
 

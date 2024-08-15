@@ -251,17 +251,41 @@ class ScanDir:
         if len(self.beam_node_dict) != 36:
             log.info("not all beams recorded in rankfile... %s", self.beam_node_dict)
 
-
-    def beam_uvfits_path(self, beam):
+    def beam_scandir_path(self, beam):
         scan_dir = self.datadirs.scan_dir(
             self.scheddir.sbid, self.scan, 
             nidx = self.beam_node_dict[int(beam)]
         )
-        return f"{scan_dir}/b{int(beam):0>2}.uvfits"
+        return scan_dir    
+
+    def beam_uvfits_path(self, beam):
+        scan_dir = self.beam_scandir_path(beam)
+        uvfits_path = f"{scan_dir}/b{int(beam):0>2}.uvfits"
+        return uvfits_path if check_path(uvfits_path) else None
+    
+    def beam_pcb_path(self, beam):
+        scan_dir = self.beam_scandir_path(beam)
+        pcb_path = f"{scan_dir}/pcbb{int(beam):0>2}.fil"
+        return pcb_path if check_path(pcb_path) else None
+
+    def beam_plan0_path(self, beam):
+        scan_dir = self.beam_scandir_path(beam)
+        plan_path =  f"{scan_dir}/beam{int(beam):0>2}/plans/plan_iblk0.pkl"
+        return plan_path if check_path(plan_path) else None
+    
+    def beam_rfi_stats_path(self, beam):
+        scan_dir = self.beam_scandir_path(beam)
+        rfi_stats_path = f"{scan_dir}/flagging_stats_log_b{int(beam):0>2}.csv"
+        return rfi_stats_path if check_path(rfi_stats_path) else None
 
     @property
     def uvfits_paths(self):
         return [self.beam_uvfits_path(beam) for beam in range(0, 36)]
+
+    @property
+    def pcb_paths(self):
+        return [self.beam_pcb_path(beam) for beam in range(0, 36)]
+
 
     @property
     def uvfits_paths_exists(self):
