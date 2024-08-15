@@ -103,6 +103,7 @@ if __name__ == '__main__':
                                 'beam_cand_sender=craco.beam_cand_sender:_main',
                                 'mpi_cand_pipeline=craco.mpi_cand_pipeline:_main',
                                 'summarise_cands=craco.summarise_cands:_main',
+                                'summarise_scan=craco.summarise_scan:_main',
                                 'metadatasaver=craco.askap.craft.obsman.metadatasaver:_main',
                                 'quicksnip=craco.quicksnip:_main',
                                 'uvfits_average=craco.uvfits_average:main',

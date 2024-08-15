@@ -2,8 +2,11 @@
 
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.metadatafile import MetadataFile as MF
-from craco.candidate_manager import SBCandsManager
+from craco.candidate_manager import SBCandsManager, ScanCandsManager
+from craco.craco_run.auto_sched import SlackPostManager
 from craft.sigproc import SigprocFile as SF
+from astropy.coordinates import get_sun, get_body
+from astropy import time as T
 import logging
 import os
 import subprocess
@@ -13,13 +16,182 @@ import sys
 from collections import defaultdict
 import glob
 import traceback
+import IPython
+import warnings
+import json
+
+warnings.filterwarnings("ignore")
 
 log = logging.getLogger(__name__)
-logging.basicConfig(filename="/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log",
+username = os.environ['USER']
+
+if username == 'gup037':
+    logname = "/tmp/tmp.tmp"
+elif username == 'craftop':
+    logname = "/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log"
+else:
+    raise RuntimeError("Oi - what are you doing with my code -- shoo!")
+
+logging.basicConfig(filename=logname,
                     format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
 stdout_handler = logging.StreamHandler(sys.stdout)
 log.addHandler(stdout_handler)
+
+'''
+        spatial_pixels_beam0 = planinfo['beam_00']['wcs']['npix']
+        spatial_pixels_min = min(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
+        spatial_pixels_max = max(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
+
+'''
+
+class TrivialEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, T.Time):
+            d = o.iso
+        else:
+            d = super().default(o)
+        return d
+
+def search_dict(d, key):
+    '''
+    Traverses through the dictionary d and finds the value for key key.
+    If not found, returns None
+    '''
+    if key in d:
+        return d[key]
+    for k, v in d.items():
+        if isinstance(v, dict):
+            return search_dict(v, key)
+    return None
+    
+def find_beam0_min_max_values(d, key):
+    '''
+    Takes a dictionary d and a key and finds the value of key for beam0,
+    and its min and max values across all beams
+
+    Assumes that all beam sub-dicts are indexed using the pattern beam_00, beam_24, etc
+
+    If a certain beam is not found, it simply ignores it
+    If beam 0 is not found, it reports None for the beam 0 value
+    '''
+    values = []
+
+    beam0_val = search_dict(d['beam_00'], key)
+    for beamid in range(36):
+        val = search_dict(d[f'beam_{beamid:0>2}'], key)
+        if val is not None:
+            values.append(val)
+
+    if len(values) == 0:
+        return None, None, None
+
+    return beam0_val, min(values), max(values)
+
+
+def pcb_path_to_beamid(pcb_path):
+    pcb_name = os.path.basename(pcb_path)
+    beamid = int(pcb_name.strip("pcbb").strip(".fil"))
+    return beamid
+
+def get_last_uncommented_line(file_path):
+    '''
+    Reads the last uncommented line from the file without looping through all lines
+    Thanks Chat-GPT
+    '''
+    with open(file_path, 'rb') as file:
+        file.seek(0, 2)  # Move the pointer to the end of the file
+        buffer = b''
+        while file.tell() > 0:
+            file.seek(-2, 1)  # Move the pointer back two characters
+            new_byte = file.read(1)
+            if new_byte == b'\n' and buffer:
+                line = buffer[::-1].decode().strip()
+                if line and not line.startswith("#"):
+                    return line
+                buffer = b''
+            else:
+                buffer += new_byte
+        # Check the first line in case it’s uncommented
+        line = buffer[::-1].decode().strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
+
+def parse_flagging_statistics_line(line):
+    '''
+    Parses the values in a given line of the flagging statistics file
+
+    Arguments
+    ---------
+    line: str
+        The contents of the line 
+    
+    Returns
+    -------
+    flagging_stats: dict
+        A dict containing useful info derived from that line
+    '''
+    parts = line.strip().split("\t")
+    info = {}
+    info['nblks']= float(parts[0])
+    info['avg_num_good_bls_pre_flagging'] = float(parts[1])
+    info['avg_num_good_cells_pre_flagging'] = float(parts[2])
+    info['avg_num_good_bls_post_flagging'] = float(parts[3])
+    info['avg_num_good_cells_post_flagging'] = float(parts[4])
+    #num_bad_cells_pre = float(parts[5])    We don't need these two values
+    #num_bad_cells_post = float(parts[6])
+    info['blk_shape'] = tuple(int(x) for x in parts[7][1:-1].split(','))
+    info['tot_num_cells_per_blk'] = float(parts[8])
+    info['num_fixed_good_chans_per_blk'] = float(parts[9])
+    info['avg_dropped_packets_frac'] = float(parts[10])
+    return info
+    
+
+def read_rfi_stats_info(scandir):
+    '''
+    Loops through all beams in given scandir and reads the RFI statistics logfile, parsing some useful info
+
+    Arguments
+    ---------
+    scandir: Object of datadirs.ScanDir() class
+
+    Returns
+    -------
+    rfiinfo: dict
+        Dictionary containing the RFI statistics keyed by beamid
+    '''
+
+    rfiinfo = {}
+    for beamid in range(36):
+        beaminfo = {}
+        rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
+        try:
+            last_line = get_last_uncommented_line(rfi_stats_path)
+            final_values = parse_flagging_statistics_line(last_line)
+            nbl, nf, nt = final_values['blk_shape']
+
+            beaminfo['frac_bls_good'] = final_values['avg_num_good_bls_pre_flagging'] / nbl
+            beaminfo['frac_bls_bad'] = 1 - beaminfo['frac_bls_good']
+
+            beaminfo['frac_fixed_good_chans'] = final_values['num_fixed_good_chans_per_blk'] / nf
+            beaminfo['frac_fixed_bad_chans'] = 1 - beaminfo['frac_fixed_good_chans']
+
+            beaminfo['frac_good_cells_post_flagging'] = final_values['avg_num_good_cells_post_flagging'] / final_values['tot_num_cells_per_blk']
+            beaminfo['frac_good_cells_pre_flagging'] = final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk']
+            beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
+            beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
+
+            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
+        except Exception as E:
+            log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
+            raise E
+            #log.critical(traceback.format_exc())
+            #IPython.embed()
+        #finally:
+        #    rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
+
+    return rfiinfo
 
 
 
@@ -56,29 +228,129 @@ def ra_to_hms(ha:float) -> str:
 
     return f"{hh:02g}:{mm:02g}:{ss_int:02g}.{ss_frac:02g}"
 
-def read_filterbank_stats(filpath):
-    try:
-        f = SF(filpath)
-        dur = f.nsamples * f.tsamp / 60         #minutes
-        bw = np.abs(f.foff) * f.nchans
-        fcen = f.fch1 + bw / 2
-        ra = f.src_raj_deg
-        dec = f.src_dej_deg
-        #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
-        fil_info = {
-            'tobs': dur,
-            'BW': bw,
-            'fcen': fcen,
-            'beam0_coords_ra_hms': ra_to_hms(ra),
-            'beam0_coords_ra_deg': ra,
-            'beam0_coords_dec_dms': dec_to_dms(dec),
-            'beam0_coords_dec_deg': dec,
-        }
-    except:
-        log.critical(f"!Error: Could not read filterbank information from path - {filpath}!")
-        fil_info = {}
-    finally:
-        return fil_info
+def read_pcb_stats(scandir):
+    '''
+    Loops over all beam nodes in a scan, and parses the information in each of the pcb filterbank
+
+    Arguments
+    ---------
+    scandir: Object of datadirs.Scandir() class
+    
+    Returns
+    -------
+    filinfo: dict
+        A dictionary containing information extracted from pcb headers - keyed by beamid
+    '''
+    pcbinfo = {}
+    for beamid in range(36):
+        try:
+            filpath = scandir.beam_pcb_path(beamid)
+            f = SF(filpath)
+            dur = f.nsamples * f.tsamp / 60         #minutes
+            bw = np.abs(f.foff) * f.nchans
+            fcen = f.fch1 + bw / 2
+            ra = f.src_raj_deg
+            dec = f.src_dej_deg
+            #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
+            beaminfo = {
+                'tobs': dur,
+                'BW': bw,
+                'fcen': fcen,
+                'coords_ra_hms': ra_to_hms(ra),
+                'coords_ra_deg': ra,
+                'coords_dec_dms': dec_to_dms(dec),
+                'coords_dec_deg': dec,
+            }
+            pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+        except Exception as E:
+            log.exception(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
+            raise E
+            #beaminfo = {}
+        #finally:
+        #    pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+
+    return pcbinfo
+
+
+def read_plan_info(scandir):
+    '''
+    Reads pickled plans for all beams in the given scan and extract all the relevant info
+
+    Arguments
+    ---------
+    scandir: Object of datadir.Scandir() class
+
+    Returns
+    -------
+
+    planinfo: dict
+        A dictionary containing relevant info from plans of all beams - keyed by beamid
+    
+    '''
+
+    planinfo = {}
+    for beamid in range(36):
+        planfile = scandir.beam_plan0_path(beamid)
+        try:
+            plan0 = np.load(planfile, allow_pickle=True)
+            
+            if beamid == 0:
+                planinfo['values'] = vars(plan0.values)
+                
+                freq_info = {}
+                freq_info['fmin'] = plan0.fmin
+                freq_info['fmax'] = plan0.fmax
+                freq_info['nchan'] = plan0.nf
+                freq_info['foff'] = plan0.foff
+                freq_info['fch1'] = plan0.freqs[0]
+
+                planinfo['freq_info'] = freq_info
+
+                uf = plan0.useful_info()
+                planinfo['tsamp_s'] = uf['TSAMP']
+                planinfo['nant'] = uf['NANT']
+                planinfo['nbl'] = uf['NBL']
+                planinfo['start_mjd'] = uf['STARTMJD']
+                planinfo['epoch'] = uf['EPOCH']
+                planinfo['nowtai'] = uf['NOWTAI']
+
+                planinfo['tstart'] = plan0.tstart
+            
+            
+            beaminfo = {}
+            beaminfo['beamid'] = plan0.beamid
+            beaminfo['target'] = plan0.target_name
+            beaminfo['solar_elong_deg'] = plan0.phase_center.separation(get_sun(plan0.tstart)).deg
+            beaminfo['lunar_elong_deg'] = plan0.phase_center.separation(get_body("moon", plan0.tstart)).deg
+
+            wcsinfo = {}
+            wcsinfo['coords_ra_deg'] = plan0.ra.deg
+            wcsinfo['coords_ra_hms'] = ra_to_hms(plan0.ra.deg)
+            wcsinfo['coords_dec_deg'] = plan0.dec.deg
+            wcsinfo['coords_dec_dms'] = dec_to_dms(plan0.dec.deg)
+            wcsinfo['gl_deg'] = plan0.phase_center.galactic.l.deg
+            wcsinfo['gb_deg'] = plan0.phase_center.galactic.b.deg
+            wcsinfo['az_deg'] = plan0.craco_wcs.altaz.az.deg
+            wcsinfo['alt_deg'] = plan0.craco_wcs.altaz.alt.deg
+            wcsinfo['npix'] = plan0.craco_wcs.npix
+            wcsinfo['cellsize1_deg'] = plan0.craco_wcs.cellsize[0].deg
+            wcsinfo['cellsize2_deg'] = plan0.craco_wcs.cellsize[1].deg
+            wcsinfo['fov1_deg'] = (plan0.craco_wcs.cellsize[0] * plan0.craco_wcs.npix).deg
+            wcsinfo['fov2_deg'] = (plan0.craco_wcs.cellsize[1] * plan0.craco_wcs.npix).deg
+            wcsinfo['hourangle_hr'] = plan0.craco_wcs.hour_angle.hour
+            wcsinfo['lst_hr'] = plan0.craco_wcs.lst.hour
+
+            beaminfo['wcs'] = wcsinfo
+
+            planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
+        except Exception as E:
+            beaminfo = {}
+            log.exception(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
+            raise E
+        #finally:
+        #    planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
+        
+    return planinfo
 
 
 def parse_scandir_env(path):
@@ -95,35 +367,39 @@ def parse_scandir_env(path):
 
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
+def extract_values_from_url(url):
+    # Split the URL to get the query string part
+    query_string = url.split('?')[1]
 
-def run_with_tsp():
-    log.info(f"Queuing up summarise scan")
-    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
-    TMPDIR = "/data/craco/craco/tmpdir"
-    environment = {
-        "TS_SOCKET": EOS_TS_SOCKET,
-        "TMPDIR": TMPDIR,
-    }
-    ecopy = os.environ.copy()
-    ecopy.update(environment)
+    # Split the query string into individual key-value pairs
+    parameters = query_string.split('&')
 
-    try:
-        scan_dir = os.environ['SCAN_DIR']
-        sbid, scanid, tstart = parse_scandir_env(scan_dir)
-    except Exception as KE:
-        log.critical(f"Could not fetch the scan directory from environment variables!!")
-        log.critical(KE)
-        return
-    else:
-        sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""summarise_scan -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+    # Initialize variables to store the values of beam and totalsample
+    beam = None
+    totalsample = None
 
-        subprocess.run(
-            [f"tsp {cmd}"], shell=True, capture_output=True,
-            text=True, env=ecopy,
-        )
-        log.info(f"Queued summarise scan job - with command - {cmd}")
+    # Iterate through the parameters and find the required values
+    for param in parameters:
+        key, value = param.split('=')
+        if key == 'beam':
+            beam = value
+        elif key == 'totalsample':
+            totalsample = value
 
+    return beam, totalsample
+
+
+def convert_urls_to_readable_links(url_list):
+    '''
+    Takes a list of URLs and converts them into markdown text with hyperlinked text that is more readable
+    Returns a list    
+    '''
+    converted_urls = []
+    for url in url_list:
+        beam, totalsample = extract_values_from_url(url)
+        converted_urls.append(f"[Beam {beam} Totalsample {totalsample}]({url})")
+
+    return converted_urls
 
 def get_metadata_info(scan):
     '''
@@ -156,6 +432,7 @@ def get_metadata_info(scan):
         except Exception as E:
             emsg = f"Could not load the metadata info from {metapath} due to this error - {E}"
             log.critical(emsg)
+            log.critical(traceback.format_exc())
             pass
             #msg = emsg
     return None
@@ -186,14 +463,14 @@ def get_num_candidates(candfiles, snr=None):
     for candfile in candfiles:
         if snr is None:
             num_cands += candfile.ncands
-            num_cands_per_beam[candfile.beamid] = candfile.ncands
+            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.ncands
         else:
             try:
                 ncands = sum( candfile.cands['snr'] >= snr )
             except KeyError:
                 ncands = sum( candfile.cands['SNR'] >= snr )
             num_cands += ncands
-            num_cands_per_beam[candfile.beamid] = ncands
+            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = ncands
             
     return num_cands, num_cands_per_beam
 
@@ -223,7 +500,7 @@ def get_num_clusters(candfiles, snr=None):
     for candfile in candfiles:
         if snr is None:
             num_clusters += candfile.nclusters
-            num_clusters_per_beam[candfile.beamid] = candfile.nclusters
+            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.nclusters
         else:
             try:
                 cands = candfile.cands[ candfile.cands['snr'] >= snr ]
@@ -231,7 +508,7 @@ def get_num_clusters(candfiles, snr=None):
                 cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
             nclusters = cands['cluster_id'].nunique()
             num_clusters += nclusters
-            num_clusters_per_beam[candfile.beamid] = nclusters
+            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = nclusters
             
     return num_clusters, num_clusters_per_beam
 
@@ -268,7 +545,7 @@ def get_num_classified_candidates(candfiles, snr=None):
                 cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
 
         value_counts = cands['LABEL'].value_counts()
-        num_classified_cands_per_beam[candfile.beamid] = value_counts.to_dict()
+        num_classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = value_counts.to_dict()
         for key, count in value_counts.items():
             num_classified_cands[key] += count
         
@@ -276,9 +553,39 @@ def get_num_classified_candidates(candfiles, snr=None):
 
 
 
+def run_with_tsp():
+    log.info(f"Queuing up summarise scan")
+    EOS_TS_SOCKET = "/data/craco/craco/tmpdir/queues/end_of_scan"
+    TMPDIR = "/data/craco/craco/tmpdir"
+    environment = {
+        "TS_SOCKET": EOS_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""summarise_scan -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued summarise scan job - with command - {cmd}")
+
+
+
 class ObsInfo:
 
-    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results'):
+    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results', runcandpipe=True):
         '''
         sbid: str, SBIDs - Can accept SB0xxxxx, 0xxxxx, xxxx formats
         scanid: str, scanid - needs to be in 00 format
@@ -295,12 +602,49 @@ class ObsInfo:
         self.tstart = tstart
         self.runname = runname
         self.tstart = tstart
-
-        self.cands_manager = SBCandsManager(self.sbid, runname=self.runname)
-
-        # self.filterbank_stats = read_filterbank_stats()
         self._dict = {}
+        self.run(runcandpipe = runcandpipe)
 
+    def run(self, runcandpipe=True):
+        try:
+            log.debug("Reading pcb info")
+            self.pcb_stats = read_pcb_stats(self.scandir)
+            log.debug("Reading plan info")
+            self.plan_info = read_plan_info(self.scandir)
+            log.debug("Reading flagging stats")
+            self.rfi_info = read_rfi_stats_info(self.scandir)
+
+            if runcandpipe:
+                log.debug("Starting candpipe execution")
+                self.run_candpipe()
+            
+            log.debug("Reading candidate files")
+            self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
+
+            self._dict['raw_pcb_info_dict'] = self.pcb_stats
+            self._dict['raw_plan_info_dict'] = self.plan_info
+            self._dict['raw_rfi_info_dict'] = self.rfi_info
+
+            self.filter_info()
+        except Exception as e:
+            msg = f"Could not generate useful info due to error:\n{e}\n{traceback.format_exc()}"
+        else:
+            try:
+                msg = self.gen_slack_msg()
+            except Exception as e:
+                msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.format_exc()}"
+        finally:
+            self.post_on_slack(msg)
+            
+
+        
+        self.dump_json()
+
+    def dump_json(self):
+        outname = os.path.join(self.scandir.scan_head_dir, "scan_summary.json")
+        log.info(f"Dumping the info as a json file - {outname}")
+        with open(outname, 'w') as fp:
+            json.dump(self._dict, fp, sort_keys=True, indent=4, cls=TrivialEncoder)
 
     def run_candpipe(self):
         '''
@@ -328,8 +672,6 @@ class ObsInfo:
                 except:
                     log.error(traceback.format_exc())
                     log.error(f"failed to run candpipe on {cand_fname}... aborted...")
-                
-        pass
 
 
     def _form_url(self, cands, beamid):
@@ -415,11 +757,11 @@ class ObsInfo:
             classified_rows = cands[ cands['LABEL'] == label ]
             if label != 'UNKNOWN':
                 # return crossmatched names for known objects 
-                classified_cands_per_beam[candfile.beamid] = classified_rows['MATCH_name'].unique().tolist()
+                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = classified_rows['MATCH_name'].unique().tolist()
                 classified_cands += classified_rows['MATCH_name'].unique().tolist()
             else:
                 # return a list of urls for unknown candidates 
-                classified_cands_per_beam[candfile.beamid] = self._form_url(classified_rows, candfile.beamid)
+                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
                 classified_cands += self._form_url(classified_rows, candfile.beamid)
             
         return list(set(classified_cands)), classified_cands_per_beam
@@ -461,12 +803,12 @@ class ObsInfo:
         candidates_info['num_clustered_uniq_cands_bright']          = num_clustered_uniq_cands_bright
         candidates_info['num_clustered_uniq_cands_bright_per_beam'] = num_clustered_uniq_cands_bright_per_beam
 
-        # total number of clustered unique candidates (and in each beam)
+        # total number of clustered rfi candidates (and in each beam)
         num_clustered_rfi_cands, num_clustered_rfi_cands_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles)
         candidates_info['num_clustered_rfi_cands']          = num_clustered_rfi_cands
         candidates_info['num_clustered_rfi_cands_per_beam'] = num_clustered_rfi_cands_per_beam
 
-        # total number of bright clustered unique candidates (and in each beam)
+        # total number of bright clustered rfi candidates (and in each beam)
         num_clustered_rfi_cands_bright, num_clustered_rfi_cands_bright_per_beam = get_num_candidates(self.cands_manager.clustered_rfi_candfiles, snr=snr)
         candidates_info['num_clustered_rfi_cands_bright']          = num_clustered_rfi_cands_bright
         candidates_info['num_clustered_rfi_cands_bright_per_beam'] = num_clustered_rfi_cands_bright_per_beam
@@ -500,6 +842,16 @@ class ObsInfo:
         pulsar_cands_bright, pulsar_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='PSR', snr=snr)
         candidates_info['pulsar_cands_bright'] = pulsar_cands_bright 
         candidates_info['pulsar_cands_bright_per_beam'] = pulsar_cands_bright_per_beam
+
+        # total of RACS (names) detected in obs 
+        racs_cands, racs_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS')
+        candidates_info['racs_cands'] = racs_cands 
+        candidates_info['racs_cands_per_beam'] = racs_cands_per_beam
+
+        # total of bright RACS (names) detected in obs 
+        racs_cands_bright, racs_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS', snr=snr)
+        candidates_info['racs_cands_bright'] = racs_cands_bright 
+        candidates_info['racs_cands_bright_per_beam'] = racs_cands_bright_per_beam
         
         # total of CUSTOM sources (names)
         custom_cands, custom_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='CUSTOM')
@@ -521,8 +873,8 @@ class ObsInfo:
         candidates_info['unknown_cands_bright'] = unknown_cands_bright
         candidates_info['unknown_cands_bright_per_beam'] = unknown_cands_bright_per_beam
             
-        self._dict['candidates_info'] = candidates_info
-        pass
+        #self._dict['candidates_info'] = candidates_info
+        return candidates_info
 
 
     def plot_candidates(self):
@@ -534,41 +886,140 @@ class ObsInfo:
         pass
 
 
-    def get_rfi_stats(self):
+    def get_data_quality_stats(self):
         '''
         To be implemented by VG
         Diagnostics -
             RFI statistics
             Dropped packet statistics
 
-        '''
-        pass
+        '''       
+        
+        data_quality_diagnostics = {}
+        rfiinfo = self.rfi_info
+        
+        dp_stats = find_beam0_min_max_values(rfiinfo, 'dropped_packets_frac')
+        data_quality_diagnostics['dropped_packets_fraction_beam00'] = dp_stats[0]
+        data_quality_diagnostics['dropped_packets_fraction_min'] = dp_stats[1]
+        data_quality_diagnostics['dropped_packets_fraction_max'] = dp_stats[2]
+
+        blg_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_good')
+        data_quality_diagnostics['good_baselines_fraction_beam00'] = blg_stats[0]
+        data_quality_diagnostics['good_baselines_fraction_min'] = blg_stats[1]
+        data_quality_diagnostics['good_baselines_fraction_max'] = blg_stats[2]
+
+        blb_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_bad')
+        data_quality_diagnostics['bad_baselines_fraction_beam00'] = blb_stats[0]
+        data_quality_diagnostics['bad_baselines_fraction_min'] = blb_stats[1]
+        data_quality_diagnostics['bad_baselines_fraction_max'] = blb_stats[2]
+
+        fc_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_good_chans')
+        data_quality_diagnostics['good_channels_fraction_beam00'] = fc_stats[0]
+        data_quality_diagnostics['good_channels_fraction_min'] = fc_stats[1]
+        data_quality_diagnostics['good_channels_fraction_max'] = fc_stats[2]
+
+        fcb_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_bad_chans')
+        data_quality_diagnostics['bad_channels_fraction_beam00'] = fcb_stats[0]
+        data_quality_diagnostics['bad_channels_fraction_min'] = fcb_stats[1]
+        data_quality_diagnostics['bad_channels_fraction_max'] = fcb_stats[2]
+
+        fcp_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_pre_flagging')
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_beam00'] = fcp_stats[0]
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_min'] = fcp_stats[1]
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_max'] = fcp_stats[2]
+
+        fcpo_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_post_flagging')
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_beam00'] = fcpo_stats[0]
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_min'] = fcpo_stats[1]
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_max'] = fcpo_stats[2]
+
+        ff_stats = find_beam0_min_max_values(rfiinfo, 'flagging_frac')
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_beam00'] = ff_stats[0]
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_min'] = ff_stats[1]
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_max'] = ff_stats[2]
+
+        return data_quality_diagnostics
+
 
     def get_search_pipeline_params(self):
         '''
         To be implemented by Keith And VG 
         
         '''
-        pass
+        planinfo = self.plan_info
+        search_params = {}
+        search_params['num_dm_trials'] = planinfo['values']['ndm']
+        search_params['dm_samps_min'] = 0
+        search_params['dm_samps_max'] = planinfo['values']['ndm'] - 1
+        search_params['dm_trial_steps'] = 'linear'
+        search_params['dm_trial_spacing'] = 1
+        search_params['num_boxcar_width_trials'] = planinfo['values']['nbox']
+        search_params['boxcar_width_samps_min'] = 1
+        search_params['boxcar_width_samps_max'] = planinfo['values']['nbox']
+        search_params['boxcar_trial_steps'] = 'linear'
+        search_params['boxcar_trial_spacing'] = 1
+        search_params['num_antennas'] = planinfo['nant']
+        search_params['num_baselines'] = planinfo['nbl']
+        search_params['num_beams_planned'] = len(planinfo['values']['search_beams'])
+        search_params['num_beams_actual'] = sum(key.startswith('beam_') for key in planinfo)
+
+        npix_b0_min_max = find_beam0_min_max_values(planinfo, 'npix')
+        search_params['num_spatial_pixels_beam00'] = npix_b0_min_max[0]
+        search_params['num_spatial_pixels_min'] = npix_b0_min_max[1]
+        search_params['num_spatial_pixels_max'] = npix_b0_min_max[2]
+
+        fov1_b0_min_max = find_beam0_min_max_values(planinfo, 'fov1_deg')
+        search_params['fov1_deg_beam00'] = fov1_b0_min_max[0]
+        search_params['fov1_deg__min'] = fov1_b0_min_max[1]
+        search_params['fov1_deg_max'] = fov1_b0_min_max[2]
+
+        fov2_b0_min_max = find_beam0_min_max_values(planinfo, 'fov2_deg')
+        search_params['fov2_deg_beam00'] = fov2_b0_min_max[0]
+        search_params['fov2_deg_min'] = fov2_b0_min_max[1]
+        search_params['fov2_deg_max'] = fov2_b0_min_max[2]
+
+        cellsize1_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize1_deg')
+        search_params['cellsize1_deg_beam00'] = cellsize1_b0_min_max[0]
+        search_params['cellsize1_deg_min'] = cellsize1_b0_min_max[1]
+        search_params['cellsize1_deg_max'] = cellsize1_b0_min_max[2]
+
+        cellsize2_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize2_deg')
+        search_params['cellsize2_deg_beam00'] = cellsize2_b0_min_max[0]
+        search_params['cellsize2_deg_min'] = cellsize2_b0_min_max[1]
+        search_params['cellsize2_deg_max'] = cellsize2_b0_min_max[2]
+    
+        search_params['calibration_file'] = planinfo['values']['calibration']
+        search_params['calibration_age_days'] = self.get_time_delay(planinfo['values']['calibration'])
+
+        return search_params
+    
+    def get_time_delay(self, calpath):
+        '''
+        Extract the tstart of the observation used to generate a cal soln, and compare it with the tstart of self
+        Return the time difference in days
+        '''
+        from datetime import datetime as DT
+        timeformat="%Y%m%d%H%M%S"
+        cal_time = DT.strptime(os.path.realpath(os.path.join(calpath, "00", "b00.uvfits")).strip().split("/")[-2], timeformat)
+        obs_time = DT.strptime(self.tstart, timeformat)
+        diff = (obs_time - cal_time).total_seconds() / 86400     #days
+        return diff
+
 
     def get_scan_info(self):
         '''
         SBID related info -
             SBID
             Scan ID
-            Tstart
-            Tobs
-            Beamformer weights used by ASKAP
-        
+            Tstart        
         '''
         scan_info = {}
         scan_info['sbid'] = self.sbid
         scan_info['scanid'] = self.scanid
         scan_info['tstart'] = self.tstart
+        scan_info['target_beam00'] = self.plan_info['beam_00']['target']
 
-
-
-        pass
+        return scan_info
 
     def get_observation_params(self):
         '''
@@ -578,44 +1029,147 @@ class ObsInfo:
                 Bandwidth
                 Time resolution
                 Number of channels
-                RA, DEC of every beam center
-                Alt, Az of all antenna (mean)
-                Gl, Gb of every beam center
+                RA, DEC of beam0
+                Alt, Az of beam0
+                Gl, Gb of beam0
                 Coordinates of sun
                 Guest science data requested (True/False)
         '''
-        pass
+        obs_params = {}
+        obs_params['beam_footprint'] = "TO BE IMPLEMENTED"
+        obs_params['central_freq_MHz'] = self.pcb_stats['beam_00']['fcen']
+        obs_params['bandwidth_MHz'] = self.pcb_stats['beam_00']['BW']
+        obs_params['num_channels'] = self.plan_info['freq_info']['nchan']
+        obs_params['sampling_time_ms'] = self.plan_info['tsamp_s'] * 1e3
+        obs_params['guest_science_proposal'] = "TO BE IMPLEMENTED"
+        
+        tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
+        obs_params['tobs_beam00'] = tobs[0]
+        obs_params['tobs_min'] = tobs[1]
+        obs_params['tobs_max'] = tobs[2]
+        obs_params['tobs_sum'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_'))
 
+        sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
+        obs_params['solar_elong_deg_beam00'] = sol[0]
+        obs_params['solar_elong_deg_min'] = sol[1]
+        obs_params['solar_elong_deg_max'] = sol[2]
 
-    def post_slack_message(self):
+        lun = find_beam0_min_max_values(self.plan_info, 'lunar_elong_deg')
+        obs_params['lunar_elong_deg_beam00'] = lun[0]
+        obs_params['lunar_elong_deg_min'] = lun[1]
+        obs_params['lunar_elong_deg_max'] = lun[2]
+
+        obs_params['coords_ra_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_deg']
+        obs_params['coords_dec_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_deg']
+        obs_params['coords_ra_hms_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_hms']
+        obs_params['coords_dec_dms_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_dms']
+
+        obs_params['coords_gl_deg_beam00'] = self.plan_info['beam_00']['wcs']['gl_deg']
+        obs_params['coords_gb_deg_beam00'] = self.plan_info['beam_00']['wcs']['gb_deg']
+
+        obs_params['coords_az_deg_beam00'] = self.plan_info['beam_00']['wcs']['az_deg']
+        obs_params['coords_alt_deg_beam00'] = self.plan_info['beam_00']['wcs']['alt_deg']
+
+        return obs_params
+        
+    def gen_slack_msg(self):
         '''
         Compose a nice slack message using the self._dict and the plot
                 
         '''
+        msg = f"End of scan: {self.sbid}/{self.scanid}/{self.tstart}, runname={self.runname}\n"
+        msg += f"Scan head dir: {self.scandir.scan_head_dir}\n"
+        
+        msg += "----------------\n"
+        msg += "Scan info -> \n"
+        msg += f"- Target [Beam 0]: {self.filtered_scan_info['target_beam00']}\n"
+        
+        msg += "----------------\n"
+        msg += "Obs info ->\n"
+        msg += f"- Beam footprint: {self.filtered_obs_info['beam_footprint']}\n"
+        msg += f"- Duration [Beam 0 (min-max,sum)]: {self.filtered_obs_info['tobs_beam00']:.2f} ({self.filtered_obs_info['tobs_min']:.2f} - {self.filtered_obs_info['tobs_max']:.2f}, {self.filtered_obs_info['tobs_sum']:.2f})\n"
+        msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
+        msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
+        msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
+        msg += f"- Sampling time: {self.filtered_obs_info['sampling_time_ms']:.3f} ms\n"
+        msg += f"- Guest science obs?: {self.filtered_obs_info['guest_science_proposal']}\n"
+        msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms_beam00']}, {self.filtered_obs_info['coords_dec_dms_beam00']}\n"
+        msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg_beam00']:.5f}, {self.filtered_obs_info['coords_dec_deg_beam00']:.5f}\n"
+        msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg_beam00']:.5f}, {self.filtered_obs_info['coords_gb_deg_beam00']:.5f}\n"
+        msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg\n"
 
-    def run(self):
-        self.get_scan_info()
-        self.get_observation_params()
-        self.get_candidates_info()
-        self.get_rfi_stats()
-        self.get_search_pipeline_params()
-        self.plot_candidates()
-        self.post_slack_message()
+        msg += "----------------\n"
+        msg += "Search info ->\n"
+        msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
+        msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
+        msg += f"- Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
+        msg += f"- Calib: {self.filtered_search_info['calibration_file']}\n"
+        msg += f"- Calib age: {self.filtered_search_info['calibration_age_days']:.2f} days\n"
+        msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
+        msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
+        msg += f"- FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
+        msg += f"- Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
+        msg += f"- Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
 
-def main(args):
+        msg += "----------------\n"
+        msg += "Candidate info -> \n"
+        
+        msg += f"- Num raw (incl. subthreshold): {self.filtered_cands_info['num_raw_cands_bright']} ({self.filtered_cands_info['num_raw_cands']})\n"
+        msg += f"- Num raw clustered (incl. subthreshold): {self.filtered_cands_info['num_clustered_cands_bright']} ({self.filtered_cands_info['num_clustered_cands']})\n"
+
+        msg += f"- Num RFI (incl. subthreshold): {self.filtered_cands_info['num_clustered_rfi_cands_bright']} ({self.filtered_cands_info['num_clustered_rfi_cands']})\n"
+        msg += f"- Num localised (incl. subthreshold): {self.filtered_cands_info['num_clustered_uniq_cands_bright']} ({self.filtered_cands_info['num_clustered_uniq_cands']})\n"
+        msg += f"- Num source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']}   ({self.filtered_cands_info['num_classified_cands']})\n"
+        msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
+        msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
+        msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
+        msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
+        
+        msg += "----------------\n"
+        msg += "Data quality info ->\n"
+        msg += f"- Dropped packets fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+        msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
+        msg += f"- Flagged baselines fraction [Beam 0 (min-max)]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
+        msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
+
+        return msg
+    
+    def post_on_slack(self, msg):
+        log.debug(f"Posting message - \n{msg}")
+        slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+        slack_poster.post_message(msg)
+
+    def filter_info(self):
+        log.debug("Filtering relevant information")
+        self.filtered_scan_info = self.get_scan_info()
+        self.filtered_obs_info = self.get_observation_params()
+        self.filtered_cands_info = self.get_candidates_info()
+        self.filtered_dq_info = self.get_data_quality_stats()
+        self.filtered_search_info = self.get_search_pipeline_params()
+
+        self._dict['filtered_scan_info_dict'] = self.filtered_scan_info
+        self._dict['filtered_obs_info_dict'] = self.filtered_obs_info
+        self._dict['filtered_cands_info_dict'] = self.filtered_cands_info
+        self._dict['filtered_dq_info_dict'] = self.filtered_dq_info
+        self._dict['filtered_search_info_dict'] = self.filtered_search_info
+
+def _main():
+    args = get_parser()
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
-                      tstart = args.tstart)
-    obsinfo.run()
+                      tstart = args.tstart,
+                      runcandpipe = args.run_candpipe)
+    #obsinfo.run()
 
-
-
-
-if __name__ == '__main__':
+def get_parser():
     a = argparse.ArgumentParser()
     a.add_argument("-sbid", type=str, help="SBID", required=True)
     a.add_argument("-scanid", type=str, help="scanid", required=True)
     a.add_argument("-tstart", type=str, help="tstart", required=True)
+    a.add_argument("-no_candpipe", dest='run_candpipe', action='store_false', help="Don't run candpipe (def:False)", default=True)
 
     args = a.parse_args()
-    main(args)
+    return args
+
+if __name__ == '__main__':
+    _main()
