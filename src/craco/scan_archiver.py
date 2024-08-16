@@ -93,7 +93,7 @@ def parse_scandir_env(path):
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
 
-def run_with_tsp(destination_str, dry=True):
+def run_with_tsp(destination_str):
     log.info(f"Queuing up archive scan")
 
     #ARCHIVE_TS_ONFINISH = "report_craco_archive"
@@ -116,7 +116,7 @@ def run_with_tsp(destination_str, dry=True):
         return
     else:
         sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""archive_scan -sbid {sbid} -scanid {scanid} -tstart {tstart} -dest {destination_str} -dry {dry}"""
+        cmd = f"""archive_scan -sbid {sbid} -scanid {scanid} -tstart {tstart} -dest {destination_str}"""
 
         S.run(
             [f"tsp {cmd}"], shell=True, capture_output=True,
@@ -146,7 +146,7 @@ class ScanArchiver:
         self.jobs_launched = {}
         self.jobs_errored = {}
         self.jobs_finished = {}
-        for jobid, datadir in enumerate(self.scan.scan_data_dirs):
+        for jobid, datadir in self.scan.scan_data_dirs:
             node_name = datadir.strip().split("/")[2]
             print(self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name)
             dest_path = os.path.join(self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name)

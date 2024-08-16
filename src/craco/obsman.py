@@ -45,12 +45,6 @@ class Obsman:
         self.values = values
         self.doquit = False
         self.curr_scanid = None
-        if values.extra_obsparams is not None:
-            self.extra_obsparams = ParameterSet(values.extra_obsparams)
-            log.info('Loaded %d extra obsparams from %s', len(self.extra_obsparams), values.extra_obsparams)
-        else:
-            self.extra_obsparams = ParameterSet()
-
 
         # Bit of a race condition here, but we'll do it
         # add_callback might have beaten us to it,
@@ -63,6 +57,16 @@ class Obsman:
         signal.signal(signal.SIGTERM, self.sigterm_handler)
         signal.signal(signal.SIGHUP, self.sighup_handler)
         signal.signal(signal.SIGINT, self.sigint_handler)
+
+    def load_extra_obsparams(self):
+        values = self.values
+        if values.extra_obsparams is not None:
+            self.extra_obsparams = ParameterSet(values.extra_obsparams)
+            log.info('Loaded %d extra obsparams from %s', len(self.extra_obsparams), values.extra_obsparams)
+        else:
+            self.extra_obsparams = ParameterSet()
+
+        return self.extra_obsparams
 
     def atexit_handler(self):
         log.info('Running atexit function')
@@ -365,6 +369,7 @@ class MetadataObsmanDriver:
             time.sleep(1)
 
         orig_obs_params = ParameterSet(self.sb_service.getObsParameters(sbid))
+        self.obsman.load_extra_obsparams()
         self.obs_params = parset.merge(orig_obs_params, self.obsman.extra_obsparams)
         
 
