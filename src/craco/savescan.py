@@ -20,7 +20,7 @@ import numpy as np
 from craco.prep_scan import touchfile,ScanPrep
 from craft.cmdline import strrange
 from craco.craco_run import auto_sched
-from craco import summarise_cands, summarise_scan
+from craco import summarise_cands, summarise_scan, scan_archiver
 
 log = logging.getLogger(__name__)
 
@@ -284,9 +284,12 @@ def exit_function():
             log.info('Queing calibration')
             auto_sched.queue_calibration(scandir)
         summarise_cands.run_with_tsp()
-        summarise_scan.run_with_tsp()
-        archive_location = obsparams.get_value('craco.archive.location', None)
+        #summarise_scan.run_with_tsp()
+        
+        archive_location = obsparams.get_value('craco.archive.location', '')
         log.info('craco.archive.location location is %s', archive_location)
+        if archive_location != '':
+            scan_archiver.run_with_tsp(archive_location)
 
 if __name__ == '__main__':
     _main()

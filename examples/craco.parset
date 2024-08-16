@@ -58,11 +58,13 @@ craco.uvfits.int_time_exp = 7
 # and also supply rclone location string of the form 
 #
 # craco.archive.location = locname:bucketname/extra/dirs/if/needed
+#
+# Note: For S3, buckets cannot contain underscore.
 # 
 # See also: https://rclone.org/commands/rclone_copy/
 # Default: Empty. Data will not be uploaded. 
 # Type: string
-craco.archive.location = acacia:craco_test_autoupload
+craco.archive.location = acacia:craco-test-autoupload
 
 
 
