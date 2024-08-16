@@ -146,7 +146,7 @@ class ScanArchiver:
         self.jobs_launched = {}
         self.jobs_errored = {}
         self.jobs_finished = {}
-        for jobid, datadir in self.scan.scan_data_dirs:
+        for jobid, datadir in enumerate(self.scan.scan_data_dirs):
             node_name = datadir.strip().split("/")[2]
             dest_path = os.path.join([self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name])
 
