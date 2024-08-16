@@ -82,7 +82,7 @@ def parse_scandir_env(path):
     parts = path.strip().split("/")
     if len(parts) > 0:
         for ip, part in enumerate(parts):
-            if part.startswith("SB0"):
+            if part.startswith("SB"):
                 sbid = part
                 scanid = parts[ip + 2]
                 tstart = parts[ip + 3]
@@ -148,7 +148,9 @@ class ScanArchiver:
         self.jobs_finished = {}
         for jobid, datadir in enumerate(self.scan.scan_data_dirs):
             node_name = datadir.strip().split("/")[2]
-            dest_path = os.path.join([self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name])
+            print(self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name)
+            dest_path = os.path.join(self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name)
+            print(dest_path)
 
             options = ["copy", "-P", f"{datadir}", f"{self.destination[0]}:{dest_path}"]
             if dry:
