@@ -1,6 +1,6 @@
 import glob
 import subprocess as S
-from datadirs import SchedDir, ScanDir, format_sbid
+from craco.datadirs import SchedDir, ScanDir, format_sbid
 import tempfile, os, sys
 import logging 
 from logging.handlers import RotatingFileHandler
