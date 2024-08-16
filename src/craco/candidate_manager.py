@@ -20,14 +20,17 @@ def format_sbid(sbid, padding=True, prefix=True):
     return sbidstr
 
 def parse_candfile(candfile, sep="\t", skiprows=0, skipfooter = 0):
-
     with open(candfile, 'r') as ff:
         while True:
             line = ff.readline()
+            if line == "":
+                raise ValueError(f"The file {candfile} is empty!")
             if line.strip() == "":
                 continue
+
             HDR_keys = line.strip().strip('#').strip().split(sep)
             break
+
     #print(f"Header keys = {HDR_keys}")
     df = pd.read_csv(candfile, skiprows=skiprows, skipfooter=skipfooter, sep=sep, header = 0, names = HDR_keys)
     return df
