@@ -93,7 +93,7 @@ def parse_scandir_env(path):
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
 
-def run_with_tsp(destination_str):
+def run_with_tsp(destination_str, dry=True):
     log.info(f"Queuing up archive scan")
 
     #ARCHIVE_TS_ONFINISH = "report_craco_archive"
@@ -116,7 +116,7 @@ def run_with_tsp(destination_str):
         return
     else:
         sbid, scanid, tstart = parse_scandir_env(scan_dir)
-        cmd = f"""archive_scan -sbid {sbid} -scanid {scanid} -tstart {tstart} -dest {destination_str}"""
+        cmd = f"""archive_scan -sbid {sbid} -scanid {scanid} -tstart {tstart} -dest {destination_str} -dry {dry}"""
 
         S.run(
             [f"tsp {cmd}"], shell=True, capture_output=True,
