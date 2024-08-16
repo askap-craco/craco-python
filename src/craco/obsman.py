@@ -31,6 +31,8 @@ from askap.interfaces.schedblock import ObsState
 from craco.askap.craft.obsman.metadatasaver import MetadataSaver
 from craco.askap.craft.obsman.metadatasubscriber import metadata_to_dict
 from askap.parset import ParameterSet
+import askap.parset as parset
+
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +45,11 @@ class Obsman:
         self.values = values
         self.doquit = False
         self.curr_scanid = None
+        if values.extra_obsparams is not None:
+            self.extra_obsparams = ParameterSet(values.extra_obsparams)
+            log.info('Loaded %d extra obsparams from %s', len(self.extra_obsparams), values.extra_obsparams)
+        else:
+            self.extra_obsparams = ParameterSet()
 
 
         # Bit of a race condition here, but we'll do it
@@ -274,7 +281,7 @@ def get_ant_numbers_from_obs_variables(obs_variables):
 # so weird. Addit and a listener and it works fine.
 #class MetadataObsmanDriver(MetadataSaver):
 class MetadataObsmanDriver:
-    def __init__(self, comm, obsman):
+    def __init__(self, comm, obsman:Obsman):
         self.obsman = obsman
         self.sbid = None
         self.scan_running = False
@@ -357,7 +364,9 @@ class MetadataObsmanDriver:
             log.warning('No antennas for schedblock %d. sleeping.', sbid)
             time.sleep(1)
 
-        self.obs_params = ParameterSet(self.sb_service.getObsParameters(sbid))
+        orig_obs_params = ParameterSet(self.sb_service.getObsParameters(sbid))
+        self.obs_params = parset.merge(orig_obs_params, self.obsman.extra_obsparams)
+        
 
         if 'schedblock.antennas' in self.obs_variables:           
             orig_ant_numbers = get_ant_numbers_from_obs_variables(self.obs_variables)
@@ -394,6 +403,7 @@ def _main():
     parser.add_argument('--driver', choices=('meta','epics'), default='meta', help='DRive with epics or metadata')
     parser.add_argument('--frac-onsource', default=0.9, type=float, help='Fraction of antennas that need to be on source to start a scan')
     parser.add_argument('--ignore-ants', type=strrange, default='', help='List of antennas to remove from the list of available antenans')
+    parser.add_argument('--extra-obsparams', default=None, help='Path to parset to use to merge with normal obsparams')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
 

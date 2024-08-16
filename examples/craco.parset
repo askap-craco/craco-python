@@ -1,0 +1,68 @@
+# 
+# CRACO example parset for controlling various CRACO aspects of CRACO
+#
+# Keith Bannister 16 Aug 2024
+#
+# See:
+# Initial discussions: https://docs.google.com/presentation/d/1hWWq9G98OQkEhl0940SvKQVxAIQaRdO_/edit#slide=id.p8 
+# JIRA epic: https://jira.csiro.au/browse/CRACO-258
+#
+
+
+#
+# craco.uvfits.int_time_exp
+#
+# Sets the integration time in CRACO visbilities saved in UVFITS format.
+# The integration time will be 0.864ms * (2**int_time_exp)
+# e.g. 110ms integrations is int_time_exp=7
+# For OCT2024 guest observing only int_time_exp=7 is supported. Other values are possible but not offered
+# in the OCT2024 semester.
+#
+# Default: if not specified, CRACO will use current default in use by the CRACO team
+# Valid range: 0 - 7 inclusive
+# Type: integer
+craco.uvfits.int_time_exp = 7
+
+#
+# craco.archive.location
+#
+# Sets the location to which data will be uploaded at the end of a scan. 
+#
+# Files are uploaded using the [Rclone copy|https://rclone.org/commands/rclone_copy/] command
+# CRACO will append /SBXXXX/scans/N/YYYYMMDDHHMMSS to the destination, where XXXX is the schedblock number, 
+# N is the scan number and YYMMDDHHMMSS is the timestamp of the data capture (more than one capture per scan is possible)
+# e.g. at the end of scan 1 in SB12345
+# with 
+# craco.archive.location = acacia:AS203
+#
+# CRACO will copy the data using the following command
+# rclone copy SOURCE_DATA acacia:AS203/SB12345/scans/01/202415620121230/ 
+#
+# SOURCE_DATA will be a tree of directories and files (including UVFITs and candidates CSV as well as ancillary data)
+# which will be copied to that location.
+# The layout of the directory tree is related to the number of CRACO nodes in use at the time and may
+# change without notice. It includes one set of directories per scan.
+# 
+# Users using acacia access at pawsey:
+# ------------------------------------
+# PI of a guest science project with project code PROJECT_CODE can request to use the CRACO allocation on acacia
+# The CRACO team will create a bucket on acacia with appropriate permissions and with a name=PROJECT_CODE
+# 
+# The parset should then contain the follwing value:
+# craco.archive.location = acacia:PROJECT_CODE
+#
+# users with their own S3 locations:
+# ----------------------------------
+# Should supply the CRACO team with an [Rclone config file| https://rclone.org/docs/#config-config-file] with an [entry
+# appropriate for their storage type| https://rclone.org/docs/]. Users must create a bucket with write permissions in advance
+# and also supply rclone location string of the form 
+#
+# craco.archive.location = locname:bucketname/extra/dirs/if/needed
+# 
+# See also: https://rclone.org/commands/rclone_copy/
+# Default: Empty. Data will not be uploaded. 
+# Type: string
+craco.archive.location = acacia:craco_test_autoupload
+
+
+
