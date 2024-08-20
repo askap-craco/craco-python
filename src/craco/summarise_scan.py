@@ -397,7 +397,8 @@ def convert_urls_to_readable_links(url_list):
     converted_urls = []
     for url in url_list:
         beam, totalsample = extract_values_from_url(url)
-        converted_urls.append(f"[Beam {beam} Totalsample {totalsample}]({url})")
+        #converted_urls.append(f"[Beam {beam} Totalsample {totalsample}]({url})")
+        converted_urls.append(f"Cand in <{url}|Beam {beam} Totalsample {totalsample}>")
 
     return converted_urls
 
@@ -1136,7 +1137,7 @@ class ObsInfo:
     
     def post_on_slack(self, msg):
         log.debug(f"Posting message - \n{msg}")
-        slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
+        slack_poster = SlackPostManager(test=False, channel="C06FCTQ6078")
         slack_poster.post_message(msg)
 
     def filter_info(self):
