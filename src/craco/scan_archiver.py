@@ -6,15 +6,24 @@ import logging
 from logging.handlers import RotatingFileHandler
 import argparse
 import json
+from craco.craco_run.auto_sched import SlackPostManager
 
 logname = "/CRACO/SOFTWARE/craco/craftop/logs/archive_scan.log"
 log = logging.getLogger(__name__)
 stdout_handler = logging.StreamHandler(sys.stdout)
-file_handler = RotatingFileHandler(logname, maxBytes=50000000, backupCount=1000)
+file_handler = RotatingFileHandler(logname, maxBytes=10000000, backupCount=10000)
 logging.basicConfig(handlers=[file_handler, stdout_handler],
                     format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
 
+class TrivialEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, bytes):
+            d = o.decode('utf-8')
+        else:
+            d = super().default(o)
+        return d
+    
 
 def fetch_rclone_cfg():
     cmd = ["rclone", "config", "file"]
@@ -134,12 +143,15 @@ class ScanArchiver:
         tstart: str, Tstart of the scan - example '2024080212412'
         destination_str: str, remote:dest_path - example (acacia:GSPs/Pxxx/)
         '''
+        self.destination_str = destination_str
         destination = (destination_str.split(":")[0], destination_str.split(":")[1])
         self.scan = ScanDir(sbid, f"{scanid}/{tstart}")
         check_write_permissions(destination)
         self.destination = destination
+        self.dest_scan_path = os.path.join(self.destination_str, format_sbid(self.scan.scheddir.sbid), self.scan.scan)
+        log.debug(f"Destination scan path is {self.dest_scan_path}")
         self.base_cmd = ["rclone"]
-        self.record_name = os.path.join(self.scan.scan_head_dir, "scan_archiver.record")
+        self.record_name = os.path.join(self.scan.scan_head_dir, "scan_archiver_record.json")
         self.record = open(self.record_name, 'w')
 
     def execute_copy_jobs(self, dry=False):
@@ -147,18 +159,20 @@ class ScanArchiver:
         self.jobs_errored = {}
         self.jobs_finished = {}
         all_datadirs = [self.scan.scan_head_dir] + list(self.scan.scan_data_dirs)
+
         for jobid, datadir in enumerate(all_datadirs):
             node_name = datadir.strip().split("/")[2]
-            dest_path = os.path.join(self.destination[1], format_sbid(self.scan.scheddir.sbid), self.scan.scan, node_name)
+            dest_path = os.path.join(self.dest_scan_path, node_name)
 
-            options = ["copy", "-P", f"{datadir}", f"{self.destination[0]}:{dest_path}"]
+            #options = ["copy", f"{datadir}", f"{self.destination[0]}:{dest_path}"]
+            options = ["copy", f"{datadir}", f"{dest_path}"]
             if dry:
                 options += ["--dry-run"]
             cmd = self.base_cmd + options
             try:
                 result = execute(cmd)
                 self.jobs_launched[jobid] = {'datadir':datadir, 'result':result}
-                if result['error']:
+                if result['code'] != 0:
                     log.info(f"Jobid {jobid} errored with {result['error']}")
                     self.jobs_errored[jobid] = {'datadir':datadir, 'result':result}
                 else:
@@ -167,6 +181,11 @@ class ScanArchiver:
             except Exception as generic_e:
                 log.info(f"Jobid {jobid} raised an exception {generic_e}")
                 self.jobs_errored[jobid] = {'datadir':datadir, 'result':result}
+        
+        #stats_cmd = self.base_cmd + ["size", f"{self.destination[0]}:{self.dest_scan_path}"]
+        stats_cmd = self.base_cmd + ["size", f"{self.dest_scan_path}"]
+        stats = execute(stats_cmd)
+        self.stats = {'dest_path': self.dest_scan_path, 'stats':stats }
 
     @property
     def num_launched(self):
@@ -181,16 +200,49 @@ class ScanArchiver:
         return len(self.jobs_errored)
     
     def dump_records(self):
-        output_dict = {'launched':self.jobs_launched, 'finished':self.jobs_finished, 'errored':self.jobs_errored}
-        json.dump(output_dict, self.record, sort_keys=True, indent=4)
+        log.info(f"Dumping the records as a json file - {self.record_name}")
+        self.output_dict = {'launched':self.jobs_launched, 'finished':self.jobs_finished, 'errored':self.jobs_errored, 'final_stats':self.stats}
+        #log.debug(output_dict)
+        json.dump(self.output_dict, self.record, sort_keys=True, indent=4, cls=TrivialEncoder)
         
     def close(self):
+        log.info("Closing the json file")
         self.record.close()
-    
+
+    def compose_message(self):
+        msg = f"CRACO archive scan summary:\nDestination: {self.dest_scan_path}\n"
+        if len(self.output_dict['launched']) == 0:
+            msg += f"Did not launch any copy jobs :(\n"
+        else:
+            num_launched = len(self.output_dict['launched'])
+            msg += f"Launched {num_launched} copy jobs\n"
+            num_finished = len(self.output_dict['finished'])
+            msg += f"{num_finished} jobs finished without any errors\n"
+            num_errored = len(self.output_dict['errored'])
+            msg += f"{num_errored} jobs finished with errors\n"
+            
+            if num_errored > 0:
+                error_msgs = [f"  {key['datadir']} --> {key['result']['error'].decode('utf-8')}" for key in self.jobs_errored]
+                error_msg = "\n\n".join(error_msgs)
+                msg += error_msg
+
+        so = self.output_dict['final_stats']
+        stats_msg = f"Destination stats:\n{so['stats']['out'].decode('utf-8')}\n{so['stats']['error'].decode('utf-8')}\n"
+        msg += stats_msg
+        log.debug(f"Composed message -\n{msg}")
+        return msg
+
+    def send_msg(self, msg):
+        log.debug(f"Sending message: \n{msg}")
+        sp = SlackPostManager(test=False, channel="C06FCTQ6078")
+        sp.post_message(msg)
+
     def run(self, dry=False):
         self.execute_copy_jobs(dry=dry)
         self.dump_records()
         self.close()
+        msg = self.compose_message()
+        self.send_msg(msg)
 
 def get_parser():
     a = argparse.ArgumentParser()
@@ -206,7 +258,7 @@ def get_parser():
 def main():
     args = get_parser()
     sa = ScanArchiver(args.sbid, args.scanid, args.tstart, args.dest)
-    sa.run()
+    sa.run(dry = args.dry)
 
 if __name__ == '__main__':
     main()
