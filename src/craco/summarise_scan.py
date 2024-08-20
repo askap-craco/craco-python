@@ -52,6 +52,12 @@ class TrivialEncoder(json.JSONEncoder):
         else:
             d = super().default(o)
         return d
+    
+class ReadInfoException(Exception):
+    def __init__(self, error_msg, exc):
+        self.my_message = error_msg
+        self.exc = exc
+        super().__init__(exc)
 
 def search_dict(d, key):
     '''
@@ -102,7 +108,7 @@ def get_last_uncommented_line(file_path):
     with open(file_path, 'rb') as file:
         file.seek(0, 2)  # Move the pointer to the end of the file
         buffer = b''
-        while file.tell() > 0:
+        while file.tell() > 1:
             file.seek(-2, 1)  # Move the pointer back two characters
             new_byte = file.read(1)
             if new_byte == b'\n' and buffer:
@@ -168,6 +174,9 @@ def read_rfi_stats_info(scandir):
         rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
         try:
             last_line = get_last_uncommented_line(rfi_stats_path)
+            if not last_line:
+                #The rfi file is empty
+                continue
             final_values = parse_flagging_statistics_line(last_line)
             nbl, nf, nt = final_values['blk_shape']
 
@@ -182,14 +191,14 @@ def read_rfi_stats_info(scandir):
             beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
             beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
 
-            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
         except Exception as E:
-            log.exception(f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}")
-            raise E
+            my_error = f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}"
+            log.exception(my_error)
+            raise ReadInfoException(my_error, E)
             #log.critical(traceback.format_exc())
             #IPython.embed()
-        #finally:
-        #    rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
+        finally:
+            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
 
     return rfiinfo
 
@@ -263,8 +272,9 @@ def read_pcb_stats(scandir):
             }
             pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
         except Exception as E:
-            log.exception(f"!Error: Could not read filterbank information from path - {filpath}!\n{E}")
-            raise E
+            log_msg = f"!Error: Could not read filterbank information from path - {filpath}!\n{E}"
+            log.exception(log_msg)
+            raise ReadInfoException(log_msg, E)
             #beaminfo = {}
         #finally:
         #    pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
@@ -345,8 +355,9 @@ def read_plan_info(scandir):
             planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         except Exception as E:
             beaminfo = {}
-            log.exception(f"!Error: Could not read plan information from path - {planfile}!\n{E}")
-            raise E
+            my_error = f"!Error: Could not read plan information from path - {planfile}!\n{E}"
+            log.exception(my_error)
+            raise ReadInfoException(my_error, E)
         #finally:
         #    planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         
@@ -620,13 +631,17 @@ class ObsInfo:
                 self.run_candpipe()
             
             log.debug("Reading candidate files")
-            self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname)
+            self.cands_manager = ScanCandsManager(self.sbid, self.scanid, self.tstart, runname=self.runname, ignore_empty=True)
 
             self._dict['raw_pcb_info_dict'] = self.pcb_stats
             self._dict['raw_plan_info_dict'] = self.plan_info
             self._dict['raw_rfi_info_dict'] = self.rfi_info
 
             self.filter_info()
+        except ReadInfoException as re:
+            msg = f"Could not generate useful info due to error:\n{re.my_message}\n"
+            msg+= f"Exception info:{re.exc}\n"
+            msg+= f"{traceback.format_exc()}\n"
         except Exception as e:
             msg = f"Could not generate useful info due to error:\n{e}\n{traceback.format_exc()}"
         else:
@@ -635,10 +650,9 @@ class ObsInfo:
             except Exception as e:
                 msg = f"Could not create message from filtered info due to :\n{e}\n{traceback.format_exc()}"
         finally:
+            msg = f"End of scan: {self.sbid}/{self.scanid}/{self.tstart}, runname={self.runname}\n" + msg
             self.post_on_slack(msg)
             
-
-        
         self.dump_json()
 
     def dump_json(self):
@@ -962,7 +976,8 @@ class ObsInfo:
         search_params['num_antennas'] = planinfo['nant']
         search_params['num_baselines'] = planinfo['nbl']
         search_params['num_beams_planned'] = len(planinfo['values']['search_beams'])
-        search_params['num_beams_actual'] = sum(key.startswith('beam_') for key in planinfo)
+        tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
+        search_params['num_beams_actual'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_')) / tobs[2]
 
         npix_b0_min_max = find_beam0_min_max_values(planinfo, 'npix')
         search_params['num_spatial_pixels_beam00'] = npix_b0_min_max[0]
@@ -1103,7 +1118,7 @@ class ObsInfo:
         msg += "Search info ->\n"
         msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
         msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
-        msg += f"- Nbeams: {self.filtered_search_info['num_beams_actual']}\n"
+        msg += f"- Nbeams_eff: {self.filtered_search_info['num_beams_actual']:.1f}\n"
         msg += f"- Calib: {self.filtered_search_info['calibration_file']}\n"
         msg += f"- Calib age: {self.filtered_search_info['calibration_age_days']:.2f} days\n"
         msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
