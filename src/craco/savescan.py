@@ -38,6 +38,18 @@ stopped = False
 do_calibration = None
 obsparams = None
 
+def get_param_with_default(obsparams, key, default_value):
+    '''
+    Gets key from obsparams with get_value. If value is not specified or equals
+    '', 'None' or 'default' returns the default value. Otherwise returns the default value
+    '''
+    v = obsparams.get_value(key, '')
+    if v == '' or v == 'None' or v == 'default':
+        v = default_value
+    
+    return v
+
+
 
 def calc_inttime_tscrunch(inttime_exp:int):
     '''
@@ -154,7 +166,7 @@ def _main():
 
 
     calibration = '' if do_calibration else f'--calibration {calpath}'
-    int_time_exp = int(obsparams.get_value('craco.uvfits.int_time_exp', values.int_time_exp)) # default is 13.8 ms
+    int_time_exp = int(get_param_with_default(obsparams, 'craco.uvfits.int_time_exp', values.int_time_exp))
     
     if do_calibration:
         int_time_exp = 7 # Do more averaging during calbration 110 ms
@@ -178,7 +190,7 @@ def _main():
     if do_calibration:
         scan_nminutes = values.calibration_scan_minutes
     else:
-        scan_nminutes = float(obsparams.get_value('craco.scan_minutes', values.scan_minutes))
+        scan_nminutes = float(get_param_with_default(obsparams, 'craco.scan_minutes', values.scan_minutes))
 
     nmsg = int(scan_nminutes*60/.11) #  Number of blocks to record for
     num_msgs = f'-N {nmsg}'
@@ -187,7 +199,7 @@ def _main():
     num_blocks = '--num-blks 16'
     fcm = '--fcm /home/ban115/20220714.fcm'
     metafile = '--metadata {values.metadata}' if values.metadata else ''
-    ndm_val = int(obsparams.get_value('craco.search.max_dm', values.ndm))
+    ndm_val = int(values.ndm)
     ndm = f'--ndm {ndm_val}'
 
     if values.search_beams and not do_calibration:
@@ -286,7 +298,7 @@ def exit_function():
         summarise_cands.run_with_tsp()
         #summarise_scan.run_with_tsp()
         
-        archive_location = obsparams.get_value('craco.archive.location', '')
+        archive_location  = get_param_with_default(obsparams, 'craco.archive.location', '')
         log.info('craco.archive.location location is %s', archive_location)
         if archive_location != '':
             scan_archiver.run_with_tsp(archive_location)
