@@ -3,6 +3,7 @@ import numpy as np
 import glob
 import os
 from craco.datadirs import ScanDir
+import warnings
 
 def format_sbid(sbid, padding=True, prefix=True):
     """
@@ -24,7 +25,7 @@ def parse_candfile(candfile, sep="\t", skiprows=0, skipfooter = 0):
         while True:
             line = ff.readline()
             if line == "":
-                raise ValueError(f"The file {candfile} is empty!")
+                raise EmptyCandfile(f"The file {candfile} is empty!")
             if line.strip() == "":
                 continue
 
@@ -111,10 +112,12 @@ class Candfile:
     def nclusters(self):
         return self.cands['cluster_id'].nunique()
         
-
+class EmptyCandfile(Exception):
+    def __init__(self, msg):
+        self.msg = msg
 
 class SBCandsManager:
-    def __init__(self, sbname, runname = "results"):
+    def __init__(self, sbname, runname = "results", ignore_empty = False):
         self.sb = format_sbid(sbname)
         self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb, runname=runname)
         self._candfile_paths = self._raw_candfile_paths + \
@@ -130,25 +133,31 @@ class SBCandsManager:
         self.clustered_uniq_candfiles = []
         self.clustered_inj_candfiles = []
         
-        for f in self._candfile_paths:           
-            if not os.path.exists(f):
-                continue
-            if f in self._raw_candfile_paths:
-                cf = Candfile(f)
-                self.raw_candfiles.append(cf)
-            if f in self._clustered_raw_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_raw_candfiles.append(cf)
-            if f in self._clustered_rfi_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_rfi_candfiles.append(cf)
-            if f in self._clustered_uniq_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_uniq_candfiles.append(cf)
-            if f in self._clustered_inj_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_inj_candfiles.append(cf)
-
+        for f in self._candfile_paths:
+            try:           
+                if not os.path.exists(f):
+                    continue
+                if f in self._raw_candfile_paths:
+                    cf = Candfile(f)
+                    self.raw_candfiles.append(cf)
+                if f in self._clustered_raw_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_raw_candfiles.append(cf)
+                if f in self._clustered_rfi_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_rfi_candfiles.append(cf)
+                if f in self._clustered_uniq_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_uniq_candfiles.append(cf)
+                if f in self._clustered_inj_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_inj_candfiles.append(cf)
+            except EmptyCandfile as ecf:
+                warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
+                if ignore_empty:
+                    pass
+                else:
+                    raise ecf
             self.all_candfiles.append(cf)
 
     @property
@@ -214,7 +223,7 @@ class SBCandsManager:
             
         
 class ScanCandsManager:
-    def __init__(self, sbname, scanid, tstart, runname = "results"):
+    def __init__(self, sbname, scanid, tstart, runname = "results", ignore_empty = False):
         self.sb = format_sbid(sbname, padding=True, prefix=True)
         self.scandir = ScanDir(self.sb, f"{scanid}/{tstart}")
         self._raw_candfile_paths, self._clustered_raw_candfile_paths, self._clustered_rfi_candfile_paths, self._clustered_uniq_candfile_paths, self._clustered_inj_candfile_paths = load_cands(self.sb, scanid, tstart, runname=runname)
@@ -232,23 +241,30 @@ class ScanCandsManager:
         self.clustered_inj_candfiles = []
         
         for f in self._candfile_paths:           
-            if not os.path.exists(f):
-                continue
-            if f in self._raw_candfile_paths:
-                cf = Candfile(f)
-                self.raw_candfiles.append(cf)
-            if f in self._clustered_raw_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_raw_candfiles.append(cf)
-            if f in self._clustered_rfi_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_rfi_candfiles.append(cf)
-            if f in self._clustered_uniq_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_uniq_candfiles.append(cf)
-            if f in self._clustered_inj_candfile_paths:
-                cf = Candfile(f)
-                self.clustered_inj_candfiles.append(cf)
+            try:
+                if not os.path.exists(f):
+                    continue
+                if f in self._raw_candfile_paths:
+                    cf = Candfile(f)
+                    self.raw_candfiles.append(cf)
+                if f in self._clustered_raw_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_raw_candfiles.append(cf)
+                if f in self._clustered_rfi_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_rfi_candfiles.append(cf)
+                if f in self._clustered_uniq_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_uniq_candfiles.append(cf)
+                if f in self._clustered_inj_candfile_paths:
+                    cf = Candfile(f)
+                    self.clustered_inj_candfiles.append(cf)
+            except EmptyCandfile as ecf:
+                warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
+                if ignore_empty:
+                    pass
+                else:
+                    raise ecf
 
             self.all_candfiles.append(cf)
 
