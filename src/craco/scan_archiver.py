@@ -7,6 +7,8 @@ from logging.handlers import RotatingFileHandler
 import argparse
 import json
 from craco.craco_run.auto_sched import SlackPostManager
+from craco.mattermost_messager import MattermostPostManager
+from craco.fixuvfits import fix
 
 logname = "/CRACO/SOFTWARE/craco/craftop/logs/archive_scan.log"
 log = logging.getLogger(__name__)
@@ -154,6 +156,19 @@ class ScanArchiver:
         self.record_name = os.path.join(self.scan.scan_head_dir, "scan_archiver_record.json")
         self.record = open(self.record_name, 'w')
 
+
+    def execute_fixuvfits(self):
+        log.debug("Running fixuvfits")
+        for uvf in self.scan.uvfits_paths:
+            log.debug(f"Fixing - {uvf}")
+            if uvf:
+                try:
+                    fix(uvf)
+                except Exception as e:
+                    log.exception(f"Could not run fixuvfits on {uvf} because of: \n{e}")
+                    pass
+            
+
     def execute_copy_jobs(self, dry=False):
         self.jobs_launched = {}
         self.jobs_errored = {}
@@ -234,10 +249,18 @@ class ScanArchiver:
 
     def send_msg(self, msg):
         log.debug(f"Sending message: \n{msg}")
-        sp = SlackPostManager(test=False, channel="C06FCTQ6078")
-        sp.post_message(msg)
+        try:
+            sp = SlackPostManager(test=False, channel="C06FCTQ6078")
+            sp.post_message(msg)
+
+            mp = MattermostPostManager()
+            mp.post_message(msg)
+        except Exception as e:
+            log.exception(f"Posting message didn't work because of: \n{e}")
+            raise e
 
     def run(self, dry=False):
+        self.execute_fixuvfits()
         self.execute_copy_jobs(dry=dry)
         self.dump_records()
         self.close()
