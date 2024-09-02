@@ -1189,10 +1189,10 @@ class CalJob:
         self.cur = self.conn.cursor()
         self.engine = get_psql_engine()
 
-        self.__parse_scan(scandir)
+        self._parse_scan(scandir)
         self.scandir = scandir
 
-    def __parse_scan(self, scandir):
+    def _parse_scan(self, scandir):
         # this is an example of scandir
         # /data/craco/craco/SB062220/scans/00/20240506160118/
         scanlst = scandir.strip("/").split("/")
@@ -1271,9 +1271,10 @@ class CalJob:
         """
         main function to queue everything
         """
-        if self._calib_is_running:
-            log.info("there is currently a calibration process running for this sbid...")
-            return
+        ### continue to do something even if some calibration is running, so I commented it out
+        # if self._calib_is_running:
+        #     log.info("there is currently a calibration process running for this sbid...")
+        #     return
         
         if self._calib_is_done:
             log.info("there is already a good calibration for this sbid...")
