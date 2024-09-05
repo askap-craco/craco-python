@@ -950,7 +950,8 @@ def proc_beam_run(proc):
     beam_comm.send(planner_iblk, dest=planner_rank) # tell planner to make plan starting on this block
     t.tick('req plan0 sent')
     req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)
-    t.tick('irecv plan0')
+    t.tick('irecv plan0')    
+
     plan_data = req.wait()
     t.tick('plan0 wait')
     plan = plan_data['plan']
