@@ -319,6 +319,7 @@ def read_plan_info(scandir):
                 uf = plan0.useful_info()
                 planinfo['tsamp_s'] = uf['TSAMP']
                 planinfo['nant'] = uf['NANT']
+                planinfo['ants'] = list(set(range(1,30)) - set(plan0.values.flag_ants))
                 planinfo['nbl'] = uf['NBL']
                 planinfo['start_mjd'] = uf['STARTMJD']
                 planinfo['epoch'] = uf['EPOCH']
@@ -974,6 +975,7 @@ class ObsInfo:
         search_params['boxcar_trial_steps'] = 'linear'
         search_params['boxcar_trial_spacing'] = 1
         search_params['num_antennas'] = planinfo['nant']
+        search_params['ants_used'] = planinfo['ants']
         search_params['num_baselines'] = planinfo['nbl']
         search_params['num_beams_planned'] = len(planinfo['values']['search_beams'])
         tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')

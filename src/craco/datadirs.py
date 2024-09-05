@@ -379,7 +379,10 @@ class RunDir:
         return os.path.join(self.beam_folder(beam), f"candidates.b{beam:0>2}.txt")
 
     def beam_pcb(self, beam):
-        return os.path.join(self.beam_folder(beam), f"pcb{beam:0>2}.fil")
+        pcbpath = os.path.join(self.beam_folder(beam), f"pcb{beam:0>2}.fil")
+        if not check_path(pcbpath):
+            pcbpath = self.scandir.beam_pcb_path(beam)
+        return pcbpath
 
     def beam_rfimask(self, beam):
         return os.path.join(self.beam_folder(beam), f"RFI_tfmask.b{beam:0>2}.fil")

@@ -7,6 +7,8 @@ from logging.handlers import RotatingFileHandler
 import argparse
 import json
 from craco.craco_run.auto_sched import SlackPostManager
+from craco.mattermost_messager import MattermostPostManager
+from craco.fixuvfits import fix
 
 logname = "/CRACO/SOFTWARE/craco/craftop/logs/archive_scan.log"
 log = logging.getLogger(__name__)
@@ -102,7 +104,10 @@ def parse_scandir_env(path):
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
 
-def run_with_tsp(destination_str):
+def run_with_tsp(destination_str, exclude_uvfits:bool = False):
+    '''
+    Launches the archive_scan job via TSP. Excludes uvfits if exclude_uvfits is True
+    '''
     log.info(f"Queuing up archive scan")
 
     #ARCHIVE_TS_ONFINISH = "report_craco_archive"
@@ -126,6 +131,8 @@ def run_with_tsp(destination_str):
     else:
         sbid, scanid, tstart = parse_scandir_env(scan_dir)
         cmd = f"""archive_scan -sbid {sbid} -scanid {scanid} -tstart {tstart} -dest {destination_str}"""
+        if exclude_uvfits:
+            cmd += " -exclude_uvfits"
 
         S.run(
             [f"tsp {cmd}"], shell=True, capture_output=True,
@@ -136,7 +143,7 @@ def run_with_tsp(destination_str):
 
 class ScanArchiver:
 
-    def __init__(self, sbid, scanid, tstart, destination_str):
+    def __init__(self, sbid, scanid, tstart, destination_str, exclude_uvfits):
         '''
         SBID: str, SBID of the observation to be copied, can accpet SB0xxxxx, SBxxxxx, xxxxx formats
         scanid: str, Scanid of the scan - example '00'
@@ -146,6 +153,7 @@ class ScanArchiver:
         self.destination_str = destination_str
         destination = (destination_str.split(":")[0], destination_str.split(":")[1])
         self.scan = ScanDir(sbid, f"{scanid}/{tstart}")
+        self.exclude_uvfits = exclude_uvfits
         check_write_permissions(destination)
         self.destination = destination
         self.dest_scan_path = os.path.join(self.destination_str, format_sbid(self.scan.scheddir.sbid), self.scan.scan)
@@ -153,6 +161,22 @@ class ScanArchiver:
         self.base_cmd = ["rclone"]
         self.record_name = os.path.join(self.scan.scan_head_dir, "scan_archiver_record.json")
         self.record = open(self.record_name, 'w')
+
+
+    def execute_fixuvfits(self):
+        if self.exclude_uvfits:
+            log.debug("Not running fixuvfits as exclude_uvfits flag is True")
+            return
+        log.debug("Running fixuvfits")
+        for uvf in self.scan.uvfits_paths:
+            log.debug(f"Fixing - {uvf}")
+            if uvf:
+                try:
+                    fix(uvf)
+                except Exception as e:
+                    log.exception(f"Could not run fixuvfits on {uvf} because of: \n{e}")
+                    pass
+            
 
     def execute_copy_jobs(self, dry=False):
         self.jobs_launched = {}
@@ -166,6 +190,8 @@ class ScanArchiver:
 
             #options = ["copy", f"{datadir}", f"{self.destination[0]}:{dest_path}"]
             options = ["copy", f"{datadir}", f"{dest_path}"]
+            if self.exclude_uvfits:
+                options += ["--exclude *.uvfits"]
             if dry:
                 options += ["--dry-run"]
             cmd = self.base_cmd + options
@@ -234,10 +260,19 @@ class ScanArchiver:
 
     def send_msg(self, msg):
         log.debug(f"Sending message: \n{msg}")
-        sp = SlackPostManager(test=False, channel="C06FCTQ6078")
-        sp.post_message(msg)
+        try:
+            sp = SlackPostManager(test=False, channel="C06FCTQ6078")
+            sp.post_message(msg)
+
+            mp = MattermostPostManager()
+            mp.post_message(msg)
+        except Exception as e:
+            log.exception(f"Posting message didn't work because of: \n{e}")
+            raise e
 
     def run(self, dry=False):
+        self.send_msg(f"Initialising archive scan jobs for: {self.scan.scheddir.sbid}/{self.scan.scan}")
+        self.execute_fixuvfits()
         self.execute_copy_jobs(dry=dry)
         self.dump_records()
         self.close()
@@ -250,6 +285,7 @@ def get_parser():
     a.add_argument("-scanid", type=str, help="scanid", required=True)
     a.add_argument("-tstart", type=str, help="tstart", required=True)
     a.add_argument("-dest", type=str, help="Destination string (hostname:/path/to/dest) - acacia:GSPs/AS400/", required=True)
+    a.add_argument("-exclude_uvfits", action='store_true', help="Exclude uvfits (def:False)", default=False)
     a.add_argument("-dry", action='store_true', help="Do a dry run only (def:False)", default=False)
 
     args = a.parse_args()
@@ -257,7 +293,7 @@ def get_parser():
 
 def main():
     args = get_parser()
-    sa = ScanArchiver(args.sbid, args.scanid, args.tstart, args.dest)
+    sa = ScanArchiver(args.sbid, args.scanid, args.tstart, args.dest, args.exclude_uvfits)
     sa.run(dry = args.dry)
 
 if __name__ == '__main__':

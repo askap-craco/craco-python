@@ -29,14 +29,17 @@ filter_radius: 2 # in unit of degree - only select catalogue candidates within t
 
 # location for pulsar/RACS/new sources catalogue csv
 # use the same catalogue for alias checking 
-catpath: ['/CRACO/DATA_00/craco/wan348/catalogues/atnf_psrcat_localized.csv',
-          '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv',
-          '/CRACO/DATA_00/craco/wan348/catalogues/craco_updated.csv']
+# ordered by priority, i.e. if one object is in multiple catalogues we will use the lastest catalogue as classification 
+catpath: [
+  '/CRACO/DATA_00/craco/wan348/catalogues/racscat_gaussian_0.3Jy.csv',  # RACS 
+  '/CRACO/DATA_00/craco/wan348/catalogues/atnf_psrcat_localized.csv',   # PSR
+  '/CRACO/DATA_00/craco/wan348/catalogues/craco_updated.csv',           # CUSTOM
+]
 catcols:
-  ra: ['RAJD', 'RA', 'RAD']
-  dec: ['DECJD', 'Dec', 'DECD']
-  input_colname: ['PSRJ', 'Gaussian_ID', 'NAME']
-  output_prefix: ['PSR', 'RACS', 'CUSTOM']
+  ra: ['RA', 'RAJD', 'RAD']
+  dec: ['Dec', 'DECJD', 'DECD']
+  input_colname: ['Gaussian_ID', 'PSRJ', 'NAME']
+  output_prefix: ['RACS', 'PSR', 'CUSTOM']
 
 threshold_crossmatch: [60, 60, 60] # in unit of arcsec
 

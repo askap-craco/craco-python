@@ -3,7 +3,7 @@
 from craco import uvfits_meta
 from craft import uvfits
 ### data process related
-from craft import craco_plan
+from craft import craco_plan, sigproc
 from craft.craco_kernels import Gridder, Imager 
 from craft.craco import bl2ant, bl2array, pointsource, coord2lm
 from craco import preprocess
@@ -24,6 +24,18 @@ import matplotlib as mpl
 import logging
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+def load_filterbank(filpath, tstart, ntimes):
+    f = sigproc.SigprocFile(filpath)
+    nelements = ntimes*f.nifs*f.nchans
+    f.seek_data(f.bytes_per_element*tstart)
+
+    if (f.nbits == 8): dtype = np.uint8
+    elif (f.nbits == 32): dtype = np.float32
+
+    v = np.fromfile(f.fin, dtype=dtype, count=nelements )
+    v = v.reshape(-1, f.nifs, f.nchans)
+    return v
 
 # for dedispersion
 def calculate_dm_tdelay(f1, f2, dm):
@@ -163,6 +175,8 @@ class Cand:
         start_mjd=None, skip_blocks=None,
         ### data flag option
         flagant=None, flagchan=None, 
+        ### data flag option...
+        pcbpath=None,
     ):
         if skip_blocks is not None:
             log.warning("`skip_blocks` not supported...")
@@ -172,7 +186,7 @@ class Cand:
             flagchan=flagchan, start_mjd=start_mjd,
         ) ### all basic information are encoded in `self.canduvfits.plan`
         self.uvfits = uvfits; self.metafile = metafile 
-        self.calfile = calfile
+        self.calfile = calfile; self.pcbpath = pcbpath
 
         ### put all information to the attribute
         self.ra_deg, self.dec_deg = ra_deg, dec_deg
@@ -203,9 +217,23 @@ class Cand:
         self.vtend = int(self.ctend + padding)
         # these are for the visibility time range
 
+    def _get_pcb_mask(self,):
+        if self.pcbpath is None: 
+            self.pcbmask = None
+        else:
+            try:
+                pcbdata = load_filterbank(
+                    self.pcbpath, self.vtstart, 
+                    self.vtend - self.vtstart + 1
+                )
+                self.pcbmask = (pcbdata == 0.).T
+            except:
+                self.pcbmask = None
+
     def extract_data(self, padding):
         ### get candidate/visibility time range
         self._get_cand_vis_range(padding = padding)
+        self._get_pcb_mask() # get mask from phase center filterbank
         self.canduvfits.snippet(self.vtstart, self.vtend)
 
     ########## data manipulation ##########
@@ -218,7 +246,8 @@ class Cand:
         """
         self.datasnippet = DataSnippet(
             cracoplan = self.canduvfits.dataplan,
-            uvsource = self.canduvfits.datauvsource
+            uvsource = self.canduvfits.datauvsource,
+            pcbmask = self.pcbmask,
         )
 
         ### get flagchan from self.canduvfits
@@ -230,6 +259,7 @@ class Cand:
 
         odata = self.canduvfits.data.copy() # original data
         fdata = self.datasnippet.flag_chan(odata, flagchan) # data after channel flagging
+        fdata = self.datasnippet.flag_pcb(fdata,)
         cdata = self.datasnippet.calibrate(fdata, self.calfile) # calibrated data
         ndata = self.datasnippet.normalise(cdata)
         ddata = self.datasnippet.dedisperse(ndata, dm=dm_pccm3)
@@ -521,10 +551,11 @@ class DataSnippet:
     class to manage uvfits snippet e.g., calibrate, get image etc.
     """
     def __init__(
-        self, cracoplan, uvsource
+        self, cracoplan, uvsource, pcbmask=None
     ):
         self.plan = cracoplan # ideally start at the burst time
         self.uvsource = uvsource
+        self.pcbmask = pcbmask # this is for pipeline flagging purpose
 
     ### flagging data
     def flag_chan(self, data, chans, flagval=0):
@@ -536,10 +567,25 @@ class DataSnippet:
         fdata.data[:, chans, ...] = flagval
         fdata.mask[:, chans, ...] = True # shape of data, nbl, nchan, npol, nt
         return fdata
-
+    
 
     def flag_freq(self, data, freqs):
         raise NotImplementedError("flag frequency not implemented...")
+
+    def flag_pcb(self, data, flagval=0.):
+        fdata = data.copy()
+        if self.pcbmask is None: return fdata
+        ### sanity check first...
+        nbl, nchan, npol, nt = fdata.shape
+        mnchan, mnpol, mnt = self.pcbmask.shape
+        if nt != mnt:
+            logging.warning("time axis not matched!!!")
+            return fdata
+        ### now time to apply mask...
+        for ibl in range(nbl):
+            fdata.data[ibl][self.pcbmask] = flagval
+            fdata.mask[ibl][self.pcbmask] = True
+        return fdata
 
     ### calibration
     def calibrate(self, data, calfile=None):

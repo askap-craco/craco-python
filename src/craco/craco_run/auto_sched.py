@@ -27,7 +27,8 @@ import pdb
 
 from slack_sdk import WebClient
 
-from .metaflag import MetaManager
+# from .metaflag import MetaManager
+from craco.craco_run.metaflag import MetaManager
 # from metaflag import MetaManager
 
 import logging
@@ -397,11 +398,25 @@ class CracoCalSol:
         if flag: return np.where(freqflag_bool)[0]
         return np.where(~freqflag_bool)[0]
 
+    ### sometimes all antennas will be bad if one or two beams are bad!
+    def _find_bad_ants_from_badant_list(self, badants, badant_thres=0.8, maxnant=30):
+        """
+        if the antenna is bad in 80% beams, it will be the real bad antenna
+        """
+        badants = np.array(badants)
+        real_badants = []
+        for ia in range(1, maxnant + 1):
+            ant_badbeam_count = (badants == ia).sum()
+            if ant_badbeam_count > badant_thres * 36:
+                real_badants.append(ia)
+        return real_badants
+
     ### calculate the score
     def rank_calsol(
-        self, phase_difference_threshold=30, plot=True,
-        good_frac_threshold=0.6, bad_frac_threshold=0.4,
-        nant_threshold=12, # if number of good antennas is lower than 12, then invalid...
+        self, phase_difference_threshold=30, plot=True, saveplot=True,
+        good_frac_threshold=0.8, bad_frac_threshold=0.6, # threshold to determine the good beams/antennas
+        nant_threshold=12, # if there are 12 good antennas, then valid...
+        nbeam_threshold = 34, # if there are 34 valid beams, then valid...
     ):
         beams = []; beam_phase_diff = []; badants = []
         for ibeam in range(36):
@@ -419,7 +434,7 @@ class CracoCalSol:
                 log.info(f"error message - {error}")
                 continue
         note = ""
-        self.calbadant = sorted(set(badants))
+        self.calbadant = self._find_bad_ants_from_badant_list(badants)
 
         ### concatnate things
         sbid_phase_diff = np.concatenate(
@@ -444,8 +459,9 @@ class CracoCalSol:
                     aspect="auto", interpolation="none"
                 )
             fig.tight_layout()
-            fig.savefig(f"{self.caldir.cal_head_dir}/calsol_qc.png", bbox_inches="tight")
-            plt.close()
+            if saveplot:
+                fig.savefig(f"{self.caldir.cal_head_dir}/calsol_qc.png", bbox_inches="tight")
+                plt.close()
 
         ### save some value for checking...
         self.sbid_phase_diff = sbid_phase_diff # in a shape of nbeam, nant, 
@@ -459,14 +475,24 @@ class CracoCalSol:
         ### decide the number of the good beam
         good_beam_count = (sbid_good_frac.mean(axis=1) > bad_frac_threshold).sum()
         good_ant_count = (sbid_good_frac.mean(axis=0) > bad_frac_threshold).sum()
-        valid_calsol = np.all(sbid_good_frac > good_frac_threshold)
-        if not valid_calsol: note = f"good frac"
+        valid_calsol = True
+        if good_beam_count < nbeam_threshold:
+            note += f"{good_beam_count} good beams found..."
+            valid_calsol = False
+        if good_ant_count < nant_threshold:
+            note += f"{good_ant_count} good antennas found..."
+            valid_calsol = False
+        # valid_calsol = np.all(sbid_good_frac > good_frac_threshold)
+        # if not valid_calsol: note = f"good frac"
 
         ### if there is one beam missing, valid should be false
         if nbeam < 36:
             log.warning(f"only {nbeam} calibration solution found... - {beams}")
             valid_calsol = False
-            note = f"{nbeam} beams"
+            note += f"{nbeam} beams calibration solution..."
+        # if len(self.calbadant) > nant_threshold:
+        #     valid_calsol = False
+        #     note = f"{len(self.calbadant)} bad antennas"
 
         return valid_calsol, good_ant_count, good_beam_count, note
         
@@ -1163,10 +1189,10 @@ class CalJob:
         self.cur = self.conn.cursor()
         self.engine = get_psql_engine()
 
-        self.__parse_scan(scandir)
+        self._parse_scan(scandir)
         self.scandir = scandir
 
-    def __parse_scan(self, scandir):
+    def _parse_scan(self, scandir):
         # this is an example of scandir
         # /data/craco/craco/SB062220/scans/00/20240506160118/
         scanlst = scandir.strip("/").split("/")
@@ -1245,9 +1271,10 @@ class CalJob:
         """
         main function to queue everything
         """
-        if self._calib_is_running:
-            log.info("there is currently a calibration process running for this sbid...")
-            return
+        ### continue to do something even if some calibration is running, so I commented it out
+        # if self._calib_is_running:
+        #     log.info("there is currently a calibration process running for this sbid...")
+        #     return
         
         if self._calib_is_done:
             log.info("there is already a good calibration for this sbid...")
