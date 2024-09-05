@@ -331,10 +331,10 @@ class MetadataObsmanDriver:
             return
                             
         d = metadata_to_dict(pub_data, self.sbid)
-
-        next_scan_running = mgr.push_data(d)
-        self.scan_running = self.obsman.poll_process()
+        
         craco_enabled = caget('ak:enableCraco') == 1
+        next_scan_running = mgr.push_data(d,craco_enabled) # include craco_enabled
+        self.scan_running = self.obsman.poll_process()
 
         if self.scan_running:
             if next_scan_running: # continue running scan
@@ -342,7 +342,7 @@ class MetadataObsmanDriver:
             else: # metadata says to stop running scan
                 self.obsman.terminate_process()
         else:
-            if next_scan_running and craco_enabled: # start new scan only if enabled. Otherwise we make the directories for nothing
+            if next_scan_running: # start new scan only if 
                 info = ScanPrep.create_from_metafile(mgr.latest_good_metafile, self.ant_numbers)
                 info.add_parset('params.parset', self.obs_params)
                 info.add_parset('variables.parset', self.obs_variables)                           
