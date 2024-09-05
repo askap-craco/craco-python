@@ -241,6 +241,12 @@ class Step(ProcessingStep):
             conditions.append(condition)
         
         classes = config['catcols']['output_prefix']
+
+        # reverse the condition list so 
+        # When multiple conditions are satisfied, the LAST one encountered in condlist is used.
+        conditions = conditions[::-1]
+        classes = classes[::-1]
+
         candidates.loc[:, 'LABEL'] = np.select(conditions, classes, default='UNKNOWN')
         candidates.loc[:, 'ALIASED'] = [0] * len(candidates)
 

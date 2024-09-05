@@ -191,7 +191,8 @@ def _main():
                      snr = values.snr
                      df = df[ df['snr'] >= snr ]
 
-                     df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+                     #df['Unknown'] = df['PSR_name'].isna() & df['RACS_name'].isna() & df['NEW_name'].isna() & df['ALIAS_name'].isna()
+                     df ['Unknown'] = df['LABEL'] == "UNKNOWN"
          
                      num_unknown_cands += len(df[df['Unknown']])
              except Exception as E:
