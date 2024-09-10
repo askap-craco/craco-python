@@ -22,7 +22,7 @@ threshold:
   max_snr: 50           # if the SNR is larger than the threshold, then it's not classified as RFI even it satisfies above metric
   mSlope: 1             # m6, for m6>1 select the first two brightest spatial clusters
   mSlopeSmooth: 0.04    # selection metrics - if 0 <= m7 < 0.04 then it can be a real source
-  mSNR: 0.5             # selection metrics - rule out all candidates with m3 < 0.5 (they're just some kind of weird RFIs)
+  mSNR: 0.2             # selection metrics - rule out all candidates with m3 < 0.2 (they're just some kind of weird RFIs)
   num_mSlopeSmooth: 10  # using first 10 data points to do smooth
 
 filter_radius: 2 # in unit of degree - only select catalogue candidates within this radius
