@@ -620,6 +620,7 @@ class ObsInfo:
 
     def run(self, runcandpipe=True):
         try:
+            self._dict["_id"] = f"{self.sbid}_scan_{self.scanid}_tstart_{self.tstart}_run_{self.runname}"
             log.debug("Reading pcb info")
             self.pcb_stats = read_pcb_stats(self.scandir)
             log.debug("Reading plan info")
