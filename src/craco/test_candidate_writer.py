@@ -34,12 +34,17 @@ class FakePlan:
         self.first_tstart = Time('2023-09-05 12:12:13')
         self.fmin = 1e9
         self.fmax = self.fmin+288e3
+        self.nf = 288
+        self.foff = (self.fmax - self.fmin) / self.nf
         self.craco_wcs = craco_wcs.CracoWCS(SkyCoord('00h00m00s -30d00m00s'),
                                             self.first_tstart,
                                             (Angle('30arcsec'),Angle('30arcsec')),
                                             self.npix,
                                             self.tsamp_s)
         self.wcs = self.craco_wcs.wcs2
+        self.freqs = np.arange(self.fmin + self.foff / 2, self.fmax + self.foff / 2, self.foff)
+        self.max_dm_samps = 1024
+        self.max_boxcar_width = 8
 
 @fixture
 def plan():
@@ -60,7 +65,7 @@ def write(writer, N=8192):
     return icands
 
 def test_write_text(plan):
-    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.txt', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     writer.fout.flush()
     header = open('test.txt', 'r').read()
     print(header)
@@ -68,15 +73,15 @@ def test_write_text(plan):
     write(writer)
 
 def test_write_npy(plan):
-    writer = CandidateWriter('test.npy', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.npy', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     write(writer)
 
 def test_write_gz(plan):
-    writer = CandidateWriter('test.txt.gz', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.txt.gz', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     write(writer)
 
 def test_write_text_n_0(plan):
-    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.txt', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     writer.fout.flush()
     header = open('test.txt', 'r').read()
     print(header)
@@ -84,7 +89,7 @@ def test_write_text_n_0(plan):
     write(writer,0)
 
 def test_time_conversion(plan):
-    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.txt', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     icands = write(writer)
 
     # I changed the code a bit, so I just ant to check I haven't ruined it with respect ot the old code
@@ -97,7 +102,7 @@ def test_time_conversion(plan):
     assert_allclose(old_mjd, new_mjd)
 
 def test_latency(plan):
-    writer = CandidateWriter('test.txt', plan.first_tstart, overwrite=True)
+    writer = CandidateWriter('test.txt', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
     icands = write(writer)
 
     # I changed the code a bit, so I just ant to check I haven't ruined it with respect ot the old code
@@ -122,7 +127,19 @@ def test_can_trace_candidates():
     t += e
     t.close()
     
-
+def test_snr_correction(plan):
+    cands = np.zeros((1), CandidateWriter.raw_dtype)
+    cand = cands[0]
+    raw_noise_level = 120
+    writer = CandidateWriter('test.txt', plan.freqs, plan.max_dm_samps, plan.max_boxcar_width, plan.first_tstart, overwrite=True)
+    c = writer.interpret_cands(cands, 0, plan, raw_noise_level = raw_noise_level)
+    print(cand, "\n",c)
+    assert cand['snr'] == c['snr'] * 1. / raw_noise_level, f"{cand['snr']} != {c['snr']} / raw_noise_level ({raw_noise_level})"
+    cand['dm'] = 500
+    cand['boxc_width'] = 4
+    cand['snr'] = 100
+    c = writer.interpret_cands(cands, 0, plan, raw_noise_level = raw_noise_level)
+    assert c['snr'] < cand['snr'] * 1. / raw_noise_level, f"{c['snr']} !< {cand['snr']} / raw_noise_level ({raw_noise_level})"
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
