@@ -1214,7 +1214,7 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile, self.first_tstart, ibeam=beamid)
+        candout = CandidateWriter(candfile, plan.freqs, plan.dmax, plan.nbox, self.first_tstart, ibeam=beamid)
         self.total_candidates = 0
         self.candout = candout        
         self.iblk = 0
