@@ -53,7 +53,7 @@ class ScanManager:
         self._frac_onsource = float(frac_onsource)
         assert 0 < self._frac_onsource <= 1,' Frac_onsource has to be in (0, 1.0]'
         
-    def push_data(self, d):
+    def push_data(self, d, craco_enabled=True):
         '''
         Push data into this ScanManager and update internal variables.
 
@@ -86,7 +86,7 @@ class ScanManager:
         frac_ok_ants = num_ok_ants / sum(self._ant_mask)
         flags_ok = frac_ok_ants  >= self._frac_onsource
         all_unchanged =  isfull and sbid_unchanged and scan_unchanged and flags_unchanged 
-        ok_to_run = flags_ok and all_unchanged and scan_ok
+        ok_to_run = flags_ok and all_unchanged and scan_ok and craco_enabled
 
         #print(sum(antok), sum(ok_ants), frac_ok_ants, flags_ok, all_unchanged, ok_to_run)
         self.latest_good_metafile = None
@@ -105,8 +105,9 @@ class ScanManager:
             else:
                 pass # Waiting for things to stabilise
 
-        log.debug('Got %d/%d good ants. Frac OK=%0.2f flags ok? %s all_unchanged=%s ok to run? %s running? %s changed antennas=%s bad antennas=%s', \
-                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, ok_to_run, self.running, changed_antennas, flagged_antennas)
+        log.debug('Got %d/%d good ants. Frac OK=%0.2f flags ok? %s all_unchanged=%s craco_enabled? %s  ok to run? %s running? %s changed antennas=%s bad antennas=%s', \
+                  num_ok_ants, sum(self._ant_mask), frac_ok_ants, flags_ok, all_unchanged, craco_enabled,
+                  ok_to_run, self.running, changed_antennas, flagged_antennas)
         
         return self.running
 

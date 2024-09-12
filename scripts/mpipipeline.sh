@@ -51,7 +51,9 @@ echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 # save the rankfile
 extra_args="--hostfile $hostfile"
 
-# dont run this yet
+echo "Resetting cards in the background see CRACO-327. It takes about 25 seconds if its all working well. Hopefully that's enough time"
+time mpirun -map-by ppr:1:node -hostfile $HOSTFILE `which resetallcards.sh` &> resetlogs.log &
+
 rm rx.rank beam.rank
 mpipipeline --dump-rankfile $rankfile $extra_args $@
 
@@ -83,6 +85,7 @@ echo "Making directories"
 mpirun -hostfile $hostfile -map-by ppr:1:node mkdir -p $SCAN_DIR
 # local directory
 mkdir -p $SCAN_DIR
+
 
 # TODO: MPI can abort explosively if you like by doing `which python` -m mpi4py before `which pipeline`
 # but I hve trouble with pyton versions 
