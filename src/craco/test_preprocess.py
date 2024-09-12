@@ -2,7 +2,6 @@ import logging
 import numpy as np
 from craco.preprocess import FastPreprocess, fast_preprocess_single_norm, fast_preprocess_multi_mean_single_norm, fast_preprocess_sos, fast_cas_crs
 from craco.vis_subtractor import VisSubtractor
-from craco.timer import Timer
 from craft import uvfits, craco_plan
 from craco import uvfits_meta, calibration
 from pytest import fixture
@@ -314,6 +313,41 @@ def test_fast_preprocess_sos_with_ones():
     assert np.isclose(np.mean(output_buf.imag), 0), f"{np.mean(output_buf.imag)}"
     assert np.isclose(np.std(output_buf.real), 0)
     assert np.isclose(np.std(output_buf.imag), 0)
+
+def test_fast_preprocess_sos_with_ones_and_fixed_freq_weights():
+    input_data = np.zeros_like(global_input_data, dtype=np.complex64) + (1+1j)
+    output_buf = np.zeros_like(input_data)
+    fixed_freq_weights = np.ones(nf, dtype=np.bool)
+    nbad = 10
+    fixed_freq_weights[:nbad] = 0     #Give 0 weight to the first 10 channels
+    bl_weights = np.ones(nbl, dtype=np.bool)
+    input_tf_weights = np.ones((nf, nt), dtype=np.bool)
+    isubblock = 0
+    interrim_means = np.zeros((nbl, nf), dtype=np.complex128)
+    s1 = np.zeros((nbl, nf), dtype=np.complex128)
+    s2 = np.zeros((2, nbl, nf), dtype=np.float64)
+    N = np.ones((nbl, nf), dtype=np.int32)
+    calsoln_data = np.ones((nbl, nf), dtype=np.complex64)
+    target_input_rms = 512
+    sky_sub = True
+
+    fast_preprocess_sos(input_data, bl_weights, fixed_freq_weights, input_tf_weights, output_buf, isubblock, interrim_means, s1, s2, N, calsoln_data, target_input_rms, sky_sub)
+
+    assert np.all(np.isclose(s1.real[nbad:], nt))
+    assert np.all(np.isclose(s1.real[:nbad], 0))
+    assert np.all(np.isclose(s1.imag[nbad:], nt))
+    assert np.all(np.isclose(s1.imag[:nbad], 0))
+    assert np.all(np.isclose(s2[0][nbad:], nt))
+    assert np.all(np.isclose(s2[0][:nbad], 0))
+    assert np.all(np.isclose(s2[1][nbad:], nt))
+    assert np.all(np.isclose(s2[1][:nbad], nt))
+    assert N.sum() == input_data.size * nbad / len(fixed_freq_weights)
+    assert np.isclose(np.mean(output_buf.real), 0), f"{np.mean(output_buf.real)}"
+    assert np.isclose(np.mean(output_buf.imag), 0), f"{np.mean(output_buf.imag)}"
+    assert np.isclose(np.std(output_buf.real), 0)
+    assert np.isclose(np.std(output_buf.imag), 0)
+
+
 
 
 def test_fast_preprocess_sos_with_old_function():
