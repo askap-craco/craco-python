@@ -1259,7 +1259,7 @@ class CandMgrProcessor(Processor):
         tx_comm = app.cand_comm
         nbeams = self.obs_info.nbeams
         iblk = 0
-        self.cand_writer = CandidateWriter('all_beam_cands.txt', self.obs_info.tstart)
+        self.cand_writer = CandidateWriter('all_beam_cands.txt', first_tstart=self.obs_info.tstart)
         self.cand_sender = SnoopySender()
         cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
         # libpq.so.5 is only installed on root node. This way it only runs on the root node.
