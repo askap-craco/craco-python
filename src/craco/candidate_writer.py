@@ -208,13 +208,17 @@ class CandidateWriter:
         if self.snr_multiplier is None:
             raise RuntimeError(f"DM-width scaling correction factor not provided!")
 
+    
+        true_snr = rawcands['snr'] * 1./raw_noise_level * self.snr_multiplier[rawcands['dm'], rawcands['boxc_width']]
+        rawcands = rawcands[true_snr >= 6]
+        
+        candidates['snr'] = true_snr[true_snr >= 6]
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
         candidates['rawsn'] = rawcands['snr']
         candidates['time'] = rawcands['time']
         candidates['dm'] = rawcands['dm']
         candidates['boxc_width'] = rawcands['boxc_width']
-        candidates['snr'] = rawcands['snr'] * 1./raw_noise_level * self.snr_multiplier[candidates['dm'], candidates['boxc_width']]
         candidates['total_sample'] = iblk * plan.nt + rawcands['time']
         candidates['iblk'] = iblk
         tsamp_s = plan.tsamp_s.value
