@@ -856,7 +856,9 @@ class Pipeline:
         self.fdmt_starts = self.run_fdmt(fdmt_tblk)
         t.tick('FDMT run')
         self.fdmt_starts.wait()
-        t.tick('FDMT wait')
+        fdmt_wait_time = t.tick('FDMT wait')
+        if fdmt_wait_time.perf < 0.002:
+            raise RuntimeError(f'FDMT completed immediately. It should take > 400 ms. There is probably a request stuck in the queue. Maybe reset the card. See CRACO-327. Took: {fdmt_wait_time}')
 
         # wait for image pipeline
         if self.image_starts is not None:
@@ -1072,18 +1074,19 @@ class VisSource:
 
         return myiter
 
-def open_device(devid, nretry=10):
+def open_device(devid, nretry=10,sleep_time=3):
     device = None
     for retry in range(nretry):
         try:
             device = pyxrt.device(devid)
+            log.info('Device %s opened successfully on retry %d', devid, retry)
             break
         except:
-            log.exception('Could not open device %d. On retry %d.', devid, retry)
+            log.exception('Could not open device %d. On retry %d. Sleeping for %s seconds', devid, retry, sleep_time)
             if retry == nretry - 1:
                 raise
             else:
-                time.sleep(1)
+                time.sleep(sleep_time)
 
     return device
         
@@ -1211,7 +1214,7 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile, self.first_tstart, ibeam=beamid)
+        candout = CandidateWriter(candfile, plan.freqs, plan.dmax, plan.nbox, self.first_tstart, ibeam=beamid)
         self.total_candidates = 0
         self.candout = candout        
         self.iblk = 0

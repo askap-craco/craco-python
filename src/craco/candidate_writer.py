@@ -28,9 +28,20 @@ location2pix = np.vectorize(location2pix)
 
 def compute_dm_width_scaling(max_dm_samps, max_boxcar, freqs):
     '''
-    Computes the correct DM-width scaling
-    
-    
+    Computes the correct DM-width scaling using the FDMT class (get_eff_var_recursive)
+    Provides a correction factor multiplier after accounting for the fact that the search pipeline
+    has already applied a sqrt(ibox * nchan) scaling.
+
+    Arguments
+    ---------
+    max_dm_samps: int
+                Maximum dm trial in sample units
+
+    max_boxcar: int
+                Maximum boxcar width trial in sample units
+
+    freqs: np.ndarray
+                Array containing the channel frequencies in Hz floats  
     '''
     nf = len(freqs)
     chw = freqs[1] - freqs[0]
