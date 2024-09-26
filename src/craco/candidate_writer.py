@@ -204,10 +204,6 @@ class CandidateWriter:
                 
     def interpret_cands(self, rawcands, iblk, plan, raw_noise_level, candbuf=None):
         ncands = len(rawcands)
-        # don't bother computing everything it if it's empty
-        # also location2pix fails as you cant verctorize on size 0 inputs
-        if ncands == 0:
-            return candidates
         first_tstart = self.first_tstart
         
 
@@ -218,7 +214,8 @@ class CandidateWriter:
         true_snr = rawcands['snr'] * 1./raw_noise_level * self.snr_multiplier[rawcands['dm'], rawcands['boxc_width']]
         rawcands = rawcands[true_snr >= 6]
 
-        #new ncands 
+        #new ncands
+        orig_ncands = ncands
         ncands = len(rawcands)
 
         if candbuf is None:
@@ -227,6 +224,12 @@ class CandidateWriter:
             assert candbuf.dtype == self.out_dtype
             candidates = candbuf[:ncands]
         
+        # don't bother computing everything it if it's empty
+        # also location2pix fails as you cant verctorize on size 0 inputs
+        if ncands == 0:
+            return candidates
+        
+        #candidates['hw_ncands'] = orig_ncands
         candidates['snr'] = true_snr[true_snr >= 6]
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
