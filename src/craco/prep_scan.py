@@ -88,6 +88,8 @@ class ScanPrep:
         self.__mfile = None
         os.makedirs(self.outdir, exist_ok=True)
         self.fcmfile = self.copy_file(fcmfile, 'fcm.txt')
+        self.fixed_flag_file = self.copy_file('/home/craftop/share/fixed_freq_flags.txt', 'fixed_freq_flags.txt')
+
 
     def save(self):
         with open(self.index_file_name(self.outdir), 'wb') as fout:

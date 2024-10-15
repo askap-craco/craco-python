@@ -224,12 +224,13 @@ def _main():
     else:
         antflag = ''
 
+    flag_file = f'--flag-frequency-file {prep.fixed_flag_file}'
     update_uv_blocks = f'--update-uv-blocks {values.update_uv_blocks}'
     extra = ' '.join(values.extra)
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold} {update_uv_blocks} {extra}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold} {update_uv_blocks} {flag_file} {extra}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag} {extra}'
 
