@@ -15,6 +15,7 @@ mkdir -p $(dirname $log_file)
 exec &> >(tee  "$log_file")
 
 echo "Resetting card $dev nrank=$nrank"
+echo "ONLY RESETTING CARDS USED IN MPIPIPELINE"
 
 xbmgmt=/opt/xilinx/xrt/bin/xbmgmt
 image=xilinx_u280_gen3x16_xdma_base_1
@@ -30,7 +31,8 @@ echo `hostname` `date` showing xball examine
 xball xbutil examine 
  
 echo `hostname` `date` running reset
-xball xbutil reset --force
+xbutil reset --force -d 0000:17:00.1
+xbutil reset --force -d 0000:b1:00.1
 
 echo `hostname` `date` Reset returned $?
 

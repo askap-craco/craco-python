@@ -17,7 +17,7 @@ fi
 
 indir=$INDIR
 beamno=$OMPI_COMM_WORLD_RANK
-xrtcardno=$(($START_CARD + $OMPI_COMM_WORLD_LOCAL_RANK))
+xrtcardno=$(($START_CARD + 2*$OMPI_COMM_WORLD_LOCAL_RANK))
 
 echo "Running $0 with start_card $START_CARD xrtcard=$xrtcardno"
 
