@@ -224,7 +224,11 @@ def _main():
     else:
         antflag = ''
 
-    flag_file = f'--flag-frequency-file {prep.fixed_flag_file}'
+    freqfile = prep.fixed_flag_file
+    freqfile = os.path.abspath(freqfile).replace('/data/craco/craco', '/CRACO/DATA_00/craco')
+    assert os.path.exists(freqfile), f'Freqfile doesnt exist {freqfile}'
+    flag_file = f'--flag-frequency-file {freqfile}'
+
     update_uv_blocks = f'--update-uv-blocks {values.update_uv_blocks}'
     extra = ' '.join(values.extra)
 
