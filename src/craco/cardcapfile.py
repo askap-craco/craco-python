@@ -100,7 +100,7 @@ def get_fid0_from_bat(start_bat, sync_bat, pol_sum, sampint):
 
 def get_fid0_from_bat_and_header(start_bat, hdr):
     sync_bat = hdr.get('SYNCBAT')
-    log.info('Header is start_bat is 0x%x %s %s', start_bat, sync_bat, type(sync_bat))
+    log.info('Header is start_bat=0x%x sync_bat=%s', start_bat, sync_bat)
     sync_bat = int(sync_bat, 16)
     sampint = hdr.get('SAMPINT')
     pol_sum = hdr.get('POLSUM')
