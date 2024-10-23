@@ -102,6 +102,7 @@ def _main():
     parser.add_argument('--int-time-exp', type=int, default=4, help='Integration time as 864us*2**X')
     parser.add_argument('--ndm', type=int, default=256, help='Number of DM trials')
     parser.add_argument('--force-calibration', action='store_true', default=False, help='Make it do calibration even if one exists')
+    parser.add_argument('--no-save-uvfits', action='store_false', dest='save_uvfits', default=True, help='Dont save uvfits to disk')
     parser.add_argument(dest='extra', help='Extra arguments', nargs='*')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -205,7 +206,12 @@ def _main():
     if values.search_beams and not do_calibration:
         search_beams = f'--search-beams {values.search_beams}'
     else:
-        search_beams = ''   
+        search_beams = ''
+
+    if values.save_uvfits or do_calibration:
+        save_uvfits = f'--save-uvfits-beams 0-35'
+    else:
+        save_uvfits = ''
 
 
     valid_ants = set(prep.valid_ant_numbers) # 1 based antenna numbers to include
@@ -234,7 +240,7 @@ def _main():
 
     # for mpicardcap
     if values.transpose:
-        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2 --save-uvfits-beams 0-35 {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold} {update_uv_blocks} {flag_file} {extra}'
+        cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} {pol} {spi} {card} {fpga} {block} {max_ncards} {pcb} --outdir {scandir} {fcm} --transpose-nmsg=2  {save_uvfits} {vis_tscrunch} {metafile} {antflag} {search_beams} {calibration} {ndm} --trigger-threshold {values.trigger_threshold} {update_uv_blocks} {flag_file} {extra}'
     else:
         cmd = f'{cmdname} {num_cmsgs} {num_blocks} {num_msgs} -f {target_file} {pol} {tscrunch} {spi} {beam} {card} {fpga} {block} {max_ncards} --devices mlx5_0,mlx5_2 {antflag} {extra}'
 

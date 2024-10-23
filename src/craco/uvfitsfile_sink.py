@@ -256,6 +256,7 @@ class UvFitsFileSink:
             log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
                      beamno, obs_info.values.save_uvfits_beams)
             self.uvout = None
+            self.prepper = None
             return
         
         fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
@@ -309,7 +310,8 @@ class UvFitsFileSink:
             
 
     def compile(self, vis_data):
-        self.prepper.compile(vis_data)
+        if self.prepper is not None:
+            self.prepper.compile(vis_data)
 
     def write(self, vis_block):
         '''
