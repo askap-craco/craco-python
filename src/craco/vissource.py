@@ -135,7 +135,7 @@ class CardCapNetworkSource:
         self.start_bat = start_bat # BAT for when CRACO Go event happens. Data starts on the next BF frame boundary (i.e. 2048 FIDs)
         self.init_fid0 = self.merger.get_fid0_from_start_bat(self.start_bat)
         self.fid0 = self.init_fid0 + np.uint64(self.skip_frames*NSAMP_PER_FRAME) # the frame ID iterator will skip this many frameids before starting
-        log.debug('Start bat was 0x%x init_fid=%d skipping %d frames. new FID0=%d',
+        log.info('Start bat was 0x%x=%d init_fid=%d skipping %d frames. new FID0=%d',
                 self.start_bat, start_bat, self.init_fid0, self.skip_frames, self.fid0)
         
         return self.fid0
