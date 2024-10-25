@@ -9,14 +9,14 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-os.environ['NUMBA_NUM_THREADS'] = '3'
+os.environ['NUMBA_NUM_THREADS'] = '1'
 os.environ['NUMBA_ENABLE_AVX'] = '1'
 os.environ['NUMBA_CPU_NAME'] = 'generic'
 os.environ['NUMBA_CPU_FEATURES'] = '+sse,+sse2,+avx,+avx2,+avx512f,+avx512dq'
 
 
 
-from craco.cardcapfile import NCHAN, NFPGA, get_indexes, NBEAM
+from craco.cardcapfile import NCHAN, NFPGA, get_indexes, NBEAM, debughdr
 from numba import jit,njit,prange
 import numba
 from numba.typed import List
@@ -220,6 +220,19 @@ def ibc2beamchan(ibc):
         chan = ibc2 // 4
 
     return (beam, chan)
+
+@njit
+def beamchan2ibc(beam:int, chan:int):
+    '''
+    Converts beam, channel index back to crazy beamforemer orering index
+    '''
+    if beam < 32:
+        ibc = chan*32 + beam
+    else:
+        ibc = NCHAN*32 + (beam - 32) + chan*4
+
+    return ibc
+  
 
 def average0(din):
     '''
@@ -470,17 +483,133 @@ def average13(packets, tscrunch, dout=None, dout2=None):
     return dout
 
 
-def vis_reshape(din, cross_idxs, dout):
+def get_flat_dtype(packet_dtype):
+    '''
+    Returns the dtype for a packet where the 'data' portion has had the last 3 dimensions
+    (i.e. nbl, npol, ncomplex=2) flattened
+
+    '''
+    flat_dtype = debughdr[:]
+    (nt2, nbl, npol, ncomp) = packet_dtype.shape
+    flat_dtype.append(('data','<i2', (nt2, nbl*npol*ncomp)))
+    flat_dtype = np.dtype(flat_dtype)
+    return flat_dtype
+
+def flatten_packets(packets):
+    '''
+    Returns a numba list of packets. each packet is a view of the original packet 
+    with the dtype set to have the last 3 dimensions flattned
+    @see get_flat_dtype
+    
+    '''
+    flat_dtype = get_flat_dtype(packets[0].dtype['data'])
+    packet_list_flat = List()
+    [packet_list_flat.append(pkt.view(flat_dtype)) for pkt in packets]
+    return packet_list_flat
+
+@njit(fastmath=True, boundscheck=False, parallel=False)
+def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
+    '''
+    input: packets with flattened few axes - see flatten_packets()
+
+    Fscrunch by 6
+    ncout = NCHAN
+    ntout = nt1*nt2 // tscrunch
+    scratch = np.zeros((ncout, ntout, nprod), dtype=np.float32)
+         _,nt1,nt2, nprod = packets_flat[0]['data'].shape
+    '''
+    nfpga = len(packets_flat)
+    vis = output['vis']
+    #print(packets_flat[0]['data'].shape, vis.shape)
+    nbeam,ncross, nchan, nt, ncomp = vis.shape
+    _,nt1,nt2, nprod = packets_flat[0]['data'].shape
+    ncout = NCHAN
+    ntout = nt1*nt2 // tscrunch
+    scale = np.float32(1./(tscrunch*nfpga))
+
+    #nprod), dtype=np.float32)if scratch is None:
+    #    scratch = np.zeros((ncout, ntout, 
+            
+    for ibeam in prange(NBEAM):
+        scratch[:] = 0
+
+        # calculate average in scratch area - do it so its easily vectorized
+        for ifpga in range(nfpga): # doing FPGA 
+            for ichan in range(ncout):
+                ibc = beamchan2ibc(ibeam, ichan)
+                for it1 in range(nt1):
+                    d = packets_flat[ifpga][ibc,it1]['data']
+                    for it2 in range(nt2):
+                        tidx = it2 + nt2*it1
+                        toutidx = tidx // tscrunch
+                        scratch[ichan, toutidx, :] += d[it2,:]
+
+        # transpose data and select only cross correlations. apply scale to bring it back to an average
+        visout = output[ibeam]['vis']
+        for ibl in range(len(cross_idxs)):
+            blidx = cross_idxs[ibl]
+            for ichan in range(ncout):
+                for it in range(ntout):
+                    start = blidx*2
+                    end = start + 2
+                    #print(output[ibeam]['vis'].shape, scratch.shape, ichan, it, ibl, start, end)
+                    # If you do an assignment with the slice and multiply by the scale it slows to a grinding halt. Don't do it.
+                    visout[ibl, ichan,  it, 0] = scratch[ichan, it, start]*scale
+                    visout[ibl, ichan,  it, 1] = scratch[ichan, it, start+1]*scale
+     
+
+    return (output, scratch)
+
+def packet_data_reshape(packets, dout=None):
+    '''
+    Reshape a list of packets into a numpy array
+    Packets have a weird shape due to funny beamformer ordering see ibc2beamchan
+    And chanenls are mixed up to to FPGA ordering
+    returned shape = (NBEAM, nfpga*NCHAN, nt1*nt2, nbl, npol, ncomp)
+    '''
+    data = np.array(packets)['data']
+    (nfpga, nibc, nt1, nt2, nbl, npol, ncomp) = data.shape 
+
+    ncout = nfpga*NCHAN
+    ntout = nt1*nt2
+    dout_shape = (NBEAM, ncout, ntout, nbl, npol, ncomp)
+    if dout is None:
+        dout = np.zeros(dout_shape, data.dtype)
+
+    assert dout.shape == dout_shape
+
+    def doreshape(nbeam, d):
+        return d.reshape(nfpga,NCHAN,nbeam,nt1*nt2,nbl,npol,ncomp) \
+                .transpose(2,1,0,3,4,5,6) \
+                .reshape(nbeam,nfpga*NCHAN,nt1*nt2,nbl,npol,ncomp)
+    dout[:32, ...] = doreshape(32, data[:,:32*4,...])
+    dout[32:, ...] = doreshape(4, data[:, 32*4:,...])
+    return dout
+
+def scrunch_vis(vis, fscrunch, tscrunch):
+    '''
+    Tscrunch and fscrunch visibility data made by packet_data-reshape
+    used mostly for testing    
+    casts to float32
+    '''
+    (nbeam, nc, nt, nbl, npol, ncomp) = vis.shape
+    dout = vis.reshape(nbeam, nc//fscrunch, fscrunch, nt // tscrunch, tscrunch, nbl, npol, ncomp) \
+        .astype(np.float32).mean(axis=(2,4))
+    return dout
+
+def vis_reshape(din, cross_idxs, dout=None):
     npkt, nt, nbl_in, _ = din.shape
     nbl_out = len(cross_idxs)
     expected_dout_shape = (NBEAM, nbl_out, NCHAN, nt, 2)
+    if dout is None:
+        dout = np.zeros(expected_dout_shape, dtype=din.dtype)
     assert dout.shape == expected_dout_shape, f'Invalid dout shape dout={dout.shape} expected={expected_dout_shape} {din.shape} {nbl_out} {nt}'
     assert npkt == NBEAM*NCHAN
     dout[:32, ...] = din[:32*4,...].reshape(NCHAN,32,nt,nbl_in,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
     dout[32:, ...] = din[32*4:,...].reshape(NCHAN,4 ,nt,nbl_in,2)[:,:,:,cross_idxs,:].transpose(1,3,0,2,4)
     return dout
             
-def average_vis_and_reshape(din, tscrunch, dout, auto_idxs, cross_idxs):
+def average_vis_and_reshape(din, tscrunch, dout, cross_idxs):
     '''
     Writes (beam,chan) order and removes autocorrelations
     Fixed fscrunch at 6
@@ -549,11 +678,45 @@ def calc_and_reshape_ics(data, auto_idxs, valid, output):
     output[:32,...] = dmean[:,:32*4 ,:,:].reshape(nfpga,NCHAN,32,nttotal).transpose(2,3,1,0).reshape(32,nttotal,NCHAN*nfpga)
     output[32:,...] = dmean[:, 32*4:,:,:].reshape(nfpga,NCHAN,4 ,nttotal).transpose(2,3,1,0).reshape(4,nttotal,NCHAN*nfpga)
     return output
+
+@njit
+def calc_ics1(packets_flat, valid, auto_idxs, output):
+    '''
+    Better version of calc_ics = does all the good stuff in 1ms.
+    '''
+    nfpga = len(packets_flat)
+    vis = output['vis']
+    #print(packets_flat[0]['data'].shape, vis.shape)
+    nbeam,ncross, nchan, nt, ncomp = vis.shape
+    _,nt1,nt2, nprod = packets_flat[0]['data'].shape
+    nant = len(auto_idxs)
+    scale = np.float32(1/nant)
+    
+    for ibeam in prange(NBEAM):
+        # calculate ICS
+        output[ibeam]['ics'][:] = 0
+
+        for ic in range(NCHAN):
+            ibc = beamchan2ibc(ibeam, ic)
+            for ifpga in range(nfpga):
+                cout =  ifpga + nfpga * ic                        
+                for it1 in range(nt1):
+                    d = packets_flat[ifpga][ibc,it1]['data']
+                    for it2 in range(nt2):
+                        s = np.float32(0)
+                        tout = it2 + nt2*it1
+                        for ibl in range(len(auto_idxs)):
+                            blidx = auto_idxs[ibl]                            
+                            idx = blidx*2 # find real part only of value were every second part is real
+                            s += d[it2,idx]
+                        
+                        output[ibeam]['ics'][tout, cout] = s*scale
+    return output
      
 def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_data, valid, antenna_mask, auto_idxs, cross_idxs,  vis_fscrunch=1, vis_tscrunch=1):
     '''
     FIxed vis fscrunch
-    Doesnt do CAS or ICS
+    Doesnt do CAS 
     '''
     assert vis_fscrunch == 6
 
@@ -569,6 +732,33 @@ def accumulate_all2(output, rescale_scales, rescale_stats, count, nant, beam_dat
     calc_and_reshape_ics(beam_data, auto_idxs, valid, output['ics'])
     
     return output
+
+def accumulate_all3(output, rescale_scales, rescale_stats, count, nant, \
+                     beam_data, valid, antenna_mask, auto_idxs, cross_idxs, scratch,
+                     vis_fscrunch=1, vis_tscrunch=1):
+    '''
+    FIxed vis fscrunch
+    Doesnt do CAS 
+    '''
+    assert vis_fscrunch == 6
+    packets_flat = flatten_packets(beam_data)
+
+
+    # we average all FPGAs into all 4 channels. If any FPGA is not valid, then all 4 channels will be under-cooked
+    # Therefore, if any FPGA is flagged, the entire visibility-summed data is flagged
+    if np.all(valid):
+        # this takes 30ms and has no memory allocation. See the numba averaging
+        # evaluation on athena
+        average15(packets_flat, valid, cross_idxs, output, vis_tscrunch, scratch)
+        
+    else:
+        output['vis'] = 0
+
+    # doint calc and rescape ics adds abotu 20mn to this call
+    calc_ics1(packets_flat, valid, auto_idxs, output)
+    
+    return output
+
 
 
 def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype=np.float32, cdtype=np.float32):
@@ -628,6 +818,11 @@ class Averager:
         self.count = np.zeros(NFPGA, dtype=np.int32)
         
         _,_,self.auto_idxs,self.cross_idxs = get_indexes(self.nant_in, exclude_ants=exclude_ants)
+        # need to be numpy arrays for numba
+        self.auto_idxs = np.array(self.auto_idxs)
+        self.cross_idxs = np.array(self.cross_idxs)
+
+        self.scratch = np.zeros((NCHAN, nt // vis_tscrunch, self.nbl_with_autos*2*self.npol), dtype=np.float32)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
 
@@ -737,7 +932,31 @@ class Averager:
             #log.info('Idata %d dhsape=%s', idata, d.shape)
             
         return self.accumulate_all(data, valid)
+    
 
+    def reference_average(self, packets):
+        '''
+        Calculate the reference accumulation of given packets
+        given the data
+        Returns an array - same shape as self.output but leaves the actual self.output alone
+        '''
+        vis = packet_data_reshape(packets)
+        auto_idxs = self.auto_idxs
+        cross_idxs = self.cross_idxs
+        ics = vis[:,:,:,auto_idxs,0,0].mean(axis=3).transpose(0,2,1)
+        cas2 = (vis[:,:,:,cross_idxs,0,0]**2 + vis[:,:,:,cross_idxs,0,1]**2).mean(axis=3)
+        cas2 = cas2.transpose(0,2,1)
+        # make viss (nbeam, nchan, nt, nbl, 2)
+        viss = scrunch_vis(vis, self.vis_fscrunch, \
+                           self.vis_tscrunch)[:,:,:,:,0,:].transpose(0,3,1,2,4)
+        
+        doutput = self.output.copy()
+        
+        doutput['vis'] = viss[:,cross_idxs,...]
+        doutput['ics'] = ics
+        doutput['cas'] = cas2
+        return doutput
+    
 
     def accumulate_all(self, beam_data, valid):
         '''
@@ -745,9 +964,24 @@ class Averager:
         :param: beam_data is numba List with the expected data
         '''
 
-        use_v2 = True
+        version = 3
 
-        if use_v2:
+        if version == 3:
+            accumulate_all3(self.output,
+                        self.rescale_scales,
+                        self.rescale_stats,
+                        self.count,
+                        self.nant_in,
+                        beam_data, # np.array(beam_data) takes 22ms
+                        valid,
+                        self.antenna_mask,
+                        self.auto_idxs,
+                        self.cross_idxs,
+                        self.scratch,
+                        self.vis_fscrunch,
+                        self.vis_tscrunch)
+
+        elif version == 2:
             #accuulate all 2 doesnt do rescaling
             # so dn't need to reset
             #self.reset()
