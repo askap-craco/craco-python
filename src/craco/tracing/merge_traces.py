@@ -37,7 +37,10 @@ def _main():
     cwdbits[1] = 'CRACO'
     cwdbits[2] = 'DATA*'
     globpath = '/'.join(cwdbits) + '/rank*trace.json'
-    foutname = 'all_traces.json'
+    dirs = os.getcwd().split('/') # '/data/SKADI_00_0/craco/SB067194/scans/00/20241027232156'
+    sbid = dirs[4]
+    scanid = dirs[-1]
+    foutname = f'{sbid}-{scanid}_traces.json'
     fout = open(foutname, 'wt')
     # assumes array mode
     fout.write('[\n')
