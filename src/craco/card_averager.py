@@ -9,7 +9,7 @@ import os
 import sys
 import logging
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
-os.environ['NUMBA_NUM_THREADS'] = '3'
+os.environ['NUMBA_NUM_THREADS'] = '2'
 os.environ['NUMBA_ENABLE_AVX'] = '1'
 os.environ['NUMBA_CPU_NAME'] = 'generic'
 os.environ['NUMBA_CPU_FEATURES'] = '+sse,+sse2,+avx,+avx2,+avx512f,+avx512dq'
@@ -605,7 +605,8 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
 class Averager:
     def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.float32, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
 
-        
+        #numba.set_num_threads(2)
+
         if exclude_ants is None:
             exclude_ants = []
 
@@ -727,7 +728,6 @@ class Averager:
         self.last_nvalid = valid.sum()
         data = List()
         [data.append(self.dummy_packet if pkt is None else pkt) for pkt in packets]
-        log.debug('Accumulating %s', ' '.join(map(str, [d.shape for d in data])))
         for idata, d in enumerate(data):
             if d.ndim == 1:
                 d.shape = (d.shape[0], 1)
