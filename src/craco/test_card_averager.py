@@ -1,14 +1,15 @@
 #!/usr/bin/env python
-from craco.card_averager import Averager
+from craco.card_averager import *
 from craco.cardcap import CardcapFile, get_single_packet_dtype, NCHAN
 from craco.cardcapmerger import CcapMerger
-from craco.utils import ibc2beamchan
+from craco.timer import Timer
 import numpy as np
 import glob
 import time
 from numba.typed import List
 from pylab import *
 from IPython import embed
+from pytest import fixture
 
 nt = 64
 nbeam = 36
@@ -20,28 +21,17 @@ nfpga = 6
 nc = 4*nfpga
 npol = 1
 
-ibl = 0
-cross_idxs = []
-auto_idxs = []
-for a1 in range(nant):
-    for a2 in range(a1, nant):
-        if a1 == a2:
-            auto_idxs.append(ibl)
-        else:
-            cross_idxs.append(ibl)
-            
-        ibl += 1
-
+_,_,auto_idxs,cross_idxs = get_indexes(nant)
 
 def test_timing():
-    cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
-    assert len(cardfiles) == 6
+    #cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
+    #assert len(cardfiles) == 6
     #fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    polsum = True
     dtype = get_single_packet_dtype(nbl, True, polsum)
     fileblocks = [np.zeros((nbeam*nc*nt), dtype=dtype) for fpga in range(nfpga)]
     fb0 = fileblocks[0]
     fb0_block = fb0[:nt]
-    from craco.card_averager import do_accumulate, accumulate_all
     avg = Averager(nbeam, nant, nc, nt, npol)
     niter = 10000
     do_accumulate(avg.output, avg.rescale_scales, avg.rescale_stats, avg.count, avg.nant, 0,0,fb0_block, 2,6 )
@@ -143,6 +133,110 @@ def test_check_accumulate_all():
 
     from IPython import embed
     embed()
+
+@fixture
+def packets():
+    nfpga = 6    
+    nt = 32
+    npkt = NBEAM*NCHAN
+    pktshape = (npkt, nt)
+    polsum = True
+    debughdr = True
+    dtype = get_single_packet_dtype(nbl, debughdr, polsum)
+    din_list = [np.zeros(pktshape, dtype=dtype) for i in range(nfpga)]
+
+    for d in din_list:
+        d['data'] = (np.random.rand(*d['data'].shape)-0.5)*32000
+        d['data'][:,:,:,auto_idxs,:,1] = 0 # autos have 0 imaginary part
+        assert not np.all(d['data'] == 0)
+
+
+    pkts = [pkt for pkt in din_list]
+    packet_list = List()
+    [packet_list.append(pkt) for pkt in pkts]
+    return packet_list
+
+
+def test_packet_data_reshape(packets):
+    pd = packet_data_reshape(packets) # shape (NBEAM, nc, NT, nbl, npol, ncomp)
+
+    # packet shape [nfpga]['data'][nibc,nt1,nt2,nbl,npol,nc]
+    # last 3 dimensions all equal = nbl, npol, nc
+    nfpga = len(packets)
+    (nibc, nt1, nt2, nbl, npol, ncomp) = packets[0]['data'].shape
+
+    # spot tests
+    assert np.all(packets[0]['data'][0,0,0,...] == pd[0,0,0,...])
+
+    for ibc in range(nibc):
+        for ifpga in range(nfpga):
+            for it1 in range(nt1):
+                for it2 in range(nt2):
+                    (beam, chan) = ibc2beamchan(ibc)
+                    tchan = ifpga + nfpga*chan
+                    t = it2 + nt2*it1
+                    assert np.all(pd[beam, tchan, t, ...] == packets[ifpga]['data'][ibc,it1,it2,...] )    
+
+    assert np.all(pd[:,:,:,auto_idxs,:,1] == 0), 'Autos should have no imaginary part'
+
+def test_scrunch_vis(packets):
+    vis = packet_data_reshape(packets) # shape (NBEAM, nc, NT, nbl, npol, ncomp)
+    tscrunch = 4
+    fscrunch = 6
+    vss = scrunch_vis(vis, fscrunch, tscrunch)
+    
+    # check first channel and integration
+    np.testing.assert_allclose(vss[:,0,0,:,:,:], vis[:,:fscrunch,:tscrunch,...].astype(float).mean(axis=(1,2)))
+
+
+def test_averager_accumulate_packets_correct(packets):   
+    tscrunch = 4
+    fscrunch = 6
+        
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0])
+    expected = avger.reference_average(packets)
+    avger.accumulate_packets(packets)
+    np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6)
+    np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
+
+def test_averager_accumulate_packets_timing(packets):   
+    niter = 10
+    tscrunch = 1
+    fscrunch = 6
+        
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0])
+    avger.accumulate_packets(packets)
+    t = Timer()
+    for i in range(niter):
+        avger.accumulate_packets(packets)
+    t.tick('Averaging)')
+    print(f'Do accumulate {t}')
+
+
+def test_ibc2beamchan():
+    assert ibc2beamchan(0) == (0,0)
+    assert ibc2beamchan(1) == (1,0)
+    assert ibc2beamchan(2) == (2,0)
+    assert ibc2beamchan(3) == (3,0)
+    assert ibc2beamchan(31) == (31,0)
+    assert ibc2beamchan(32) == (0,1)
+    assert ibc2beamchan(32+1) == (1,1)
+    assert ibc2beamchan(4*32-1) == (31,3)
+    assert ibc2beamchan(4*32+0) == (32,0)
+    assert ibc2beamchan(4*32+1) == (33,0)
+    assert ibc2beamchan(4*32+2) == (34,0)
+    assert ibc2beamchan(4*32+3) == (35,0)
+    assert ibc2beamchan(4*32+4) == (32,1)
+    assert ibc2beamchan(4*32+5) == (33,1)
+    assert ibc2beamchan(4*32+6) == (34,1)
+    assert ibc2beamchan(4*32+7) == (35,1)
+
+def test_beamchan2ibc():
+    for ibc in range(NBEAM*NCHAN):
+        bc = ibc2beamchan(ibc)
+        assert beamchan2ibc(*bc) == ibc, 'Invlid {ibc}. Expected {bc}'
+
+
 
 def _main():
     test_averaging()
