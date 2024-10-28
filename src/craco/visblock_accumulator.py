@@ -93,7 +93,13 @@ def write_slow(tstart:int, vis_data, blflags, pipeline_data):
 def write_fast(tstart:int, vis_data, blflags, pipeline_data):
     nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
     # If any baselines in the current block are bad, we make them bad for hte whole block
-    pipeline_data['bl_weights'] &= ~ blflags    
+    
+    # update 
+    # pipeline_data['bl_weights'] &= ~ blflags I think this allocates memory, which sux
+    blweights = pipeline_data['bl_weights']
+    for ibl in range(nbl):
+        blweights[ibl] &= not blflags[ibl]
+
     tend = tstart + vis_nt
 
     # loop through each card
