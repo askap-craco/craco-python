@@ -102,13 +102,13 @@ def write_fast(tstart:int, vis_data, blflags, pipeline_data):
         fend = fstart + vis_nc
         for ichan, chan in enumerate(range(fstart, fend)):
             for itime, time in enumerate(range(tstart, tend)):
-                weight = np.uint8(0) # weight is True if any values are nonzero
+                weight = np.uint8(1) # weight is True if any values are nonzero
                 for ibl in range(nbl):
                     d = vis_data[irx, ibl, ichan, itime]
                     # copy data in        
 
                     pipeline_data['vis'][ibl, chan, time] = d
-                    weight |= ((d.real != 0) | (d.imag != 0))
+                    weight &= ((d.real != 0) | (d.imag != 0))
                 
                 pipeline_data['tf_weights'][chan,time] = weight
 
