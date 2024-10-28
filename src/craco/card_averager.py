@@ -8,6 +8,7 @@ import numpy as np
 import os
 import sys
 import logging
+from craco.timer import Timer
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
 os.environ['NUMBA_NUM_THREADS'] = '2'
 os.environ['NUMBA_ENABLE_AVX'] = '1'
@@ -740,8 +741,10 @@ def accumulate_all3(output, rescale_scales, rescale_stats, count, nant, \
     FIxed vis fscrunch
     Doesnt do CAS 
     '''
+    t = Timer()
     assert vis_fscrunch == 6
     packets_flat = flatten_packets(beam_data)
+    t.tick('Flatten packets')
 
 
     # we average all FPGAs into all 4 channels. If any FPGA is not valid, then all 4 channels will be under-cooked
@@ -750,12 +753,14 @@ def accumulate_all3(output, rescale_scales, rescale_stats, count, nant, \
         # this takes 30ms and has no memory allocation. See the numba averaging
         # evaluation on athena
         average15(packets_flat, valid, cross_idxs, output, vis_tscrunch, scratch)
-        
+        t.tick('average15')
     else:
         output['vis'] = 0
+        t.tick('Flag0')
 
     # doint calc and rescape ics adds abotu 20mn to this call
     calc_ics1(packets_flat, valid, auto_idxs, output)
+    t.tick('calc_ics1')
     
     return output
 
@@ -919,10 +924,15 @@ class Averager:
 
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
+        t = Timer()
         valid = np.array([pkt is not None for pkt in packets], dtype=bool)
+        t.tick('make valid')
         self.last_nvalid = valid.sum()
+        t.tick('sum nvalid')
         data = List()
+        t.tick('make list')
         [data.append(self.dummy_packet if pkt is None else pkt) for pkt in packets]
+        t.tick('append list')
         for idata, d in enumerate(data):
             if d.ndim == 1:
                 d.shape = (d.shape[0], 1)
@@ -931,6 +941,8 @@ class Averager:
 
             #log.info('Idata %d dhsape=%s', idata, d.shape)
             
+        t.tick('Do reshape')
+
         return self.accumulate_all(data, valid)
     
 
@@ -966,6 +978,7 @@ class Averager:
 
         version = 3
 
+        t = Timer()
         if version == 3:
             accumulate_all3(self.output,
                         self.rescale_scales,
@@ -1009,11 +1022,13 @@ class Averager:
                         self.antenna_mask,
                         self.vis_fscrunch,
                         self.vis_tscrunch)
-            
+
+        t.tick('Run accumulate')            
 
         # update after first block and then every N thereafter
         if self.iblk == 0 or self.iblk % self.rescale_update_blocks == 0:
             self.update_scales()
+            t.tick('Update scales')
 
         self.iblk += 1
 
