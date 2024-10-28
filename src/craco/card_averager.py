@@ -798,7 +798,12 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.float32, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
+    def __init__(self, nbeam, nant, nc, nt, npol, 
+                 vis_fscrunch=6, vis_tscrunch=1,
+                 rdtype=np.float32, cdtype=np.float32, 
+                 dummy_packet=None, exclude_ants=None, 
+                 rescale_update_blocks=16, rescale_output_path=None,
+                 version=3):
 
         #numba.set_num_threads(2)
 
@@ -816,6 +821,7 @@ class Averager:
         self.nc = nc
         self.vis_fscrunch = vis_fscrunch
         self.vis_tscrunch = vis_tscrunch
+        self.version = version
         self.rescale_update_blocks = rescale_update_blocks
         self.dtype = get_averaged_dtype(nbeam, self.nant_out, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype, cdtype)
         self.output = np.zeros(nbeam, dtype=self.dtype)
@@ -976,7 +982,7 @@ class Averager:
         :param: beam_data is numba List with the expected data
         '''
 
-        version = 3
+        version = self.version
 
         t = Timer()
         if version == 3:

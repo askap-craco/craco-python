@@ -790,7 +790,7 @@ class Pipeline:
         :iblk: = input block number. Increments by 1 for every call.
         :returns: cand_iblk, candidates
         '''
-        raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
+        #raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
 
         fdmt_tblk = iblk % NBLK
         img_tblk = (iblk -1) % NBLK

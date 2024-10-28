@@ -188,6 +188,24 @@ def test_scrunch_vis(packets):
     # check first channel and integration
     np.testing.assert_allclose(vss[:,0,0,:,:,:], vis[:,:fscrunch,:tscrunch,...].astype(float).mean(axis=(1,2)))
 
+def test_averager_accumulate_same_v2_v3(packets):   
+    tscrunch = 4
+    fscrunch = 6
+    
+    beam_data = packets
+                
+    valid = np.ones(len(packets), dtype=bool)
+
+    avger2 = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=2)       
+    avger3 = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=3)
+
+    avger2.accumulate_packets(packets)
+    avger3.accumulate_packets(packets)
+
+    np.testing.assert_allclose(avger2.output['vis'], avger3.output['vis'], rtol=1e-6)
+    np.testing.assert_allclose(avger2.output['ics'], avger3.output['ics'], rtol=1e-6)
+    np.testing.assert_allclose(avger2.output['cas'], avger3.output['cas'], rtol=1e-6)
+
 
 def test_averager_accumulate_packets_correct(packets):   
     tscrunch = 4
