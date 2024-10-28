@@ -1,2 +1,0 @@
-[pytest]
-addopts = --doctest-modules --junitxml=test_results.xml --cov=craco --cov-report xml:coverage.xml --cov-report html:htmlcov --cov-report term 
