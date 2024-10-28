@@ -328,7 +328,8 @@ def populate_ranks(pipe_info, total_cards):
                 net_dev_idx = cardno % len(net_devices) # this is the same logic as cardcap.py - ideally we'd pass it down.
                 net_dev = net_devices[net_dev_idx]
                 slot = net_dev_idx # dev 0 is on slot 0 and dev1 is on slot 1
-                icore = (hostrank * ncores_per_proc) % nslots_per_host
+                slotrank = (cardno  - 1)// len(net_devices)
+                icore = (slotrank * ncores_per_proc) % ncores_per_socket
                 #icore = (slotrank*ncores_per_proc) % ncores_per_socket 
                 #core='0-9'
                 core = f'{icore}-{icore+ncores_per_proc-1}'
