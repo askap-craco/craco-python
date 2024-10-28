@@ -1,0 +1,7 @@
+EPICS fpga ID RXdevice
+1              mlx5_0
+2              mlx5_1
+3              mlx5_0 AND mlx5_1
+4              mlx5_0 not mlx5_1
+5              Neither
+6              mlx5_0 AND mlx5_1 - WTF?!

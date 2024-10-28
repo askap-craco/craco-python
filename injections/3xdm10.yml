@@ -1,0 +1,42 @@
+seed: 777
+
+injection_tsamps:
+    - 100
+    - 400
+    - 700
+
+injection_coords:
+    - 0
+    - 0
+    - 0
+
+#furby_files:
+#    - /Users/gup037/Codes/Furby_install/temp_database/furby_07347
+#    - /Users/gup037/Codes/Furby_install/temp_database/furby_21276
+#    - /Users/gup037/Codes/Furby_install/temp_database/furby_07347
+
+furby_props:
+    - {'snr': 200,
+       'dm': 10,
+       'width': 0.0001,
+       'tau0': 0.0001,
+       'spectrum': flat,
+       'noise_per_sample' : 1.0}
+
+    - {'snr': 200,
+       'dm': 10,
+       'width': 0.0001,
+       'tau0': 0.0001,
+       'spectrum': flat,
+       'noise_per_sample' : 1.0}
+    - {'snr': 200,
+       'dm': 10,
+       'width': 0.0001,
+       'tau0': 0.0001,
+       'spectrum': flat,
+       'noise_per_sample' : 1.0}
+
+
+    
+
+
