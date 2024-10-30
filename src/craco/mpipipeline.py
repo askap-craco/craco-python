@@ -677,11 +677,6 @@ def proc_rx_run(proc):
     
     pktiter = ccap.packet_iter(proc.pipe_info.requested_nframe)
 
-    # receive dummy value and discard??
-    packets, fids = next(pktiter)
-    averaged = averager.accumulate_packets(packets)
-    log.info('Recieved dummy packet')
- 
     best_avg_time = 1e6
     
     t_start = MPI.Wtime()
@@ -699,17 +694,22 @@ def proc_rx_run(proc):
         # so we have to put a dummy value in and add a separate flags array
         avg_start = MPI.Wtime()
         test_mode = info.values.test_mode
-        check_fids = False
+        check_fids = True
         if check_fids:
             for pkt, fid in zip(packets, fids):
-                log.info('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
+                log.debug('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
                 pktfid = None if pkt is None else pkt['frame_id'][0,0]
                 assert pkt is None or pktfid == fid, f'FID did not match for ibuf {ibuf}. Expected {fid} but got {pktfid}'
-                assert pkt is None or pktfid == expected_fid, f'FID did not match expected. Expected {expected_fid} but got {pktfid}'
+                assert pkt is None or pktfid == expected_fid, f'FID did not match expected ibuf {ibuf} . Expected {expected_fid} but got {pktfid}'
             timer.tick('check fids')
 
         if test_mode == 'none':
             averaged = averager.accumulate_packets(packets)
+            if ibuf == 0:
+                np.save(f'iblk0_cardid{cardidx:02d}_packets.npz', packets, allow_pickle=True)
+                np.save(f'iblk0_cardid{cardidx:02d}_averaged.npz', averaged, allow_pickle=True)
+                timer.tick('saveaverage')
+
             timer.tick('average')
         elif test_mode == 'fid':
             fidnos = np.array([0 if pkt is None else fid for pkt, fid in zip(packets, fids)])
