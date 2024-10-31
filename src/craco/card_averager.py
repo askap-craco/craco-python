@@ -508,7 +508,7 @@ def flatten_packets(packets):
     [packet_list_flat.append(pkt.view(flat_dtype)) for pkt in packets]
     return packet_list_flat
 
-@njit(fastmath=True, boundscheck=False, parallel=False)
+@njit(fastmath=True, boundscheck=True, parallel=False)
 def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
     '''
     input: packets with flattened few axes - see flatten_packets()
@@ -527,7 +527,7 @@ def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
     ncout = NCHAN
     ntout = nt1*nt2 // tscrunch
     scale = np.float32(1./(tscrunch*nfpga))
-
+    
     #nprod), dtype=np.float32)if scratch is None:
     #    scratch = np.zeros((ncout, ntout, 
             
@@ -549,6 +549,8 @@ def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
         visout = output[ibeam]['vis']
         for ibl in range(len(cross_idxs)):
             blidx = cross_idxs[ibl]
+            assert ibl < visout.shape[0]
+
             for ichan in range(ncout):
                 for it in range(ntout):
                     start = blidx*2
@@ -815,6 +817,7 @@ class Averager:
         self.nant_in = nant
         self.nant_out = self.nant_in - len(exclude_ants)
         nbl_with_autos = self.nant_out*(self.nant_out+1)//2
+        self.nbl_in_with_autos = nant*(nant+1)//2
         self.nbl_with_autos = nbl_with_autos
         self.nt = nt
         self.npol = npol
@@ -834,7 +837,7 @@ class Averager:
         self.auto_idxs = np.array(self.auto_idxs)
         self.cross_idxs = np.array(self.cross_idxs)
 
-        self.scratch = np.zeros((NCHAN, nt // vis_tscrunch, self.nbl_with_autos*2*self.npol), dtype=np.float32)
+        self.scratch = np.zeros((NCHAN, nt // vis_tscrunch, self.nbl_in_with_autos*2*self.npol), dtype=np.float32)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
 
