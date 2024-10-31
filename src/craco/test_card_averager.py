@@ -216,6 +216,18 @@ def test_averager_accumulate_packets_correct_v3(packets):
     np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6)
     np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
 
+def test_averager_accumulate_packets_correct_exclude_ants_v3(packets):   
+    tscrunch = 4
+    fscrunch = 6
+    
+    exclude_ants = [3,4,5]
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=3, exclude_ants=exclude_ants)
+    expected = avger.reference_average(packets)
+    avger.accumulate_packets(packets)
+    np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6)
+    np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
+
+
 def test_averager_accumulate_packets_timing(packets):   
     niter = 10
     tscrunch = 1

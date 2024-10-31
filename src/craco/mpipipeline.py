@@ -681,6 +681,7 @@ def proc_rx_run(proc):
     
     t_start = MPI.Wtime()
     timer = Timer()
+    
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         timer.tick('read')
@@ -695,9 +696,10 @@ def proc_rx_run(proc):
         avg_start = MPI.Wtime()
         test_mode = info.values.test_mode
         check_fids = True
-        if check_fids:
+        if check_fids:            
             for pkt, fid in zip(packets, fids):
-                log.debug('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
+                #if pkt is not None:
+                #    log.debug('Packet %s %s fid %s %s %s pktiter=%s', type(pkt), type(pkt[0]), type(pkt[1]), type(fid), fid, type(pktiter))
                 pktfid = None if pkt is None else pkt['frame_id'][0,0]
                 assert pkt is None or pktfid == fid, f'FID did not match for ibuf {ibuf}. Expected {fid} but got {pktfid}'
                 assert pkt is None or pktfid == expected_fid, f'FID did not match expected ibuf {ibuf} . Expected {expected_fid} but got {pktfid}'
