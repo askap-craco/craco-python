@@ -650,13 +650,14 @@ class Pipeline:
         self.candidates.copy_from_device()
         # argmax stops at the first occurence of 'True'
         c = self.candidates.nparr
-        log.info('Last candidate is %s', c[-1])
         if c[-1]['snr'] != 0:
             warnings.warn('Candidate buffer overflowed')
             candout = c
         else:
             ncand = np.argmin(self.candidates.nparr['snr'] == 0)
             candout = self.candidates.nparr[:ncand]
+
+        log.info('Got %d candidates. Last candidate is %s', len(candout), c[-1])
 
         # TODO: think about performance here
         return candout
@@ -793,7 +794,7 @@ class Pipeline:
         #raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
 
         fdmt_tblk = iblk % NBLK
-        img_tblk = (iblk -1) % NBLK
+        img_tblk = (iblk - 1) % NBLK
         cand_iblk = iblk - 2 # candidate block coming from pipeline
 
 
@@ -820,6 +821,8 @@ class Pipeline:
         # only start running once we've run an FDMT
         if iblk >= 1:
             self.image_starts = self.run_image(img_tblk, values)
+
+        log.info('parallel excecution on iblk %d fdmt_tblk=%d img_tblk=%d cand_iblk=%d, ncand=%d', iblk, fdmt_tblk, img_tblk, cand_iblk, len(candidates))
 
         return cand_iblk, candidates
     
