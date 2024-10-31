@@ -655,7 +655,7 @@ class Pipeline:
             warnings.warn('Candidate buffer overflowed')
             candout = c
         else:
-            ncand = np.argmax(self.candidates.nparr['snr'] == 0)
+            ncand = np.argmin(self.candidates.nparr['snr'] == 0)
             candout = self.candidates.nparr[:ncand]
 
         # TODO: think about performance here
