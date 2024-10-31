@@ -165,7 +165,7 @@ class SearchPipelineSink:
         if devid is not None:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
-                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=True, plan=plan)
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=False, plan=plan)
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
