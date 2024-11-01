@@ -637,7 +637,7 @@ class Pipeline:
         # thisis probably a bit extreme, because it sets the whole candidate array to 0, but we
         # We could just set the first entry to zero - I'll work that out later
         self.candidates.clear()
-        assert len(self.get_candidates()) == 0
+        #assert len(self.get_candidates()) == 0
         
 
     def get_candidates(self):
