@@ -991,7 +991,12 @@ def proc_beam_run(proc):
             t.tick('recv')
             if iblk == 0:
                 log.info('got block 0')
-            
+
+            candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
+            t.tick('pipeline')
+
+            # for first block we already have a plan so we don't want to recv a new one straight away
+            # Otherwise it all takes too long for the first block, which sux
             if pipeline_sink.ready_for_next_plan:
                 plan_received, plan = req.test()
                 t.tick('recv plan')
@@ -1003,8 +1008,7 @@ def proc_beam_run(proc):
                     beam_comm.send(planner_iblk, dest=planner_rank)
                     req = beam_comm.irecv(PLAN_MSG_SIZE, source=planner_rank)    
 
-            candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
-            t.tick('pipeline')
+
             if candidates is None:
                 ncand = 0
                 #maxsnr = 0
