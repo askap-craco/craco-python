@@ -126,6 +126,19 @@ def make_fft_config(nplanes:int,
 
     return word
 
+def count_candidates(c):
+    '''
+    Count the number of candidates in a block of candiates by finding the first candidate with snr==0
+    returns the index of that candidate. If there are no candidates in the block then returns len(c)
+    '''
+    try:
+        ncand, lastcand = next((i,c) for i,c in enumerate(c) if c['snr']  == 0)
+    except StopIteration:
+        ncand = len(c) 
+
+    return ncand
+
+
 def calc_fft_scale(fft_shift1, fft_shift2):
     '''
     Returns the scaling in accross the FFT2D kernel
@@ -547,7 +560,7 @@ class Pipeline:
         self.last_bc_noise_level = bc_noiselevel # save for future reference
         assert threshold_boxcarval > 0, f'Invalid threshold boxcar value {threshold_boxcarval}'
 
-        log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x} threshold={threshold} imgnoise={img_noiselevel} bcnoise={bc_noiselevel} bcthresh={bc_threshold}={threshold_boxcarval}\n')
+        log.info(f'Configuration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x} threshold={threshold} imgnoise={img_noiselevel} bcnoise={bc_noiselevel} bcthresh={bc_threshold}={threshold_boxcarval}\n')
 
         assert ndm < 1024,' It hangs for ndm=1024 - not sure why.'
 
@@ -654,7 +667,7 @@ class Pipeline:
             warnings.warn('Candidate buffer overflowed')
             candout = c
         else:
-            ncand = np.argmin(self.candidates.nparr['snr'] == 0)
+            ncand = count_candidates(c)
             candout = self.candidates.nparr[:ncand]
 
         log.info('Got %d candidates. Last candidate is %s', len(candout), c[-1])
@@ -814,7 +827,7 @@ class Pipeline:
 
         # if we've waited successfuly then we can get candidates
         if cand_iblk >= 0:
-            candidates = self.get_candidates()
+            candidates = self.get_candidates().copy() # It's about to get cleared - so we should copy it befor eit does
         else:
             candidates = np.zeros(0, dtype=candidate_dtype)
 
@@ -1184,6 +1197,8 @@ class PipelineWrapper:
                             values.dump_boxcar_hist_buf is not None or \
                             values.dump_input is not None or \
                             values.print_dm0_stats
+
+        self.doing_dumps = alloc_device_only
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
@@ -1293,8 +1308,13 @@ class PipelineWrapper:
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
         out_cands = None
+
+        if self.parallel_mode and self.doing_dumps:
+            log.info('Sleepign for 2 seconds as were dumping data but running in parallel mode so we should wait')
+            time.sleep(2)
+
         if len(candidates) > 0:
-            out_cands = self.candout.interpret_cands(candidates, iblk, plan, p.last_bc_noise_level, candout_buffer)
+            out_cands = self.candout.interpret_cands(candidates, cand_iblk, plan, p.last_bc_noise_level, candout_buffer)
             t.tick('Interpret candidates')
             self.candout.write_cands(out_cands)            
             t.tick('Write candidates')
@@ -1319,6 +1339,7 @@ class PipelineWrapper:
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
+            p.candidates.saveto(f'candidate_buf_iblk{iblk}.npy') # also save whole buffer because  ... debugging
             t.tick('dump candidates')
         if do_dump(values.dump_mainbufs, iblk):
             for ib, mainbuf in enumerate(p.all_mainbufs):
@@ -1391,8 +1412,9 @@ def _main():
     log.info('Creating UVW data for isamp=%d will update every %d samples', isamp_update, update_uv_blocks*nt)
     plan_info = f.vis_metadata(isamp_update)
     start_info = f.vis_metadata(0)
+    parallel_mode = True
         
-    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info, parallel_mode=False)
+    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info, parallel_mode=parallel_mode)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source

@@ -707,10 +707,10 @@ def proc_rx_run(proc):
 
         if test_mode == 'none':
             averaged = averager.accumulate_packets(packets)
-            if ibuf == 0:
-                np.save(f'iblk0_cardid{cardidx:02d}_packets.npz', packets, allow_pickle=True)
-                np.save(f'iblk0_cardid{cardidx:02d}_averaged.npz', averaged, allow_pickle=True)
-                timer.tick('saveaverage')
+            #if ibuf == 0:
+                #np.save(f'iblk0_cardid{cardidx:02d}_packets.npz', packets, allow_pickle=True)
+                #np.save(f'iblk0_cardid{cardidx:02d}_averaged.npz', averaged, allow_pickle=True)
+                #timer.tick('saveaverage')
 
             timer.tick('average')
         elif test_mode == 'fid':
