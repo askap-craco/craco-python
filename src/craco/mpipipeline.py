@@ -844,7 +844,7 @@ def transpose_beam_run(proc):
     iblk = 0 
     transposer = proc.transposer
 
-    cas_filterbank = FilterbankSink('cas',info)
+    #cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
@@ -876,8 +876,8 @@ def transpose_beam_run(proc):
                 log.info('got block 0')
             beam_data_complex = transposer.drx_complex # a view into the same data.
             t.tick('transposer')
-            cas_filterbank.write(beam_data['cas'])
-            t.tick('cas')
+            #cas_filterbank.write(beam_data['cas'])
+            #t.tick('cas')
             ics_filterbank.write(beam_data['ics'])
             t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
@@ -914,7 +914,7 @@ def transpose_beam_run(proc):
 
     finally:
         print(f'Closing beam files for {beamid}')
-        cas_filterbank.close()
+        #cas_filterbank.close()
         ics_filterbank.close()
         vis_file.close()
         vis_accum.close()
