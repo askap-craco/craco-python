@@ -48,6 +48,7 @@ from craco.snoopy_sender import SnoopySender
 from craco.mpi_candidate_buffer import MpiCandidateBuffer
 from craco.mpi_tracefile import MpiTracefile
 from craco.uvfitsfile_sink import UvFitsFileSink
+from craco.mpi_ring_buffer_manager import MpiRingBufferManager
 
 from craco.tracing import tracing
 import pickle
@@ -65,6 +66,9 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 # realtime SCHED_FIFO priorities
 BEAM_PRIORITY = 90
 RX_PRIORITY = 91
+
+NPROC_RING_SLOTS = 4
+
 
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
@@ -847,7 +851,11 @@ def transpose_beam_run(proc):
     #cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
     vis_file = UvFitsFileSink(info)
-    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
+    proc_comm = pipe_info.mpi_app.beamproc_comm
+    assert proc_comm.rank == 0, 'Expected to be rank 0'
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
+    ring_buffer = MpiRingBufferManager(proc_comm, NPROC_RING_SLOTS)
+    curr_blk = ring_buffer.open_write()
 
     # Make make fake data to get vis_accum to compile. *sig*
     beam_data_complex = transposer.drx_complex # a view into the same data.
@@ -864,9 +872,7 @@ def transpose_beam_run(proc):
     vis_file.compile(transposer.drx['vis'])
 
    # warmup send
-    beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
-
-
+   #beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
     vis_accum_send_req = None
     try:
        for iblk in range(pipe_info.requested_nframe):
@@ -886,6 +892,7 @@ def transpose_beam_run(proc):
             vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
             t.tick('visfile')
             # We have to complete teh send request before writing to the vis_accum
+            '''
             if vis_accum_send_req is not None:
                 req_finished, _ = vis_accum_send_req.test()
                 t.tick('Send req test')
@@ -895,13 +902,17 @@ def transpose_beam_run(proc):
                     vis_accum_send_req = None
                 else:
                     raise RuntimeError(f'VisAccum isend for blk {iblk-1} not complete. It should be done! finished={req_finished}')
+            '''
 
-            vis_accum.write(vis_block_complex)
+            vis_accum.write(vis_block_complex, iblk=curr_blk)
             t.tick('accumulate')
             if vis_accum.is_full:
                 # Send asynchronously. It should finish by the time we get the next frame.
-                vis_accum_send_req = beam_comm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
-                t.tick('Isend')
+                #vis_accum_send_req = beam_comm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
+                ring_buffer.close_write()
+                curr_blk = ring_buffer.open_write()
+                vis_accum.reset(iblk=curr_blk)
+                t.tick('close open')
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
@@ -966,13 +977,17 @@ def proc_beam_run(proc):
     nf = len(info.vis_channel_frequencies)
     nt = 256 # required by pipeline. TODO: Get pipeline NT correctly
     nbl = info.nbl_flagged    
-    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt)
+    proc_comm = pipe_info.mpi_app.beamproc_comm
+    assert proc_comm.rank == 1, f'Expected to be rank 1. Was {proc_comm.rank}'
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
+    ring_buffer = MpiRingBufferManager(proc_comm, NPROC_RING_SLOTS)
     t.tick('Make visaccum')
     pipeline_data = vis_accum.pipeline_data
     
     # warumup recv
-    beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
-    t.tick('warmup recv')
+    #beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+    #t.tick('warmup recv')
+
     cand_buf = MpiCandidateBuffer.for_tx(beam_comm, candproc_rank)
     t.tick('make cand buf')
 
@@ -986,13 +1001,16 @@ def proc_beam_run(proc):
         for iblk in range(pipe_info.requested_nsearch):
             t = Timer(args={'iblk':iblk})
             # recieve from transposer rank
-            beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
-
+            #beam_comm.Recv(vis_accum.mpi_msg, source=transposer_rank)
+            curr_blk = ring_buffer.open_read()
+            pipeline_data = vis_accum.pipeline_data_array[curr_blk]
             t.tick('recv')
             if iblk == 0:
-                log.info('got block 0')
+                log.info('got block 0 blk=%s', curr_blk)
 
+        
             candidates = pipeline_sink.write_pipeline_data(pipeline_data, cand_buf.cands)
+            ring_buffer.close_read()
             t.tick('pipeline')
 
             # for first block we already have a plan so we don't want to recv a new one straight away

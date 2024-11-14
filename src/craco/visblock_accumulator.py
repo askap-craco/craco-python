@@ -14,6 +14,7 @@ import logging
 from craco.timer import Timer
 import mpi4py.util.dtlib
 from numba import njit
+from mpi4py import MPI
 
 
 log = logging.getLogger(__name__)
@@ -125,16 +126,32 @@ def write_fast(tstart:int, vis_data, blflags, pipeline_data):
         #chan_weights = abs(vis_data[irx, ...]) != 0
         #pipeline_data['tf_weights'][fstart:fend, tstart:tend] = np.all(chan_weights == True, axis=0)
 
+def allocate_shared_buffer(dt, nblocks, comm):
+    disp_unit = dt.itemsize
+    win = MPI.Win.Allocate_shared(nblocks * disp_unit if comm.rank == 0 else 0, disp_unit, comm = comm)
+    buf, itemsize = win.Shared_query(0)
+    assert itemsize == dt.itemsize            
+    d = np.ndarray(buffer=buf, dtype=dt, shape=(nblocks,))
+    return d
+
 
 class VisblockAccumulatorStruct:
-    def __init__(self, nbl:int, nf:int, nt:int):
+    def __init__(self, nbl:int, nf:int, nt:int, comm=None, nblocks=1):
+        '''
+        If comm is not None, alocates a shared memory buffer
+        '''
         shape = (nbl, nf, nt)
         dt = np.dtype([
             ('vis', np.complex64, (nbl,nf,nt)),
             ('tf_weights', np.uint8, (nf,nt)),
             ('bl_weights', np.uint8, (nbl,))
         ])
-        self.pipeline_data_array = np.zeros((1), dtype=dt)
+        if comm is None:
+            d = np.zeros((nblocks), dtype=dt)
+        else:
+            d = allocate_shared_buffer(dt, nblocks, comm)
+
+        self.pipeline_data_array = d
         self.pipeline_data = self.pipeline_data_array[0]
         self.dtype = dt
         self.t = 0
@@ -143,6 +160,7 @@ class VisblockAccumulatorStruct:
         self.mpi_msg = [self.pipeline_data_array, 
                         self.pipeline_data_array.size, 
                         self.mpi_dtype]
+        self.nblocks = nblocks
         self.reset() # set bl_weights to True - otherwise preprocess fails with zerodivisionerror
 
     def compile(self, vis_block):
@@ -154,7 +172,7 @@ class VisblockAccumulatorStruct:
         self.reset()
 
 
-    def write(self, vis_block):
+    def write(self, vis_block, iblk=0):
         vis_data = vis_block.data
         assert len(vis_data.shape) >= 4, f'Invalid vis data shape {vis_data.shape} {vis_data.dtype}'
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
@@ -170,7 +188,8 @@ class VisblockAccumulatorStruct:
         vis_data = vis_block.data
         blflags = vis_block.baseline_flags # True = Bad, False=Good
         #write_slow(tstart, vis_data, blflags, self.pipeline_data)
-        write_fast(tstart, vis_data, blflags, self.pipeline_data)
+        assert 0<= iblk < self.nblocks
+        write_fast(tstart, vis_data, blflags, self.pipeline_data_array[iblk])
         self.t += vis_nt
         assert self.t <= self.nt, f'Wrote too many blocks without reset {self.t} {self.nt}'
 
@@ -184,18 +203,13 @@ class VisblockAccumulatorStruct:
     def is_full(self):
         return self.t == self.nt
     
-    def reset(self):
+    def reset(self, iblk=0):
         self.t = 0
-        self.pipeline_data['bl_weights'][:] = True # make them all good again
+        self.pipeline_data_array[iblk]['bl_weights'][:] = True # make them all good again
         # Don't need to reset 'vis' and 'tf_weights' as they will be overidden
 
     def close(self):
         pass
-
-
-
-
-
 
 
 def _main():
