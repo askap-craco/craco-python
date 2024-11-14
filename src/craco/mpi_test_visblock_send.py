@@ -20,7 +20,7 @@ from craft import craco_plan
 from craft import uvfits
 from craco.timer import Timer
 import time
-from craco.visblock_accumulator import VisblockAccumulatorStruct
+from craco.visblock_accumulator import VisblockAccumulatorStruct,SharedVisblockSender
 
 log = logging.getLogger(__name__)
 
@@ -39,24 +39,78 @@ def _main():
     rank = world.Get_rank()
     nbl = 435
     nc = 288
-    nt = 256
+    nt =  256
     va = VisblockAccumulatorStruct(nbl,nc,nt)
-    mpi_dtype = mpi4py.util.dtlib.from_numpy_dtype(va.pipeline_data_array.dtype)
-    msg = [va.pipeline_data_array, va.pipeline_data_array.size, mpi_dtype]
-
+    msg = va.mpi_msg
     t = Timer()
+
+    
     if rank == 0:        
         log.info('Sending')
-        world.Send(msg, dest=1)
-        log.info('sent')
+        req = world.Isend(msg, dest=1)
+        log.info('sent')        
         t.tick('Send')
+        req.wait()
+        t.tick('send complete')
     else:
         log.info('receving')
-        world.Recv(msg, source=0)
-        log.info('received')
-        t.tick('Recv')
+        req = world.Irecv(msg, source=0)
+        log.info('received')        
+        t.tick('IRecv')
+        req.wait()
+        t.tick('Irecv complete')
 
     print(t)
+    size = 1
+    disp_unit = va.dtype.itemsize
+    node_comm = world
+    win = MPI.Win.Allocate_shared(size * disp_unit if world.rank == 0 else 0,
+            disp_unit, comm = node_comm)
+
+    buf, itemsize = win.Shared_query(0)
+    assert itemsize == va.dtype.itemsize
+    #buf = np.array(buf, dtype=va.dtype, copy=False)
+    ary = np.ndarray(buffer=buf, dtype=va.dtype, shape=(size,))
+    d = va.pipeline_data
+    d['bl_weights'] = np.arange(nbl)
+    d['tf_weights'] = np.arange(nc*nt).reshape(d['tf_weights'].shape)
+    d['vis'].real = np.arange(nc*nt*nbl).reshape(d['vis'].shape)
+    
+    t = Timer()
+    if rank == 0:                
+        ary['bl_weights'] = d['bl_weights']
+        ary['tf_weights'] = d['tf_weights']
+        ary['vis'] = d['vis']
+        t.tick('setting')
+        log.info('Sending')
+        req = world.send(0, dest=1)
+        log.info('sent')        
+        t.tick('Send')        
+    else:
+        iblk = world.recv(source=0)
+        log.info(f'received {iblk}')        
+        t.tick('recv')
+        np.testing.assert_equal(d, ary)
+        t.tick('Compare')
+        d['bl_weights'] = ary['bl_weights']
+        d['tf_weights'] = ary['tf_weights']
+        d['vis'] = ary['vis']
+        t.tick('copy')
+
+
+    print(t)
+
+    # test newer version
+
+    vsend = SharedVisblockSender(nbl,nc,nt, world, 3)
+    if rank == 0:
+        for i in range(3):
+            vsend.va.pipeline_data_array[i]['bl_weights'] = i
+
+        
+        
+        
+
 
     
 

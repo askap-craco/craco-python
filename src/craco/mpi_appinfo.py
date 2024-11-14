@@ -64,6 +64,7 @@ class MpiAppInfo:
     rx_beam_comm = communicator for RX and BEAMPROC ranks. Ranks that aren't that have None
     beam_chain_comm = communicator for BEAMPROC, PLANNER and BEAM_CAND ranks, split by beamid. rank[0] is the
     BEAMPROC, ranks[1] is the PLANNER and rank[2] is the BEAM_CAND
+    beamproc_comm = BEAMTRAN (rank 0) and BEAMPROC (rank1) = used for shared memory comms
     cand_comm = communicator for BEAM_CAND and BEAM_MGR ranks. Rank[0] is the BEAM_MGR, the remainder are the 
     beam processor (rank=beamid+1)
     '''
@@ -121,6 +122,15 @@ class MpiAppInfo:
                 assert bcrank == MpiAppInfo.PLANNER_RANK
             elif self.is_cand_processor:
                 assert bcrank == MpiAppInfo.CANDPROC_RANK
+
+        # rank 0 = beamtran
+        # rank 1 = beamproc
+        # used for shared memory comms for high bandwidth goodness
+        if self.beam_chain_comm is not None:
+            beamproc_comm = self.beam_chain_comm.Split(0 if bcrank <= 1 else -1, bcrank)
+            self.beamproc_comm = beamproc_comm if bcrank <= 1 else None
+        else:
+            self.beamproc_comm = None
 
         # candidate communicator.
         # rank=[0] is manager,
