@@ -158,6 +158,8 @@ class CandidateWriter:
             self.snr_multiplier = None
         else:
             self.snr_multiplier = compute_dm_width_scaling(max_dm_samps, max_boxcar_width, freqs)
+            # ignore widest boxcars
+            self.snr_multiplier[:,-1] = 0
             
         self.open_files()
         
@@ -212,7 +214,7 @@ class CandidateWriter:
         
         #Get the corrected snrs and remove all below 6 sigma
         true_snr = rawcands['snr'] * 1./raw_noise_level * self.snr_multiplier[rawcands['dm'], rawcands['boxc_width']]
-        rawcands = rawcands[true_snr >= 6]
+        rawcands = rawcands[(true_snr >= 6)]
 
         #new ncands
         orig_ncands = ncands
