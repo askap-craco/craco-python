@@ -155,7 +155,7 @@ class SBCandsManager:
             except EmptyCandfile as ecf:
                 warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
                 if ignore_empty:
-                    pass
+                    continue
                 else:
                     raise ecf
             self.all_candfiles.append(cf)
@@ -262,7 +262,7 @@ class ScanCandsManager:
             except EmptyCandfile as ecf:
                 warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
                 if ignore_empty:
-                    pass
+                    continue
                 else:
                     raise ecf
 

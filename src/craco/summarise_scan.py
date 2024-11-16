@@ -38,6 +38,8 @@ logging.basicConfig(filename=logname,
 stdout_handler = logging.StreamHandler(sys.stdout)
 log.addHandler(stdout_handler)
 
+null_value = None
+
 '''
         spatial_pixels_beam0 = planinfo['beam_00']['wcs']['npix']
         spatial_pixels_min = min(planinfo[key]['wcs']['npix'] for key in planinfo if key.startswith('beam_'))
@@ -49,6 +51,8 @@ class TrivialEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, T.Time):
             d = o.iso
+        elif isinstance(o, np.int64):
+            d = int(o)
         else:
             d = super().default(o)
         return d
@@ -105,23 +109,24 @@ def get_last_uncommented_line(file_path):
     Reads the last uncommented line from the file without looping through all lines
     Thanks Chat-GPT
     '''
-    with open(file_path, 'rb') as file:
-        file.seek(0, 2)  # Move the pointer to the end of the file
-        buffer = b''
-        while file.tell() > 1:
-            file.seek(-2, 1)  # Move the pointer back two characters
-            new_byte = file.read(1)
-            if new_byte == b'\n' and buffer:
-                line = buffer[::-1].decode().strip()
-                if line and not line.startswith("#"):
-                    return line
-                buffer = b''
-            else:
-                buffer += new_byte
-        # Check the first line in case it’s uncommented
-        line = buffer[::-1].decode().strip()
-        if line and not line.startswith("#"):
-            return line
+    if file_path and os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            file.seek(0, 2)  # Move the pointer to the end of the file
+            buffer = b''
+            while file.tell() > 1:
+                file.seek(-2, 1)  # Move the pointer back two characters
+                new_byte = file.read(1)
+                if new_byte == b'\n' and buffer:
+                    line = buffer[::-1].decode().strip()
+                    if line and not line.startswith("#"):
+                        return line
+                    buffer = b''
+                else:
+                    buffer += new_byte
+            # Check the first line in case it’s uncommented
+            line = buffer[::-1].decode().strip()
+            if line and not line.startswith("#"):
+                return line
     return None
 
 def parse_flagging_statistics_line(line):
@@ -168,40 +173,63 @@ def read_rfi_stats_info(scandir):
         Dictionary containing the RFI statistics keyed by beamid
     '''
 
-    rfiinfo = {}
+    rfiinfo = {
+        'frac_bls_good': [],
+        'frac_bls_bad': [],
+        'frac_fixed_good_chans': [],
+        'frac_fixed_bad_chans': [],
+        'frac_good_cells_post_flagging': [],
+        'frac_good_cells_pre_flagging': [],
+        'flagging_frac': [],
+        'dropped_packets_frac': []
+    }
+
+    found_a_rfi_stats_file = False
     for beamid in range(36):
-        beaminfo = {}
         rfi_stats_path = scandir.beam_rfi_stats_path(beamid)
         try:
             last_line = get_last_uncommented_line(rfi_stats_path)
             if not last_line:
-                #The rfi file is empty
+                #The rfi file is empty or the file doesn't exist
                 continue
             final_values = parse_flagging_statistics_line(last_line)
             nbl, nf, nt = final_values['blk_shape']
 
-            beaminfo['frac_bls_good'] = final_values['avg_num_good_bls_pre_flagging'] / nbl
-            beaminfo['frac_bls_bad'] = 1 - beaminfo['frac_bls_good']
+            rfiinfo['frac_bls_good'].append(final_values['avg_num_good_bls_pre_flagging'] / nbl)
+            rfiinfo['frac_bls_bad'].append(1 - rfiinfo['frac_bls_good'][-1])
 
-            beaminfo['frac_fixed_good_chans'] = final_values['num_fixed_good_chans_per_blk'] / nf
-            beaminfo['frac_fixed_bad_chans'] = 1 - beaminfo['frac_fixed_good_chans']
+            rfiinfo['frac_fixed_good_chans'].append(final_values['num_fixed_good_chans_per_blk'] / nf)
+            rfiinfo['frac_fixed_bad_chans'].append(1 - rfiinfo['frac_fixed_good_chans'][-1])
 
-            beaminfo['frac_good_cells_post_flagging'] = final_values['avg_num_good_cells_post_flagging'] / final_values['tot_num_cells_per_blk']
-            beaminfo['frac_good_cells_pre_flagging'] = final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk']
-            beaminfo['flagging_frac'] = (final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk']
-            beaminfo['dropped_packets_frac'] = final_values['avg_dropped_packets_frac']
+            rfiinfo['frac_good_cells_post_flagging'].append(final_values['avg_num_good_cells_post_flagging'] / final_values['tot_num_cells_per_blk'])
+            rfiinfo['frac_good_cells_pre_flagging'].append(final_values['avg_num_good_cells_pre_flagging'] / final_values['tot_num_cells_per_blk'])
+            rfiinfo['flagging_frac'].append((final_values['avg_num_good_cells_pre_flagging'] - final_values['avg_num_good_cells_post_flagging']) / final_values['tot_num_cells_per_blk'])
+            rfiinfo['dropped_packets_frac'].append(final_values['avg_dropped_packets_frac'])
+
+            found_a_rfi_stats_file = True
 
         except Exception as E:
             my_error = f"!Error: Could not read flagging information from path - {rfi_stats_path}!\n{E}"
             log.exception(my_error)
-            raise ReadInfoException(my_error, E)
+
+            rfiinfo['frac_bls_good'].append(null_value)
+            rfiinfo['frac_bls_bad'].append(null_value)
+
+            rfiinfo['frac_fixed_good_chans'].append(null_value)
+            rfiinfo['frac_fixed_bad_chans'].append(null_value)
+
+            rfiinfo['frac_good_cells_post_flagging'].append(null_value)
+            rfiinfo['frac_good_cells_pre_flagging'].append(null_value)
+            rfiinfo['flagging_frac'].append(null_value)
+            rfiinfo['dropped_packets_frac'].append(null_value)
+
+            #raise ReadInfoException(my_error, E)
             #log.critical(traceback.format_exc())
             #IPython.embed()
-        finally:
-            rfiinfo[f'beam_{beamid:0>2}'] = beaminfo
 
+    if not found_a_rfi_stats_file:
+        rfiinfo = {}
     return rfiinfo
-
 
 
 def dec_to_dms(deg:float) -> str:
@@ -250,35 +278,68 @@ def read_pcb_stats(scandir):
     filinfo: dict
         A dictionary containing information extracted from pcb headers - keyed by beamid
     '''
-    pcbinfo = {}
+    found_a_pcb = False
+    BW_values = []
+    tobs_values = []
+    fcen_values = []
+    coords_ra_hms_values = []
+    coords_dec_dms_values = []
+    coords_ra_deg_values = []
+    coords_dec_deg_values = []
     for beamid in range(36):
         try:
             filpath = scandir.beam_pcb_path(beamid)
             f = SF(filpath)
-            dur = f.nsamples * f.tsamp / 60         #minutes
+            tobs = f.nsamples * f.tsamp / 60         #minutes
             bw = np.abs(f.foff) * f.nchans
             fcen = f.fch1 + bw / 2
             ra = f.src_raj_deg
             dec = f.src_dej_deg
             #coord_string = f"{ra_to_hms(ra)}, {dec_to_dms(dec)} ({ra:.4f}, {dec:.4f})"
-            beaminfo = {
-                'tobs': dur,
-                'BW': bw,
-                'fcen': fcen,
-                'coords_ra_hms': ra_to_hms(ra),
-                'coords_ra_deg': ra,
-                'coords_dec_dms': dec_to_dms(dec),
-                'coords_dec_deg': dec,
-            }
-            pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+            coords_ra_hms = ra_to_hms(ra)
+            coords_ra_deg = ra
+            coords_dec_dms = dec_to_dms(dec)
+            coords_dec_deg = dec
+
+            found_a_pcb = True
+
         except Exception as E:
             log_msg = f"!Error: Could not read filterbank information from path - {filpath}!\n{E}"
             log.exception(log_msg)
-            raise ReadInfoException(log_msg, E)
-            #beaminfo = {}
-        #finally:
-        #    pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+            
+            tobs = null_value
+            bw = null_value
+            fcen = null_value
+            coords_ra_hms = null_value
+            coords_ra_deg = null_value
+            coords_dec_dms = null_value
+            coords_dec_deg = null_value
 
+            #raise ReadInfoException(log_msg, E)
+            #beaminfo = {}
+        finally:
+            tobs_values.append(tobs)
+            BW_values.append(bw)
+            fcen_values.append(fcen)
+            coords_ra_hms_values.append(coords_ra_hms)
+            coords_ra_deg_values.append(coords_ra_deg)
+            coords_dec_dms_values.append(coords_dec_dms)
+            coords_dec_deg_values.append(coords_dec_deg)
+        #    pcbinfo[f'beam_{beamid:0>2}'] = beaminfo
+    
+
+    pcbinfo = {
+        'tobs' : tobs_values,
+        'BW': BW_values,
+        'fcen': fcen_values,
+        'coords_ra_hms': coords_ra_hms_values,
+        'coords_ra_deg': coords_ra_deg_values,
+        'coords_dec_dms': coords_dec_dms_values,
+        'coords_dec_deg': coords_dec_deg_values,
+    }
+
+    if not found_a_pcb:
+        pcbinfo = {}
     return pcbinfo
 
 
@@ -298,13 +359,36 @@ def read_plan_info(scandir):
     
     '''
 
-    planinfo = {}
+    planinfo = {
+        'beamid': [],
+        'target': [],
+        'solar_elong_deg': [],
+        'lunar_elong_deg': [],
+        'wcs': {
+            'coords_ra_deg': [],
+            'coords_ra_hms': [],
+            'coords_dec_deg': [],
+            'coords_dec_dms': [],
+            'gl_deg': [],
+            'gb_deg': [],
+            'az_deg': [],
+            'alt_deg': [],
+            'npix': [],
+            'cellsize1_deg': [],
+            'cellsize2_deg': [],
+            'fov1_deg': [],
+            'fov2_deg': [],
+            'hourangle_hr': [],
+            'lst_hr': []
+        }
+    }
+    found_a_plan = False
     for beamid in range(36):
         planfile = scandir.beam_plan0_path(beamid)
         try:
             plan0 = np.load(planfile, allow_pickle=True)
             
-            if beamid == 0:
+            if not found_a_plan:        #This means that we save the values of the first plan we found, may or may not be beam 0
                 planinfo['values'] = vars(plan0.values)
                 
                 freq_info = {}
@@ -327,41 +411,60 @@ def read_plan_info(scandir):
 
                 planinfo['tstart'] = plan0.tstart
             
-            
-            beaminfo = {}
-            beaminfo['beamid'] = plan0.beamid
-            beaminfo['target'] = plan0.target_name
-            beaminfo['solar_elong_deg'] = plan0.phase_center.separation(get_sun(plan0.tstart)).deg
-            beaminfo['lunar_elong_deg'] = plan0.phase_center.separation(get_body("moon", plan0.tstart)).deg
+            planinfo['beamid'].append(plan0.beamid)
+            planinfo['target'].append(plan0.target_name)
+            planinfo['solar_elong_deg'].append(plan0.phase_center.separation(get_sun(plan0.tstart)).deg)
+            planinfo['lunar_elong_deg'].append(plan0.phase_center.separation(get_body("moon", plan0.tstart)).deg)
 
-            wcsinfo = {}
-            wcsinfo['coords_ra_deg'] = plan0.ra.deg
-            wcsinfo['coords_ra_hms'] = ra_to_hms(plan0.ra.deg)
-            wcsinfo['coords_dec_deg'] = plan0.dec.deg
-            wcsinfo['coords_dec_dms'] = dec_to_dms(plan0.dec.deg)
-            wcsinfo['gl_deg'] = plan0.phase_center.galactic.l.deg
-            wcsinfo['gb_deg'] = plan0.phase_center.galactic.b.deg
-            wcsinfo['az_deg'] = plan0.craco_wcs.altaz.az.deg
-            wcsinfo['alt_deg'] = plan0.craco_wcs.altaz.alt.deg
-            wcsinfo['npix'] = plan0.craco_wcs.npix
-            wcsinfo['cellsize1_deg'] = plan0.craco_wcs.cellsize[0].deg
-            wcsinfo['cellsize2_deg'] = plan0.craco_wcs.cellsize[1].deg
-            wcsinfo['fov1_deg'] = (plan0.craco_wcs.cellsize[0] * plan0.craco_wcs.npix).deg
-            wcsinfo['fov2_deg'] = (plan0.craco_wcs.cellsize[1] * plan0.craco_wcs.npix).deg
-            wcsinfo['hourangle_hr'] = plan0.craco_wcs.hour_angle.hour
-            wcsinfo['lst_hr'] = plan0.craco_wcs.lst.hour
+            planinfo['wcs']['coords_ra_deg'].append(plan0.ra.deg)
+            planinfo['wcs']['coords_ra_hms'].append(ra_to_hms(plan0.ra.deg))
+            planinfo['wcs']['coords_dec_deg'].append(plan0.dec.deg)
+            planinfo['wcs']['coords_dec_dms'].append(dec_to_dms(plan0.dec.deg))
+            planinfo['wcs']['gl_deg'].append(plan0.phase_center.galactic.l.deg)
+            planinfo['wcs']['gb_deg'].append(plan0.phase_center.galactic.b.deg)
+            planinfo['wcs']['az_deg'].append(plan0.craco_wcs.altaz.az.deg)
+            planinfo['wcs']['alt_deg'].append(plan0.craco_wcs.altaz.alt.deg)
+            planinfo['wcs']['npix'].append(plan0.craco_wcs.npix)
+            planinfo['wcs']['cellsize1_deg'].append(plan0.craco_wcs.cellsize[0].deg)
+            planinfo['wcs']['cellsize2_deg'].append(plan0.craco_wcs.cellsize[1].deg)
+            planinfo['wcs']['fov1_deg'].append((plan0.craco_wcs.cellsize[0] * plan0.craco_wcs.npix).deg)
+            planinfo['wcs']['fov2_deg'].append((plan0.craco_wcs.cellsize[1] * plan0.craco_wcs.npix).deg)
+            planinfo['wcs']['hourangle_hr'].append(plan0.craco_wcs.hour_angle.hour)
+            planinfo['wcs']['lst_hr'].append(plan0.craco_wcs.lst.hour)
 
-            beaminfo['wcs'] = wcsinfo
+            found_a_plan = True
 
-            planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         except Exception as E:
-            beaminfo = {}
             my_error = f"!Error: Could not read plan information from path - {planfile}!\n{E}"
             log.exception(my_error)
-            raise ReadInfoException(my_error, E)
+            #raise ReadInfoException(my_error, E)
+            planinfo['beamid'].append(null_value)
+            planinfo['target'].append(null_value)
+            planinfo['solar_elong_deg'].append(null_value)
+            planinfo['lunar_elong_deg'].append(null_value)
+
+            planinfo['wcs']['coords_ra_deg'].append(null_value)
+            planinfo['wcs']['coords_ra_hms'].append(null_value)
+            planinfo['wcs']['coords_dec_deg'].append(null_value)
+            planinfo['wcs']['coords_dec_dms'].append(null_value)
+            planinfo['wcs']['gl_deg'].append(null_value)
+            planinfo['wcs']['gb_deg'].append(null_value)
+            planinfo['wcs']['az_deg'].append(null_value)
+            planinfo['wcs']['alt_deg'].append(null_value)
+            planinfo['wcs']['npix'].append(null_value)
+            planinfo['wcs']['cellsize1_deg'].append(null_value)
+            planinfo['wcs']['cellsize2_deg'].append(null_value)
+            planinfo['wcs']['fov1_deg'].append(null_value)
+            planinfo['wcs']['fov2_deg'].append(null_value)
+            planinfo['wcs']['hourangle_hr'].append(null_value)
+            planinfo['wcs']['lst_hr'].append(null_value)
+
         #finally:
         #    planinfo[f'beam_{int(beamid):0>2}'] = beaminfo
         
+    if not found_a_plan:
+        planinfo = {}
+
     return planinfo
 
 
@@ -471,19 +574,20 @@ def get_num_candidates(candfiles, snr=None):
         number of candidates for each beam/Candfile() with beamid as keys 
     '''
     num_cands = 0
-    num_cands_per_beam = {}
+    num_cands_per_beam = []
 
-    for candfile in candfiles:
-        if snr is None:
-            num_cands += candfile.ncands
-            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.ncands
-        else:
-            try:
-                ncands = sum( candfile.cands['snr'] >= snr )
-            except KeyError:
-                ncands = sum( candfile.cands['SNR'] >= snr )
-            num_cands += ncands
-            num_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = ncands
+    if len(candfiles) > 0:
+        for candfile in candfiles:
+            if snr is None:
+                num_cands += candfile.ncands
+                num_cands_per_beam.append(candfile.ncands)
+            else:
+                try:
+                    ncands = sum( candfile.cands['snr'] >= snr )
+                except KeyError:
+                    ncands = sum( candfile.cands['SNR'] >= snr )
+                num_cands += ncands
+                num_cands_per_beam.append(ncands)
             
     return num_cands, num_cands_per_beam
 
@@ -508,24 +612,25 @@ def get_num_clusters(candfiles, snr=None):
         number of clusters for each beam/Candfile() with beamid as keys 
     '''
     num_clusters = 0
-    num_clusters_per_beam = {}
+    num_clusters_per_beam = []
 
-    for candfile in candfiles:
-        if snr is None:
-            num_clusters += candfile.nclusters
-            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = candfile.nclusters
-        else:
-            try:
-                cands = candfile.cands[ candfile.cands['snr'] >= snr ]
-            except KeyError:
-                cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
-            nclusters = cands['cluster_id'].nunique()
-            num_clusters += nclusters
-            num_clusters_per_beam[f'beam_{candfile.beamid:0>2}'] = nclusters
+    if len(candfiles) > 0:
+        for candfile in candfiles:
+            if snr is None:
+                num_clusters += candfile.nclusters
+                num_clusters_per_beam.append(candfile.nclusters)
+            else:
+                try:
+                    cands = candfile.cands[ candfile.cands['snr'] >= snr ]
+                except KeyError:
+                    cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
+                nclusters = cands['cluster_id'].nunique()
+                num_clusters += nclusters
+                num_clusters_per_beam.append(nclusters)
             
     return num_clusters, num_clusters_per_beam
 
-
+#VG - change this function to return list with values for each beam, instead of dict
 def get_num_classified_candidates(candfiles, snr=None):
     '''
     Get a list of candidates names for a specific class (label)
@@ -548,21 +653,22 @@ def get_num_classified_candidates(candfiles, snr=None):
     num_classified_cands = defaultdict(int)
     num_classified_cands_per_beam = {}
     
-    for candfile in candfiles:
-        if snr is None:
-            cands = candfile.cands
-        else:
-            try:
-                cands = candfile.cands[ candfile.cands['snr'] >= snr ]
-            except KeyError:
-                cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
+    if len(candfiles) > 0:
+        for candfile in candfiles:
+            if snr is None:
+                cands = candfile.cands
+            else:
+                try:
+                    cands = candfile.cands[ candfile.cands['snr'] >= snr ]
+                except KeyError:
+                    cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
 
-        value_counts = cands['LABEL'].value_counts()
-        num_classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = value_counts.to_dict()
-        for key, count in value_counts.items():
-            num_classified_cands[key] += count
+            value_counts = cands['LABEL'].value_counts()
+            #num_classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = value_counts.to_dict()
+            for key, count in value_counts.items():
+                num_classified_cands[key] += count
         
-    return dict(num_classified_cands), num_classified_cands_per_beam
+    return dict(num_classified_cands)#, num_classified_cands_per_beam
 
 
 
@@ -762,25 +868,26 @@ class ObsInfo:
         classified_cands = []
         classified_cands_per_beam = {}
         
-        for candfile in candfiles:
-            if snr is None:
-                cands = candfile.cands
-            else:
-                try:
-                    cands = candfile.cands[ candfile.cands['snr'] >= snr ]
-                except KeyError:
-                    cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
+        if len(candfiles) > 0:
+            for candfile in candfiles:
+                if snr is None:
+                    cands = candfile.cands
+                else:
+                    try:
+                        cands = candfile.cands[ candfile.cands['snr'] >= snr ]
+                    except KeyError:
+                        cands = candfile.cands[ candfile.cands['SNR'] >= snr ]
 
-            classified_rows = cands[ cands['LABEL'] == label ]
-            if label != 'UNKNOWN':
-                # return crossmatched names for known objects 
-                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = classified_rows['MATCH_name'].unique().tolist()
-                classified_cands += classified_rows['MATCH_name'].unique().tolist()
-            else:
-                # return a list of urls for unknown candidates 
-                classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
-                classified_cands += self._form_url(classified_rows, candfile.beamid)
-            
+                classified_rows = cands[ cands['LABEL'] == label ]
+                if label != 'UNKNOWN':
+                    # return crossmatched names for known objects 
+                    classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = classified_rows['MATCH_name'].unique().tolist()
+                    classified_cands += classified_rows['MATCH_name'].unique().tolist()
+                else:
+                    # return a list of urls for unknown candidates 
+                    classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
+                    classified_cands += self._form_url(classified_rows, candfile.beamid)
+                
         return list(set(classified_cands)), classified_cands_per_beam
         
 
@@ -841,49 +948,60 @@ class ObsInfo:
         candidates_info['num_clustered_cands_bright_per_beam'] = num_clustered_cands_bright_per_beam
 
         # total number of candidates for each classification 
-        num_classified_cands, num_classified_cands_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles)
+        #candidates_info['num_classified_cands_per_beam'] was not being used anywhere, so I removed it completely
+        #num_classified_cands, num_classified_cands_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles)
+        num_classified_cands = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles)
         candidates_info['num_classified_cands'] = num_classified_cands
-        candidates_info['num_classified_cands_per_beam'] = num_classified_cands_per_beam
+        #candidates_info['num_classified_cands_per_beam'] = num_classified_cands_per_beam
 
         # total number of bright candidates for each classification 
-        num_classified_cands_bright, num_classified_cands_bright_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
+        #num_classified_cands_bright, num_classified_cands_bright_per_beam = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
+        num_classified_cands_bright = get_num_classified_candidates(self.cands_manager.clustered_uniq_candfiles, snr=snr)
         candidates_info['num_classified_cands_bright'] = num_classified_cands_bright
-        candidates_info['num_classified_cands_bright_per_beam'] = num_classified_cands_bright_per_beam
+        #candidates_info['num_classified_cands_bright_per_beam'] = num_classified_cands_bright_per_beam
 
+        '''
         # total of PSR (names) detected in obs 
         pulsar_cands, pulsar_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='PSR')
         candidates_info['pulsar_cands'] = pulsar_cands 
         candidates_info['pulsar_cands_per_beam'] = pulsar_cands_per_beam
+        '''
 
         # total of bright PSR (names) detected in obs 
         pulsar_cands_bright, pulsar_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='PSR', snr=snr)
         candidates_info['pulsar_cands_bright'] = pulsar_cands_bright 
         candidates_info['pulsar_cands_bright_per_beam'] = pulsar_cands_bright_per_beam
 
+        '''
         # total of RACS (names) detected in obs 
         racs_cands, racs_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS')
         candidates_info['racs_cands'] = racs_cands 
         candidates_info['racs_cands_per_beam'] = racs_cands_per_beam
+        '''
 
         # total of bright RACS (names) detected in obs 
         racs_cands_bright, racs_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='RACS', snr=snr)
         candidates_info['racs_cands_bright'] = racs_cands_bright 
         candidates_info['racs_cands_bright_per_beam'] = racs_cands_bright_per_beam
         
+        '''
         # total of CUSTOM sources (names)
         custom_cands, custom_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='CUSTOM')
         candidates_info['custom_cands'] = custom_cands 
         candidates_info['custom_cands_per_beam'] = custom_cands_per_beam
+        '''
 
         # total of bright CUSTOM sources (names)
         custom_cands_bright, custom_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='CUSTOM', snr=snr)
         candidates_info['custom_cands_bright'] = custom_cands_bright
         candidates_info['custom_cands_bright_per_beam'] = custom_cands_bright_per_beam
 
+        '''
         # total of UNKNOWN sources (urls)
         unknown_cands, unknown_cands_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='UNKNOWN')
         candidates_info['unknown_cands'] = unknown_cands 
         candidates_info['unknown_cands_per_beam'] = unknown_cands_per_beam
+        '''
 
         # total of bright UNKNOWN sources (urls)
         unknown_cands_bright, unknown_cands_bright_per_beam = self._get_classified_candidates(self.cands_manager.clustered_uniq_candfiles, label='UNKNOWN', snr=snr)
@@ -914,46 +1032,48 @@ class ObsInfo:
         
         data_quality_diagnostics = {}
         rfiinfo = self.rfi_info
+        if rfiinfo == {}:
+            return data_quality_diagnostics
         
-        dp_stats = find_beam0_min_max_values(rfiinfo, 'dropped_packets_frac')
-        data_quality_diagnostics['dropped_packets_fraction_beam00'] = dp_stats[0]
-        data_quality_diagnostics['dropped_packets_fraction_min'] = dp_stats[1]
-        data_quality_diagnostics['dropped_packets_fraction_max'] = dp_stats[2]
+        #dp_stats = find_beam0_min_max_values(rfiinfo, 'dropped_packets_frac')
+        data_quality_diagnostics['dropped_packets_fraction_mean'] = np.mean(rfiinfo['dropped_packets_frac'])
+        data_quality_diagnostics['dropped_packets_fraction_min'] = np.min(rfiinfo['dropped_packets_frac'])
+        data_quality_diagnostics['dropped_packets_fraction_max'] = np.max(rfiinfo['dropped_packets_frac'])
 
-        blg_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_good')
-        data_quality_diagnostics['good_baselines_fraction_beam00'] = blg_stats[0]
-        data_quality_diagnostics['good_baselines_fraction_min'] = blg_stats[1]
-        data_quality_diagnostics['good_baselines_fraction_max'] = blg_stats[2]
+        #blg_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_good')
+        data_quality_diagnostics['good_baselines_fraction_mean'] = np.mean(rfiinfo['frac_bls_good'])
+        data_quality_diagnostics['good_baselines_fraction_min'] =  np.min(rfiinfo['frac_bls_good'])
+        data_quality_diagnostics['good_baselines_fraction_max'] =  np.max(rfiinfo['frac_bls_good'])
 
-        blb_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_bad')
-        data_quality_diagnostics['bad_baselines_fraction_beam00'] = blb_stats[0]
-        data_quality_diagnostics['bad_baselines_fraction_min'] = blb_stats[1]
-        data_quality_diagnostics['bad_baselines_fraction_max'] = blb_stats[2]
+        #blb_stats = find_beam0_min_max_values(rfiinfo, 'frac_bls_bad')
+        data_quality_diagnostics['bad_baselines_fraction_mean'] = np.mean(rfiinfo['frac_bls_bad'])
+        data_quality_diagnostics['bad_baselines_fraction_min'] = np.min(rfiinfo['frac_bls_bad'])
+        data_quality_diagnostics['bad_baselines_fraction_max'] = np.max(rfiinfo['frac_bls_bad'])
 
-        fc_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_good_chans')
-        data_quality_diagnostics['good_channels_fraction_beam00'] = fc_stats[0]
-        data_quality_diagnostics['good_channels_fraction_min'] = fc_stats[1]
-        data_quality_diagnostics['good_channels_fraction_max'] = fc_stats[2]
+        #fc_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_good_chans')
+        data_quality_diagnostics['good_channels_fraction_mean'] = np.mean(rfiinfo['frac_fixed_good_chans'])
+        data_quality_diagnostics['good_channels_fraction_min'] = np.min(rfiinfo['frac_fixed_good_chans'])
+        data_quality_diagnostics['good_channels_fraction_max'] = np.max(rfiinfo['frac_fixed_good_chans'])
 
-        fcb_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_bad_chans')
-        data_quality_diagnostics['bad_channels_fraction_beam00'] = fcb_stats[0]
-        data_quality_diagnostics['bad_channels_fraction_min'] = fcb_stats[1]
-        data_quality_diagnostics['bad_channels_fraction_max'] = fcb_stats[2]
+        #fcb_stats = find_beam0_min_max_values(rfiinfo, 'frac_fixed_bad_chans')
+        data_quality_diagnostics['bad_channels_fraction_mean'] = np.mean(rfiinfo['frac_fixed_bad_chans'])
+        data_quality_diagnostics['bad_channels_fraction_min'] = np.min(rfiinfo['frac_fixed_bad_chans'])
+        data_quality_diagnostics['bad_channels_fraction_max'] = np.max(rfiinfo['frac_fixed_bad_chans'])
 
-        fcp_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_pre_flagging')
-        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_beam00'] = fcp_stats[0]
-        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_min'] = fcp_stats[1]
-        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_max'] = fcp_stats[2]
+        #fcp_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_pre_flagging')
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_mean'] = np.mean(rfiinfo['frac_good_cells_pre_flagging'])
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_min'] = np.min(rfiinfo['frac_good_cells_pre_flagging'])
+        data_quality_diagnostics['good_cells_fraction_pre_rfi_flagging_max'] = np.max(rfiinfo['frac_good_cells_pre_flagging'])
 
-        fcpo_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_post_flagging')
-        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_beam00'] = fcpo_stats[0]
-        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_min'] = fcpo_stats[1]
-        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_max'] = fcpo_stats[2]
+        #fcpo_stats = find_beam0_min_max_values(rfiinfo, 'frac_good_cells_post_flagging')
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_mean'] = np.mean(rfiinfo['frac_good_cells_post_flagging'])
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_min'] = np.min(rfiinfo['frac_good_cells_post_flagging'])
+        data_quality_diagnostics['good_cells_fraction_post_rfi_flagging_max'] = np.max(rfiinfo['frac_good_cells_post_flagging'])
 
-        ff_stats = find_beam0_min_max_values(rfiinfo, 'flagging_frac')
-        data_quality_diagnostics['rfi_dynamic_flagging_fraction_beam00'] = ff_stats[0]
-        data_quality_diagnostics['rfi_dynamic_flagging_fraction_min'] = ff_stats[1]
-        data_quality_diagnostics['rfi_dynamic_flagging_fraction_max'] = ff_stats[2]
+        #ff_stats = find_beam0_min_max_values(rfiinfo, 'flagging_frac')
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_mean'] = np.mean(rfiinfo['flagging_frac'])
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_min'] = np.min(rfiinfo['flagging_frac'])
+        data_quality_diagnostics['rfi_dynamic_flagging_fraction_max'] = np.max(rfiinfo['flagging_frac'])
 
         return data_quality_diagnostics
 
@@ -963,6 +1083,9 @@ class ObsInfo:
         To be implemented by Keith And VG 
         
         '''
+        if self.plan_info == {} or self.pcb_stats == {}:
+            return {}
+        
         planinfo = self.plan_info
         search_params = {}
         search_params['num_dm_trials'] = planinfo['values']['ndm']
@@ -979,33 +1102,33 @@ class ObsInfo:
         search_params['ants_used'] = planinfo['ants']
         search_params['num_baselines'] = planinfo['nbl']
         search_params['num_beams_planned'] = len(planinfo['values']['search_beams'])
-        tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
-        search_params['num_beams_actual'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_')) / tobs[2]
+        #tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
+        #search_params['num_beams_actual'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_')) / tobs[2]
 
-        npix_b0_min_max = find_beam0_min_max_values(planinfo, 'npix')
-        search_params['num_spatial_pixels_beam00'] = npix_b0_min_max[0]
-        search_params['num_spatial_pixels_min'] = npix_b0_min_max[1]
-        search_params['num_spatial_pixels_max'] = npix_b0_min_max[2]
+        #npix_b0_min_max = find_beam0_min_max_values(planinfo, 'npix')
+        search_params['num_spatial_pixels_mean'] = np.mean(planinfo['wcs']['npix'])
+        search_params['num_spatial_pixels_min'] = np.min(planinfo['wcs']['npix'])
+        search_params['num_spatial_pixels_max'] = np.max(planinfo['wcs']['npix'])
 
-        fov1_b0_min_max = find_beam0_min_max_values(planinfo, 'fov1_deg')
-        search_params['fov1_deg_beam00'] = fov1_b0_min_max[0]
-        search_params['fov1_deg__min'] = fov1_b0_min_max[1]
-        search_params['fov1_deg_max'] = fov1_b0_min_max[2]
+        #fov1_b0_min_max = find_beam0_min_max_values(planinfo, 'fov1_deg')
+        search_params['fov1_deg_mean'] = np.mean(planinfo['wcs']['fov1_deg'])
+        search_params['fov1_deg_min'] = np.min(planinfo['wcs']['fov1_deg'])
+        search_params['fov1_deg_max'] = np.max(planinfo['wcs']['fov1_deg'])
 
-        fov2_b0_min_max = find_beam0_min_max_values(planinfo, 'fov2_deg')
-        search_params['fov2_deg_beam00'] = fov2_b0_min_max[0]
-        search_params['fov2_deg_min'] = fov2_b0_min_max[1]
-        search_params['fov2_deg_max'] = fov2_b0_min_max[2]
+        #fov2_b0_min_max = find_beam0_min_max_values(planinfo, 'fov2_deg')
+        search_params['fov2_deg_mean'] = np.mean(planinfo['wcs']['fov2_deg'])
+        search_params['fov2_deg_min'] = np.min(planinfo['wcs']['fov2_deg'])
+        search_params['fov2_deg_max'] = np.max(planinfo['wcs']['fov2_deg'])
 
-        cellsize1_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize1_deg')
-        search_params['cellsize1_deg_beam00'] = cellsize1_b0_min_max[0]
-        search_params['cellsize1_deg_min'] = cellsize1_b0_min_max[1]
-        search_params['cellsize1_deg_max'] = cellsize1_b0_min_max[2]
+        #cellsize1_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize1_deg')
+        search_params['cellsize1_deg_mean'] = np.mean(planinfo['wcs']['cellsize1_deg'])
+        search_params['cellsize1_deg_min'] = np.min(planinfo['wcs']['cellsize1_deg'])
+        search_params['cellsize1_deg_max'] = np.max(planinfo['wcs']['cellsize1_deg'])
 
-        cellsize2_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize2_deg')
-        search_params['cellsize2_deg_beam00'] = cellsize2_b0_min_max[0]
-        search_params['cellsize2_deg_min'] = cellsize2_b0_min_max[1]
-        search_params['cellsize2_deg_max'] = cellsize2_b0_min_max[2]
+        #cellsize2_b0_min_max = find_beam0_min_max_values(planinfo, 'cellsize2_deg')
+        search_params['cellsize2_deg_mean'] = np.mean(planinfo['wcs']['cellsize2_deg'])
+        search_params['cellsize2_deg_min'] = np.min(planinfo['wcs']['cellsize2_deg'])
+        search_params['cellsize2_deg_max'] = np.max(planinfo['wcs']['cellsize2_deg'])
     
         search_params['calibration_file'] = planinfo['values']['calibration']
         search_params['calibration_age_days'] = self.get_time_delay(planinfo['values']['calibration'])
@@ -1036,7 +1159,10 @@ class ObsInfo:
         scan_info['sbid'] = self.sbid
         scan_info['scanid'] = self.scanid
         scan_info['tstart'] = self.tstart
-        scan_info['target_beam00'] = self.plan_info['beam_00']['target']
+        if self.plan_info == {}:
+            scan_info['target'] = null_value
+        else:
+            scan_info['target'] = self.plan_info['target'][0]
 
         return scan_info
 
@@ -1054,40 +1180,42 @@ class ObsInfo:
                 Coordinates of sun
                 Guest science data requested (True/False)
         '''
+        if self.pcb_stats == {} or self.plan_info == {}:
+            return {}
         obs_params = {}
         obs_params['beam_footprint'] = "TO BE IMPLEMENTED"
-        obs_params['central_freq_MHz'] = self.pcb_stats['beam_00']['fcen']
-        obs_params['bandwidth_MHz'] = self.pcb_stats['beam_00']['BW']
+        obs_params['central_freq_MHz'] = self.pcb_stats['fcen'][0]
+        obs_params['bandwidth_MHz'] = self.pcb_stats['BW'][0]
         obs_params['num_channels'] = self.plan_info['freq_info']['nchan']
         obs_params['sampling_time_ms'] = self.plan_info['tsamp_s'] * 1e3
         obs_params['guest_science_proposal'] = "TO BE IMPLEMENTED"
         
-        tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
-        obs_params['tobs_beam00'] = tobs[0]
-        obs_params['tobs_min'] = tobs[1]
-        obs_params['tobs_max'] = tobs[2]
-        obs_params['tobs_sum'] = sum(self.pcb_stats[beamid]['tobs'] for beamid in self.pcb_stats if beamid.startswith('beam_'))
+        #tobs = find_beam0_min_max_values(self.pcb_stats, 'tobs')
+        obs_params['tobs_mean'] = np.mean(self.pcb_stats['tobs'])
+        obs_params['tobs_min'] = np.min(self.pcb_stats['tobs'])
+        obs_params['tobs_max'] = np.max(self.pcb_stats['tobs'])
+        obs_params['tobs_sum'] = np.sum(self.pcb_stats['tobs'])
 
-        sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
-        obs_params['solar_elong_deg_beam00'] = sol[0]
-        obs_params['solar_elong_deg_min'] = sol[1]
-        obs_params['solar_elong_deg_max'] = sol[2]
+        #sol = find_beam0_min_max_values(self.plan_info, 'solar_elong_deg')
+        obs_params['solar_elong_deg_mean'] = np.mean(self.plan_info['solar_elong_deg'])
+        obs_params['solar_elong_deg_min'] = np.min(self.plan_info['solar_elong_deg'])
+        obs_params['solar_elong_deg_max'] = np.max(self.plan_info['solar_elong_deg'])
 
-        lun = find_beam0_min_max_values(self.plan_info, 'lunar_elong_deg')
-        obs_params['lunar_elong_deg_beam00'] = lun[0]
-        obs_params['lunar_elong_deg_min'] = lun[1]
-        obs_params['lunar_elong_deg_max'] = lun[2]
+        #lun = find_beam0_min_max_values(self.plan_info, 'lunar_elong_deg')
+        obs_params['lunar_elong_deg_mean'] = np.mean(self.plan_info['lunar_elong_deg'])
+        obs_params['lunar_elong_deg_min'] = np.min(self.plan_info['lunar_elong_deg'])
+        obs_params['lunar_elong_deg_max'] = np.max(self.plan_info['lunar_elong_deg'])
 
-        obs_params['coords_ra_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_deg']
-        obs_params['coords_dec_deg_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_deg']
-        obs_params['coords_ra_hms_beam00'] = self.plan_info['beam_00']['wcs']['coords_ra_hms']
-        obs_params['coords_dec_dms_beam00'] = self.plan_info['beam_00']['wcs']['coords_dec_dms']
+        obs_params['coords_ra_deg_beam00'] = self.plan_info['wcs']['coords_ra_deg'][0]      #not gauranteed to be beam00 - just the first beam in the list. Should be beam 0 if beam 0 was searched
+        obs_params['coords_dec_deg_beam00'] = self.plan_info['wcs']['coords_dec_deg'][0]
+        obs_params['coords_ra_hms_beam00'] = self.plan_info['wcs']['coords_ra_hms'][0]
+        obs_params['coords_dec_dms_beam00'] = self.plan_info['wcs']['coords_dec_dms'][0]
 
-        obs_params['coords_gl_deg_beam00'] = self.plan_info['beam_00']['wcs']['gl_deg']
-        obs_params['coords_gb_deg_beam00'] = self.plan_info['beam_00']['wcs']['gb_deg']
+        obs_params['coords_gl_deg_beam00'] = self.plan_info['wcs']['gl_deg'][0]
+        obs_params['coords_gb_deg_beam00'] = self.plan_info['wcs']['gb_deg'][0]
 
-        obs_params['coords_az_deg_beam00'] = self.plan_info['beam_00']['wcs']['az_deg']
-        obs_params['coords_alt_deg_beam00'] = self.plan_info['beam_00']['wcs']['alt_deg']
+        obs_params['coords_az_deg_beam00'] = self.plan_info['wcs']['az_deg'][0]
+        obs_params['coords_alt_deg_beam00'] = self.plan_info['wcs']['alt_deg'][0]
 
         return obs_params
         
@@ -1101,55 +1229,47 @@ class ObsInfo:
         
         msg += "----------------\n"
         msg += "Scan info -> \n"
-        msg += f"- Target [Beam 0]: {self.filtered_scan_info['target_beam00']}\n"
+        if self.filtered_scan_info != {}:
+            msg += f"- Target [Beam 0]: {self.filtered_scan_info['target']}\n"
         
         msg += "----------------\n"
         msg += "Obs info ->\n"
-        msg += f"- Beam footprint: {self.filtered_obs_info['beam_footprint']}\n"
-        msg += f"- Duration [Beam 0 (min-max,sum)]: {self.filtered_obs_info['tobs_beam00']:.2f} ({self.filtered_obs_info['tobs_min']:.2f} - {self.filtered_obs_info['tobs_max']:.2f}, {self.filtered_obs_info['tobs_sum']:.2f})\n"
-        msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
-        msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
-        msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
-        msg += f"- Sampling time: {self.filtered_obs_info['sampling_time_ms']:.3f} ms\n"
-        msg += f"- Guest science obs?: {self.filtered_obs_info['guest_science_proposal']}\n"
-        msg += f"- Coords [Beam 0]: {self.filtered_obs_info['coords_ra_hms_beam00']}, {self.filtered_obs_info['coords_dec_dms_beam00']}\n"
-        msg += f"- Coords [Beam 0] (deg): {self.filtered_obs_info['coords_ra_deg_beam00']:.5f}, {self.filtered_obs_info['coords_dec_deg_beam00']:.5f}\n"
-        msg += f"- Coords [Beam 0] (gal): {self.filtered_obs_info['coords_gl_deg_beam00']:.5f}, {self.filtered_obs_info['coords_gb_deg_beam00']:.5f}\n"
-        msg += f"- Solar elongation [Beam 0]: {self.filtered_obs_info['solar_elong_deg_beam00']:.5f} deg\n"
-
+        if self.filtered_obs_info != {}:
+            msg += f"- Duration [max (min,mean,sum)]: {self.filtered_obs_info['tobs_max']:.2f} ({self.filtered_obs_info['tobs_min']:.2f}, {self.filtered_obs_info['tobs_mean']:.2f}, {self.filtered_obs_info['tobs_sum']:.2f})\n"
+            msg += f"- Central freq: {self.filtered_obs_info['central_freq_MHz']:.1f} MHz\n"
+            msg += f"- Bandwidth: {self.filtered_obs_info['bandwidth_MHz']:.2f} MHz\n"
+            msg += f"- Sampling time: {self.filtered_obs_info['sampling_time_ms']:.3f} ms\n"
+            
         msg += "----------------\n"
-        msg += "Search info ->\n"
-        msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
-        msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
-        msg += f"- Nbeams_eff: {self.filtered_search_info['num_beams_actual']:.1f}\n"
-        msg += f"- Calib: {self.filtered_search_info['calibration_file']}\n"
-        msg += f"- Calib age: {self.filtered_search_info['calibration_age_days']:.2f} days\n"
-        msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
-        msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
-        msg += f"- FOV [Beam 0]: {self.filtered_search_info['fov1_deg_beam00']:.2f} deg, {self.filtered_search_info['fov2_deg_beam00']:.2f} deg\n"
-        msg += f"- Cell size [Beam 0]: {self.filtered_search_info['cellsize1_deg_beam00']} deg, {self.filtered_search_info['cellsize2_deg_beam00']} deg\n"
-        msg += f"- Npix [Beam 0]: {self.filtered_search_info['num_spatial_pixels_beam00']}\n"
+        if self.filtered_search_info != {}:
+            msg += "Search info ->\n"
+            msg += f"- Nant: {self.filtered_search_info['num_antennas']}\n"
+            msg += f"- Nbl: {self.filtered_search_info['num_baselines']}\n"
+            msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
+            msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
+            msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
 
         msg += "----------------\n"
         msg += "Candidate info -> \n"
-        
-        msg += f"- Num raw (incl. subthreshold): {self.filtered_cands_info['num_raw_cands_bright']} ({self.filtered_cands_info['num_raw_cands']})\n"
-        msg += f"- Num raw clustered (incl. subthreshold): {self.filtered_cands_info['num_clustered_cands_bright']} ({self.filtered_cands_info['num_clustered_cands']})\n"
+        if self.filtered_cands_info != {}:
+            msg += f"- Num raw (incl. subthreshold): {self.filtered_cands_info['num_raw_cands_bright']} ({self.filtered_cands_info['num_raw_cands']})\n"
+            msg += f"- Num raw clustered (incl. subthreshold): {self.filtered_cands_info['num_clustered_cands_bright']} ({self.filtered_cands_info['num_clustered_cands']})\n"
 
-        msg += f"- Num RFI (incl. subthreshold): {self.filtered_cands_info['num_clustered_rfi_cands_bright']} ({self.filtered_cands_info['num_clustered_rfi_cands']})\n"
-        msg += f"- Num localised (incl. subthreshold): {self.filtered_cands_info['num_clustered_uniq_cands_bright']} ({self.filtered_cands_info['num_clustered_uniq_cands']})\n"
-        msg += f"- Num source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']}   ({self.filtered_cands_info['num_classified_cands']})\n"
-        msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
-        msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
-        msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
-        msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
+            msg += f"- Num RFI (incl. subthreshold): {self.filtered_cands_info['num_clustered_rfi_cands_bright']}\n"# ({self.filtered_cands_info['num_clustered_rfi_cands']})\n"
+            msg += f"- Num localised (incl. subthreshold): {self.filtered_cands_info['num_clustered_uniq_cands_bright']}\n"# ({self.filtered_cands_info['num_clustered_uniq_cands']})\n"
+            msg += f"- Num source types detected (incl. subthreshold): {self.filtered_cands_info['num_classified_cands_bright']}\n"#   ({self.filtered_cands_info['num_classified_cands']})\n"
+            msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
+            msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
+            msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
+            msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
         
         msg += "----------------\n"
         msg += "Data quality info ->\n"
-        msg += f"- Dropped packets fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_beam00']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
-        msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_beam00']:.2f}\n"
-        msg += f"- Flagged baselines fraction [Beam 0 (min-max)]: {self.filtered_dq_info['bad_baselines_fraction_beam00']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
-        msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_beam00']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
+        if self.filtered_dq_info != {}:
+            msg += f"- Dropped packets fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_mean']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+            msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_mean']:.2f}\n"
+            msg += f"- Flagged baselines fraction [Beam 0 (min-max)]: {self.filtered_dq_info['bad_baselines_fraction_mean']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
+            msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_mean']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
 
         return msg
     
