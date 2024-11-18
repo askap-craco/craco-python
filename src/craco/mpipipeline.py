@@ -771,7 +771,7 @@ def proc_rx_run(proc):
         timer = Timer(args={'ibuf':ibuf+1})
         values = proc.pipe_info.values
         if ibuf == values.num_msgs -1:
-            raise ValueError('Stopped')
+            raise StopIteration('Stopped')
 
 
 class FilterbankSink:
