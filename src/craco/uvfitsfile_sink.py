@@ -20,6 +20,7 @@ from craco.cardcap import NCHAN, NFPGA, NSAMP_PER_FRAME
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 import astropy.units as u
+from craco.vissource import VisBlock
 from numba import njit
 
 log = logging.getLogger(__name__)
@@ -200,7 +201,7 @@ class DataPrepper:
         self.iblk = 0
         self.inttime_days = self.inttim / 86400
 
-    def write(self, vis_block):
+    def write(self, vis_block:VisBlock):
         #t = Timer()
         vis_data = vis_block.data
         vis_nt = vis_data.shape[3]
@@ -245,21 +246,17 @@ class DataPrepper:
             
 
 class UvFitsFileSink:
-    def __init__(self, obs_info):
+    def __init__(self, obs_info, fileout=None, extra_header=None):
 
         beamno = obs_info.pipe_info.beamid
         self.beamno = beamno
         self.obs_info = obs_info
         self.blockno = 0
         values = obs_info.values
-        if values.fcm is None or beamno not in obs_info.values.save_uvfits_beams:
-            log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
-                     beamno, obs_info.values.save_uvfits_beams)
-            self.uvout = None
-            self.prepper = None
-            return
         
-        fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
+        if fileout is None:
+            fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
+            
         self.fileout = fileout
         fcm = Parset.from_file(values.fcm)
         antennas = get_antennas(fcm)
@@ -276,7 +273,11 @@ class UvFitsFileSink:
         self.source_list = obs_info.sources().values()
         source_list = self.source_list
         log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
-        extra_header = {'BEAMID': beamno, 'TSCALE':'UTC'}
+        
+        _extra_header = {'BEAMID': beamno, 'TSCALE':'UTC'}
+        if extra_header is not None:
+            _extra_header.update(extra_header)
+            
         self.uvout = CorrUvFitsFile(fileout,
                                     fcent,
                                     foff,
@@ -285,7 +286,7 @@ class UvFitsFileSink:
                                     tstart,
                                     source_list,
                                     antennas,
-                                    extra_header=extra_header,
+                                    extra_header=_extra_header,
                                     instrume='CRACO')
 
         # create extra tables so we can fix it later on. if the file is not closed properly
