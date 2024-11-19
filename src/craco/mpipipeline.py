@@ -850,7 +850,14 @@ def transpose_beam_run(proc):
 
     #cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
-    vis_file = UvFitsFileSink(info)
+
+    if values.fcm is None or beamid not in info.values.save_uvfits_beams:
+        log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
+                beamid, info.values.save_uvfits_beams)
+        vis_file = None
+    else:
+        vis_file = UvFitsFileSink(info)
+        
     proc_comm = pipe_info.mpi_app.beamproc_comm
     assert proc_comm.rank == 0, 'Expected to be rank 0'
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
@@ -869,7 +876,8 @@ def transpose_beam_run(proc):
     # requested block to planner to get moving
 
     # let the fits sink see some ddata so it can compile
-    vis_file.compile(transposer.drx['vis'])
+    if vis_file is not None:
+        vis_file.compile(transposer.drx['vis'])
 
    # warmup send
    #beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
@@ -889,8 +897,9 @@ def transpose_beam_run(proc):
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
             vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
             t.tick('visblock')
-            vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
-            t.tick('visfile')
+            if vis_file is not None:
+                vis_file.write(vis_block) # can't handle complex vis blocks. *groan* -maybe???'
+                t.tick('visfile')
             # We have to complete teh send request before writing to the vis_accum
             '''
             if vis_accum_send_req is not None:
@@ -926,9 +935,10 @@ def transpose_beam_run(proc):
     finally:
         print(f'Closing beam files for {beamid}')
         #cas_filterbank.close()
-        ics_filterbank.close()
-        vis_file.close()
+        ics_filterbank.close()        
         vis_accum.close()
+        if vis_file is not None:
+            vis_file.close()
 
 
 def proc_beam_run(proc):
