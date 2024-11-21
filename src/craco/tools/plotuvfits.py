@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
-def cmplxplot(d, title=''):
+def cmplxplot(d, title='', xlabel='', ylabel=''):
     fig, ax = pylab.subplots(2,2)
     fig.suptitle(title)
     fig.tight_layout()
@@ -30,6 +30,11 @@ def cmplxplot(d, title=''):
     ax[0,1].text(0,0,'imag',ha='left', va='bottom')
     ax[1,0].text(0,0,'abs',ha='left', va='bottom')
     ax[1,1].text(0,0,'ang',ha='left', va='bottom')
+    ax[1,0].set_xlabel(xlabel)
+    ax[1,1].set_xlabel(xlabel)
+
+    ax[0,0].set_ylabel(ylabel)
+    ax[1,0].set_ylabel(ylabel)
 
 
     return fig,ax
@@ -41,6 +46,9 @@ def _main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-m','--metadata-file', help='Metadatda file')
     parser.add_argument('--calc11', action='store_true')
+    parser.add_argument('-b','--bl', type=int, default=0, help='Baseline to plot')
+    parser.add_argument('-c','--chan', type=int, default=0, help='Chan to plot')
+    parser.add_argument('-t','--sample', type=int, default=0, help='sample to plot')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -59,10 +67,13 @@ def _main():
     d, uvw = next(inf.fast_time_blocks(nt, fetch_uvws=True, istart=0))
     d = d.squeeze()
     print(type(d), d.shape, type(uvw))
+    chan = values.chan
+    samp = values.sample
+    bl = values.bl
     # d.shape = (nbl, nf, nt)
-    cmplxplot(d[:,0,:], title='Channel 0')
-    cmplxplot(d[:,:,0], title='Sample 0')
-    cmplxplot(d[0,:,:], title='Baseline 0')
+    cmplxplot(d[:,chan,:], title=f'Channel {chan}', xlabel='t', ylabel='bl') # channel
+    cmplxplot(d[:,:,samp], title=f'Sample {samp}', xlabel='chan', ylabel='bl') #  sample
+    cmplxplot(d[bl,:,:], title=f'Baseline {bl}', xlabel='chan', ylabel='t') # baseline
 
     pylab.show()
 
