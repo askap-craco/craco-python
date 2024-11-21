@@ -115,7 +115,7 @@ class CandidateOutput:
         self.cand = cand
         self.cutout_buffer = cutout_buffer
         beamid = self.cutout_buffer.obs_info.beamid
-        cand_dir = f'beamd{beamid:02d}/candidates/iblk{cand["iblk"]}'
+        cand_dir = f'beam{beamid:02d}/candidates/iblk{cand["iblk"]}'
         os.makedirs(cand_dir, exist_ok=True)
         candfile = os.path.join(cand_dir, 'candidate.txt')
         candwriter = CandidateWriter(candfile)
