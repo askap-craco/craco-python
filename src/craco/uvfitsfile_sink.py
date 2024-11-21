@@ -248,7 +248,7 @@ class DataPrepper:
 class UvFitsFileSink:
     def __init__(self, obs_info, fileout=None, extra_header=None):
 
-        beamno = obs_info.pipe_info.beamid
+        beamno = obs_info.beamid
         self.beamno = beamno
         self.obs_info = obs_info
         self.blockno = 0
@@ -263,9 +263,9 @@ class UvFitsFileSink:
         log.info('FCM %s contained %d antennas', values.fcm, len(antennas))
         info = obs_info
         fcent = info.fcent
-        foff = info.foff * values.vis_fscrunch
-        assert info.nchan % values.vis_fscrunch == 0, f'Fscrunch needs to divide nchan {info.nchan} {values.vis_fscrunch}'
-        nchan = info.nchan // values.vis_fscrunch
+        foff = info.foff * info.vis_fscrunch
+        assert info.nchan % info.vis_fscrunch == 0, f'Fscrunch needs to divide nchan {info.nchan} {values.vis_fscrunch}'
+        nchan = info.nchan // info.vis_fscrunch
         self.npol = 1 # card averager always sums polarisations
         npol = self.npol
         tstart = (info.tstart.utc.value + info.inttime.to(u.day).value)
