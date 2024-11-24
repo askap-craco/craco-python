@@ -86,7 +86,7 @@ def _main():
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
     parser.add_argument('--scan-minutes', type=float, help='Number of minutes to record for', default=15)
-    parser.add_argument('--calibration-scan-minutes', default=5.0, type=float, help='Length of scan if we need to do a calibartion')
+    parser.add_argument('--calibration-scan-minutes', default=15.0, type=float, help='Length of scan if we need to do a calibartion')
     parser.add_argument('--pol-sum', help='Sum pol mode', action='store_true', dest='pol_sum', default=True)
     parser.add_argument('--dual-pol', help='Dual pol mode', action='store_false', dest='pol_sum', default=False)
     parser.add_argument('-a','--card', help='Cards to download', default='1-12')
