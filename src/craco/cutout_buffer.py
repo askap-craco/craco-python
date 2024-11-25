@@ -15,13 +15,14 @@ from craco.candidate_writer import CandidateWriter
 from craco.uvfitsfile_sink import UvFitsFileSink
 from craco.mpi_obsinfo import MpiObsInfo
 from craco.vissource import VisBlock
+from craco.timer import Timer
 
 log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class CutoutBuffer:
-    def __init__(self, dtype, ndtype, nslots:int, obs_info:MpiObsInfo):
+    def __init__(self, dtype, ndtype, nslots:int, obs_info:MpiObsInfo, maxncand:int=1):
         self.buf = np.zeros((nslots, ndtype), dtype=dtype)
         self.buf_iblk = np.ones(nslots, dtype=int)*-1
         self.write_idx = -1
@@ -29,6 +30,8 @@ class CutoutBuffer:
         self.write_iblk = -1
         self.candidates = []
         self.obs_info = obs_info
+        assert maxncand > 0
+        self.maxncand = maxncand
 
     @property
     def oldest_slot_idx(self):
@@ -98,8 +101,9 @@ class CutoutBuffer:
         '''
         Add this candidate to the list of candidates to dump and write to disk
         '''
-        cout = CandidateOutput(cand, self)
-        self.candidates += cout
+        if len(self.candidates) < self.maxncand:
+            cout = CandidateOutput(cand, self)
+            self.candidates.append(cout)
         return cout
 
     def flush_all(self):
@@ -112,18 +116,22 @@ class CutoutBuffer:
 
 class CandidateOutput:
     def __init__(self, cand, cutout_buffer:CutoutBuffer):
+        t = Timer()
         self.cand = cand
         self.cutout_buffer = cutout_buffer
         beamid = self.cutout_buffer.obs_info.beamid
         cand_dir = f'beam{beamid:02d}/candidates/iblk{cand["iblk"]}'
         os.makedirs(cand_dir, exist_ok=True)
+        t.tick('mkdir')
         candfile = os.path.join(cand_dir, 'candidate.txt')
         candwriter = CandidateWriter(candfile)
         candwriter.write_cands([cand])
         candwriter.close()
+        t.tick('write cand')
         # write another version, jsut to see if it works
-        np.savetxt(os.path.join(cand_dir, 'candidate_spacedelim.txt'), np.array([cand]))
+        #np.savetxt(os.path.join(cand_dir, 'candidate_spacedelim.txt'), np.array([cand]))
         cutout_file_name = os.path.join(cand_dir, 'candidate.uvfits')
+        self.cutout_file_name = cutout_file_name
         self.start_iblk = self.cutout_buffer.oldest_slot_iblk
         self.start_slot_idx = self.cutout_buffer.oldest_slot_idx
         self.end_iblk = self.cutout_buffer.current_slot_iblk
@@ -138,10 +146,18 @@ class CandidateOutput:
             s = 'CAND_'+k.upper()
             hdr[s] = cand[k]
 
+        t.tick('mkdhdr')
+
         # why don't we just write out as much data as we have? That seems sensible?
         # OK so the current block being written to is self.cutout_buffer.write_iblk
 
-        self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr)
+        format = 'fits' # can be 'raw' or 'fits'
+        use_uvws = False
+        self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr, format=format, use_uvws=use_uvws)
+
+        t.tick('mkoutfile')
+        log.info('Writing canidate %s to %s from iblk=%s-%s or slot=%s-%s',
+                 cand, cand_dir, self.start_iblk, self.end_iblk, self.start_slot_idx, self.end_slot_idx)
         
                 
     @property
@@ -155,13 +171,14 @@ class CandidateOutput:
         '''
         if self.cutout_buffer is None: # shoudln't happen, but quit sillently if we've already finished
             return
-        data = self.cutout_buffer[self.curr_slot_idx]
+        data = self.cutout_buffer.buf[self.curr_slot_idx,:]
         iblk = self.cutout_buffer.buf_iblk[self.curr_slot_idx]
         info = self.cutout_buffer.obs_info
-        block = VisBlock(data, iblk, info)
+        block = VisBlock(data['vis'], iblk, info)
 
-        self.cutout_file.write(block)
+        self.cutout_file.write(block)        
         finished = self.curr_slot_idx == self.end_slot_idx
+        log.info('Wrote iblk %s to %s, finished=%s', iblk, self.cutout_file_name, finished)
         if finished:
             self.cutout_file.close()
             self.cutout_file = None

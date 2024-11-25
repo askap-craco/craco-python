@@ -75,6 +75,44 @@ NPROC_RING_SLOTS = 4
 # rank ordering
 # [ beam0, beam1, ... beamN-1 | rx0, rx1, ... rxM-1]
 
+
+
+class Processor:
+    def __init__(self, pipe_info:MpiPipelineInfo):
+        self.trace_file = MpiTracefile.instance()
+        self.pipe_info = pipe_info
+        
+        is_rx = pipe_info.mpi_app.is_rx_processor
+        world = self.pipe_info.mpi_app.world
+        hdrs = self.get_headers()
+        log.debug(f'Headers: Got {len(hdrs)} hdrs before bcast')
+        if len(hdrs) > 0:
+            log.debug('Headers: %s', hdrs)
+        hdrs = world.bcast(hdrs, root=0)
+        log.debug(f'Headers: Got {len(hdrs)} hdrs after bcast')
+        world.Barrier()
+        log.debug('Barrier1')
+        self.obs_info = MpiObsInfo(hdrs, pipe_info)
+        world.Barrier()
+        log.debug('Barrier2')
+        fid0 = self.get_fid0()
+        world.Barrier()
+        log.debug('Barrier3')
+        log.debug('FID0 before bcast %d', fid0)
+        fid0 = world.bcast(fid0, root=0)
+        log.debug('FID0 after bcast %d',fid0)
+        self.obs_info.fid0 = fid0            
+        log.info(f'fid0={fid0} {type(fid0)}')
+
+    def get_headers(self):
+        return ''
+    
+    def get_fid0(self):
+        return 0
+    
+    def run(self):
+        pass
+
 def set_scheduler(priority:int, policy=None):
     '''
     This breaks the system
@@ -489,11 +527,10 @@ def transpose_beam_get_fid0(proc):
 
     return 0
 
-def transpose_beam_run(proc):
+def transpose_beam_run(proc:Processor):
     set_scheduler(BEAM_PRIORITY)
     pipe_info = proc.pipe_info
     info = proc.obs_info
-
     nbeam = pipe_info.nbeams
     values = pipe_info.values
     beamid = pipe_info.beamid
@@ -552,20 +589,40 @@ def transpose_beam_run(proc):
 
     nslots = 128 # number of 110ms write slots in cutout buffer
     cutout_buffer = CutoutBuffer(transposer.drx.dtype, transposer.drx.size, nslots, info)
+   
+    world_comm = pipe_info.mpi_app.world_comm
+    cand_req = world_comm.irecv(source=pipe_info.cand_mngr_rankinfo.rank)
+    enable_write_block = True
 
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
             beam_data = cutout_buffer.next_write_buffer()
+            t.tick('get writebuf')
+
+            # check for candidate
+            cand_received, cand = cand_req.test()
+            if cand_received:
+                cutout_buffer.add_candidate_to_dump(cand)
+                cand_req = world_comm.irecv(source=pipe_info.cand_mngr_rankinfo.rank)
+                t.tick('Add cand')
+
+            if enable_write_block:
+                try:
+                    cutout_buffer.write_next_block()
+                    t.tick('Write blocks')
+                except:
+                    log.exception('error writing block. Disabling write')
+                    enable_write_block = False
+
             beam_data = transposer.recv(beam_data)
             if iblk == 0:
                 log.info('got block 0')
             #beam_data_complex = transposer.drx_complex # a view into the same data.
             beam_data_complex = beam_data.view(dtype=transposer.dtype_complex)
-
             t.tick('transposer')
             #cas_filterbank.write(beam_data['cas'])
-            #t.tick('cas')
+            #t.tick('cas')            
             ics_filterbank.write(beam_data['ics'])
             t.tick('ics')
             vis_block = VisBlock(beam_data['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
@@ -600,6 +657,7 @@ def transpose_beam_run(proc):
         #cas_filterbank.close()
         ics_filterbank.close()        
         vis_accum.close()
+        cutout_buffer.flush_all()
         if vis_file is not None:
             vis_file.close()
 
@@ -725,42 +783,6 @@ def proc_beam_run(proc):
         beam_comm.send(-1, dest=planner_rank) # Tell planner to quit
         pipeline_sink.close()
 
-
-class Processor:
-    def __init__(self, pipe_info):
-        self.trace_file = MpiTracefile.instance()
-        self.pipe_info = pipe_info
-        
-        is_rx = pipe_info.mpi_app.is_rx_processor
-        world = self.pipe_info.mpi_app.world
-        hdrs = self.get_headers()
-        log.debug(f'Headers: Got {len(hdrs)} hdrs before bcast')
-        if len(hdrs) > 0:
-            log.debug('Headers: %s', hdrs)
-        hdrs = world.bcast(hdrs, root=0)
-        log.debug(f'Headers: Got {len(hdrs)} hdrs after bcast')
-        world.Barrier()
-        log.debug('Barrier1')
-        self.obs_info = MpiObsInfo(hdrs, pipe_info)
-        world.Barrier()
-        log.debug('Barrier2')
-        fid0 = self.get_fid0()
-        world.Barrier()
-        log.debug('Barrier3')
-        log.debug('FID0 before bcast %d', fid0)
-        fid0 = world.bcast(fid0, root=0)
-        log.debug('FID0 after bcast %d',fid0)
-        self.obs_info.fid0 = fid0            
-        log.info(f'fid0={fid0} {type(fid0)}')
-
-    def get_headers(self):
-        return ''
-    
-    def get_fid0(self):
-        return 0
-    
-    def run(self):
-        pass
 
 class RxProcessor(Processor):
     def get_headers(self):
@@ -962,6 +984,7 @@ class CandMgrProcessor(Processor):
         # libpq.so.5 is only installed on root node. This way it only runs on the root node.
         # SHoud make slackpostmanager not reference psycopg2
         from craco.craco_run.auto_sched import SlackPostManager
+        self.trigger_req = None
 
         self.slack_poster = SlackPostManager(test=False, channel="C05Q11P9GRH")
         for iblk in range(self.pipe_info.requested_nsearch):
@@ -988,9 +1011,25 @@ class CandMgrProcessor(Processor):
         bestcand_dict = {k:bestcand[k] for k in bestcand.dtype.names}
 
         if bestcand['snr'] >= self.pipe_info.values.trigger_threshold:
-            log.critical('Sending candidate %s', bestcand_dict)
+            log.critical('TRIGGER Sending candidate %s', bestcand_dict)
+            # Send candidate to CRAFT to dump voltages
             self.cand_sender.send(bestcand)
+
+            # log in the trace
             trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
+
+            # Send candidate to beam transposer, so they can dump to disk
+            ibeam = bestcand['ibeam']
+            try:
+                beamtran_rankinfo = self.pipe_info.get_beamtran_info_for_beam(ibeam)       
+                # disable for now - it's too slow         
+                log.info('Sending candidate to beamtran %s', beamtran_rankinfo)
+                self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
+                
+            except:
+                log.exception('Failed to trigger cand dump')
+            
+            # send to slack
             msg = format_candidate_slack_message(bestcand, outdir)
             self.slack_poster.post_message(msg)
 
