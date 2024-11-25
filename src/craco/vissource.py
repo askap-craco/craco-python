@@ -16,6 +16,7 @@ from craco.cardcap import NCHAN, NFPGA
 from craco.cardcapfile import NSAMP_PER_FRAME
 from craco import cardcap
 from craco.cardcapmerger import CcapMerger, frame_id_iter
+from craco.mpi_obsinfo import MpiObsInfo
 import astropy.io.fits.header as header
 from mpi4py import MPI
 
@@ -176,7 +177,7 @@ class VisBlock:
     All baselines
     Block of NT integrations
     '''
-    def __init__(self, data, iblk, info, cas=None, ics=None):
+    def __init__(self, data, iblk, info:MpiObsInfo, cas=None, ics=None):
         self._d = data
         self.iblk = iblk
         self.info = info
