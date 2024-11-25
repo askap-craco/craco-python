@@ -915,7 +915,7 @@ class MpiCardcapController:
             if len(my_fpga) == 1:
                 devidx = my_fpga[0] % len(devices)
             else:
-                devidx = my_card % len(devices)
+                devidx = rank % len(devices)
 
             my_values.device = devices[devidx]
 

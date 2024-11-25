@@ -201,17 +201,20 @@ class DataPrepper:
         self.iblk = 0
         self.inttime_days = self.inttim / 86400
 
-    def write(self, vis_block:VisBlock):
+    def write(self, vis_block:VisBlock, use_uvws=True):
         #t = Timer()
         vis_data = vis_block.data
         vis_nt = vis_data.shape[3]
         assert self.vis_nt == vis_nt
-        uvw = vis_block.uvw
-        for blinfo in self.baselines:
-            ia1 = blinfo.ia1
-            ia2 = blinfo.ia2
-            ibl = blinfo.blidx
-            self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+        if use_uvws:
+            uvw = vis_block.uvw
+            for blinfo in self.baselines:
+                ia1 = blinfo.ia1
+                ia2 = blinfo.ia2
+                ibl = blinfo.blidx
+                self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+        else:
+            self.uvw_baselines[:] = 0
         #t.tick('calc baselines')
 
         dout = self.dout
@@ -229,7 +232,7 @@ class DataPrepper:
         #t.tick('prep fast')
         v = self.dout.view(np.float32)
         #t.tick('view')
-        v.byteswap(inplace=True)
+        v.byteswap(inplace=True) # FITS is big endian. Damn.
         #t.tick('byteswap')
         v.tofile(self.uvfitsout.fout)
         #t.tick('tofile')
@@ -246,13 +249,21 @@ class DataPrepper:
             
 
 class UvFitsFileSink:
-    def __init__(self, obs_info, fileout=None, extra_header=None):
+    def __init__(self, obs_info, fileout=None, extra_header=None, format='fits', use_uvws=True):
 
+        '''
+        Raw does some kidnof raw format that we'll have to use the header to covert
+
+        '''
+        assert format in ('fits', 'raw'), f'Invalid format {format}'
+        self.format = format
+        self.use_uvws = use_uvws
         beamno = obs_info.beamid
         self.beamno = beamno
         self.obs_info = obs_info
         self.blockno = 0
         values = obs_info.values
+
         
         if fileout is None:
             fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
@@ -274,7 +285,7 @@ class UvFitsFileSink:
         source_list = self.source_list
         log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
         
-        _extra_header = {'BEAMID': beamno, 'TSCALE':'UTC'}
+        _extra_header = {'BEAMID': beamno, 'TSCALE':'UTC', 'FORMAT':self.format}
         if extra_header is not None:
             _extra_header.update(extra_header)
             
@@ -324,47 +335,57 @@ class UvFitsFileSink:
         if self.uvout is None:
             return
 
-        raw_dump = False
-        if raw_dump:
-            vis_data.tofile(self.uvout.fout)
-            return        
-
         t = Timer()
         do_fast = True
-        if do_fast:
-            self.prepper.write(vis_block)
-            t.tick('Write prepper')
-        else:
-            info = self.obs_info
-            vis_data = vis_block.data
-            nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
-            fid_start = vis_block.fid_start
-            fid_mid = vis_block.fid_mid
-            mjd = vis_block.mjd_mid
-            antflags = vis_block.antflags
-            samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
-            sourceidx = vis_block.source_index
-            fits_sourceidx = sourceidx + 1
-            nant = info.nant
-            inttime = info.inttime.to(u.second).value*info.vis_tscrunch
+        if self.format == 'fits':
+            if do_fast:
+                self.prepper.write(vis_block, self.use_uvws)
+                t.tick('Write prepper')
+            else:
+                info = self.obs_info
+                vis_data = vis_block.data
+                nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+                fid_start = vis_block.fid_start
+                fid_mid = vis_block.fid_mid
+                mjd = vis_block.mjd_mid
+                antflags = vis_block.antflags
+                samps_per_vis = np.uint64(NSAMP_PER_FRAME // vis_nt)
+                sourceidx = vis_block.source_index
+                fits_sourceidx = sourceidx + 1
+                nant = info.nant
+                inttime = info.inttime.to(u.second).value*info.vis_tscrunch
 
-            assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
-            # FID is for the beginning of the block.
-            # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
-            fid_itimes = [fid_start + samps_per_vis // 2 + itime*samps_per_vis for itime in range(vis_nt)]
-            mjds = np.array([info.fid_to_mjd(fid_itime).utc.value for fid_itime in fid_itimes])
-            
-            assert NSAMP_PER_FRAME % vis_nt == 0
-            (dreshape, weights, uvw_baselines) = prepare_data_slow(vis_block, self.total_nchan, self.npol, info.baseline_iter())
-            t.tick('prepare')               
-            write_data_slow(self.uvout, uvw_baselines,dreshape, weights, fits_sourceidx, mjds, self.blids, inttime)
-            t.tick('Write')
+                assert nbl == info.nbl_flagged, f'Expected nbl={info.nbl_flagged} but got {nbl}'
+                # FID is for the beginning of the block.
+                # we might vis_nt = 2 and the FITS convention is to use the integraton midpoint
+                fid_itimes = [fid_start + samps_per_vis // 2 + itime*samps_per_vis for itime in range(vis_nt)]
+                mjds = np.array([info.fid_to_mjd(fid_itime).utc.value for fid_itime in fid_itimes])
+                
+                assert NSAMP_PER_FRAME % vis_nt == 0
+                (dreshape, weights, uvw_baselines) = prepare_data_slow(vis_block, self.total_nchan, self.npol, info.baseline_iter())
+                t.tick('prepare')               
+                write_data_slow(self.uvout, uvw_baselines,dreshape, weights, fits_sourceidx, mjds, self.blids, inttime)
+                t.tick('Write')
+                #self.uvout.fout.flush()
+                t.tick('flush')
+
+        elif self.format == 'raw':
+            self.write_raw(vis_block)
+        else:
+            assert self.format in ('fits', 'raw'), f'Invalid format {format}'
         
-        self.uvout.fout.flush()
-        t.tick('flush')
         #if self.beamno == 0:
         #    log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
         self.blockno += 1
+
+    def write_raw(self, vis_block:VisBlock):
+        t = Timer(args={'iblk':vis_block.iblk})
+        if self.use_uvws:
+            vis_block.uvw.tofile(self.uvout.fout)
+            t.tick('write uvw')
+            
+        vis_block.data.tofile(self.uvout.fout)
+        t.tick('write vis')
 
 
     def close(self):
