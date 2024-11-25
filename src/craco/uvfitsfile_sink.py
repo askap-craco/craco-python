@@ -372,7 +372,7 @@ class UvFitsFileSink:
         elif self.format == 'raw':
             self.write_raw(vis_block)
         else:
-            assert self.format in ('fits', 'raw'), f'Invalid format {format}'
+            assert self.format in ('fits', 'raw'), f'Invalid format {self.format}'
         
         #if self.beamno == 0:
         #    log.debug(f'File size is {os.path.getsize(self.fileout)} blockno={self.blockno} ngroups={self.uvout.ngroups} timer={t}')
