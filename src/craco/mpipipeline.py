@@ -51,6 +51,7 @@ from craco.uvfitsfile_sink import UvFitsFileSink
 from craco.mpi_ring_buffer_manager import MpiRingBufferManager
 from craco.cutout_buffer import CutoutBuffer
 from craco.mpi_obsinfo import MpiObsInfo
+from craco.mpi_transposer import MpiTransposeSender, MpiTransposeReceiver
 
 from craco.tracing import tracing
 import pickle
@@ -161,6 +162,13 @@ def get_transpose_dtype(values, real_dtype=REAL_DTYPE, cplx_dtype=CPLX_DTYPE):
 
 ## OK KB - YOU NEED TO TEST THE AVERAGER WITH THE INPUT DATA
 
+def make_transposer(info, transposer_klass):
+    nbeam = info.nbeams
+    nrx = info.nrx
+    dtype = get_transpose_dtype(info)
+    comm = info.pipe_info.mpi_app.rx_beam_comm
+    return transposer_klass(comm, nbeam, nrx, dtype)
+
 class DtypeTransposer:
     def __init__(self, info):
         # OK - now this is where it gets tricky and i wish I could refactor it properlty to get what I'm expecting
@@ -201,7 +209,7 @@ class DtypeTransposer:
                   np2array(self.rx_displacements)),
                  self.mpi_dtype]
         
-        self.comm.Barrier()
+        #self.comm.Barrier() # Does this hurt rank0 more than everyone else???
  
         
         self.comm.Alltoallv(s_msg, r_msg)
@@ -309,7 +317,6 @@ class TransposeReceiver(DtypeTransposer):
     def recv(self, drx=None):
         return self.all2all(self.dtx, drx)
 
-
 def proc_rx_get_headers(proc): 
     '''
     Process 1 card per beam
@@ -354,8 +361,9 @@ def proc_rx_get_fid0(proc):
 
     averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.flag_ants, rescale_output_path=rsout)
     log.info('made averager')
+    dtype = get_transpose_dtype(info)
     
-    transposer = TransposeSender(info)
+    transposer = make_transposer(info, MpiTransposeSender)
     log.info('made transposer')
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
@@ -519,10 +527,12 @@ class FilterbankSink:
 def transpose_beam_get_fid0(proc):
     info = proc.obs_info
 
-    transposer = TransposeReceiver(info)
+    transposer = make_transposer(info, MpiTransposeReceiver)
     # Find first frame ID
     log.info('Recieving dummy transpose for warmup')
-    transposer.recv()
+    dummy_data = np.zeros((transposer.nrx, 1), dtype=transposer.dtype)
+    transposer.recv(dummy_data)
+    del dummy_data
     proc.transposer = transposer
 
     return 0
@@ -564,15 +574,24 @@ def transpose_beam_run(proc:Processor):
         
     proc_comm = pipe_info.mpi_app.beamproc_comm
     assert proc_comm.rank == 0, 'Expected to be rank 0'
-    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
     ring_buffer = MpiRingBufferManager(proc_comm, NPROC_RING_SLOTS)
     curr_blk = ring_buffer.open_write()
 
+
+    dtype_complex =get_transpose_dtype(info, cplx_dtype=np.complex64)
+    # make cutout buffer
+    nslots = 128 # number of 110ms write slots in cutout buffer
+    cutout_buffer = CutoutBuffer(transposer.dtype, transposer.nrx, nslots, info)
+    beam_data_arr = cutout_buffer.next_write_buffer()
+    beam_data = beam_data_arr
+    beam_data_complex = beam_data.view(dtype=dtype_complex)
+
+
     # Make make fake data to get vis_accum to compile. *sig*
-    beam_data_complex = transposer.drx_complex # a view into the same data.
-    beam_data = transposer.drx
     vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
     vis_accum.compile(vis_block_complex)
+    
 
     beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
     beam_comm = pipe_info.mpi_app.beam_chain_comm
@@ -581,15 +600,12 @@ def transpose_beam_run(proc:Processor):
 
     # let the fits sink see some ddata so it can compile
     if vis_file is not None:
-        vis_file.compile(transposer.drx['vis'])
+        vis_file.compile(beam_data['vis'])
 
    # warmup send
    #beam_comm.Send(vis_accum.mpi_msg, dest=beam_proc_rank)
     vis_accum_send_req = None
 
-    nslots = 128 # number of 110ms write slots in cutout buffer
-    cutout_buffer = CutoutBuffer(transposer.drx.dtype, transposer.drx.size, nslots, info)
-   
     world_comm = pipe_info.mpi_app.world_comm
     cand_req = world_comm.irecv(source=pipe_info.cand_mngr_rankinfo.rank)
     enable_write_block = True
@@ -597,8 +613,12 @@ def transpose_beam_run(proc:Processor):
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
-            beam_data = cutout_buffer.next_write_buffer()
+            #beam_data_arr = cutout_buffer.next_write_buffer()
+            beam_data = beam_data_arr
             t.tick('get writebuf')
+            transposer.Irecv(beam_data_arr)
+            t.tick('irecv')
+
 
             # check for candidate
             cand_received, cand = cand_req.test()
@@ -615,12 +635,13 @@ def transpose_beam_run(proc:Processor):
                     log.exception('error writing block. Disabling write')
                     enable_write_block = False
 
-            beam_data = transposer.recv(beam_data)
+            transposer.wait()
+            t.tick('Transposer wait')
             if iblk == 0:
                 log.info('got block 0')
             #beam_data_complex = transposer.drx_complex # a view into the same data.
-            beam_data_complex = beam_data.view(dtype=transposer.dtype_complex)
-            t.tick('transposer')
+            beam_data_complex = beam_data.view(dtype=dtype_complex)
+            t.tick('beam comlpex view')
             #cas_filterbank.write(beam_data['cas'])
             #t.tick('cas')            
             ics_filterbank.write(beam_data['ics'])
@@ -1024,7 +1045,7 @@ class CandMgrProcessor(Processor):
                 beamtran_rankinfo = self.pipe_info.get_beamtran_info_for_beam(ibeam)       
                 # disable for now - it's too slow         
                 log.info('Sending candidate to beamtran %s', beamtran_rankinfo)
-                self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
+                #self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
                 
             except:
                 log.exception('Failed to trigger cand dump')
