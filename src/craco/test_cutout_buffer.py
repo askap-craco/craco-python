@@ -20,9 +20,14 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+class DummyValues:
+    def __init__(self):
+        self.fcm = './testdata/fcm_20220714.txt'
+
 class DummyInfo:
     def __init__(self):
         self.beamid = 3
+        self.values = DummyValues()
         
 
 def make_cb(nslots=128):
@@ -74,6 +79,7 @@ def test_check_buffer_dtypes():
 
     assert transpose_buffer.dtype == write_buffer.dtype
     assert transpose_buffer.shape == write_buffer.shape
+    assert write_buffer.shape == (nrx,)
 
 
 
