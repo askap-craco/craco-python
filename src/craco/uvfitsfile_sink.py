@@ -249,7 +249,7 @@ class DataPrepper:
             
 
 class UvFitsFileSink:
-    def __init__(self, obs_info, fileout=None, extra_header=None, format='fits', use_uvws=True):
+    def __init__(self, obs_info, fileout=None, extra_header=None, format='fits', use_uvws=True, fcm=None):
 
         '''
         Raw does some kidnof raw format that we'll have to use the header to covert
@@ -269,7 +269,9 @@ class UvFitsFileSink:
             fileout = os.path.join(values.outdir, f'b{beamno:02}.uvfits')
             
         self.fileout = fileout
-        fcm = Parset.from_file(values.fcm)
+        if fcm is None:
+            fcm = Parset.from_file(values.fcm)
+            
         antennas = get_antennas(fcm)
         log.info('FCM %s contained %d antennas', values.fcm, len(antennas))
         info = obs_info
