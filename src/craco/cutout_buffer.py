@@ -16,6 +16,8 @@ from craco.uvfitsfile_sink import UvFitsFileSink
 from craco.mpi_obsinfo import MpiObsInfo
 from craco.vissource import VisBlock
 from craco.timer import Timer
+from craft.parset import Parset
+
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +34,13 @@ class CutoutBuffer:
         self.obs_info = obs_info
         assert maxncand > 0
         self.maxncand = maxncand
+
+        # cache fcm
+        self.fcm = None
+        if self.obs_info is not None:
+            self.fcm = Parset.from_file(obs_info.values.fcm)
+
+        self.vis_nt = dtype['vis'].shape[2] # find vis_nt so we can count blocks
 
     @property
     def oldest_slot_idx(self):
@@ -62,6 +71,18 @@ class CutoutBuffer:
     @property
     def current_slot_iblk(self):
         return self.buf_iblk[self.current_slot_idx]
+
+    def iblk2slot(self, iblk:int):
+        '''
+        Convert iblk numeer to slot idx
+        raise ValueError if iblk is not in the ringbuffer for some reason
+        '''
+        nback = self.current_slot_iblk - iblk
+        slot_idx = (self.current_slot_idx - nback) % self.nslots
+        if self.buf_iblk[slot_idx] != iblk:
+            raise ValueError(f'Iblk {iblk} not found at slot {slot_idx} with current slot iblk={self.current_slot_iblk} and idx={self.current_slot_idx}')
+        
+        return slot_idx
     
     def next_write_buffer(self, iblk=None):
         '''
@@ -115,7 +136,7 @@ class CutoutBuffer:
 
 
 class CandidateOutput:
-    def __init__(self, cand, cutout_buffer:CutoutBuffer):
+    def __init__(self, cand, cutout_buffer:CutoutBuffer, dumpall=False):
         t = Timer()
         self.cand = cand
         self.cutout_buffer = cutout_buffer
@@ -130,13 +151,33 @@ class CandidateOutput:
         t.tick('write cand')
         # write another version, jsut to see if it works
         #np.savetxt(os.path.join(cand_dir, 'candidate_spacedelim.txt'), np.array([cand]))
+
         cutout_file_name = os.path.join(cand_dir, 'candidate.uvfits')
         self.cutout_file_name = cutout_file_name
-        self.start_iblk = self.cutout_buffer.oldest_slot_iblk
-        self.start_slot_idx = self.cutout_buffer.oldest_slot_idx
-        self.end_iblk = self.cutout_buffer.current_slot_iblk
-        self.end_slot_idx = self.cutout_buffer.current_slot_idx
+        search_nt = 256
+        vis_nt = self.cutout_buffer.vis_nt
+        search_blocks_per_input_block = search_nt // vis_nt
+        assert search_blocks_per_input_block >= 1
+
+        if dumpall: # dump the entire buffer. Otherwise, try to dump only the bit of the buffer with the FRB in it
+            self.start_iblk = self.cutout_buffer.oldest_slot_iblk        
+            self.end_iblk = self.cutout_buffer.current_slot_iblk
+        else: # dump the FRB only
+            # input blocks are 110ms blocks = vis_nt samples. 
+            # Candidate 'iblk' is in units of search blocks = 256 samples
+            cand_iblk = cand['iblk']*search_blocks_per_input_block
+            cand_nsamp = cand['dm'] # number of samples of DM delay
+            cand_nblks = (cand_nsamp + vis_nt) // vis_nt + 1 # add an extra block for good measure
+            # end iblk number. Clamp to the current slot
+            self.end_iblk = min(cand_iblk, self.cutout_buffer.current_slot_iblk)
+            # begining iblk. Clamp to the oldest available
+            self.start_iblk = max(self.end_iblk - cand_nblks, self.cutout_buffer.oldest_slot_iblk)
+        
+        self.start_slot_idx = self.cutout_buffer.iblk2slot(self.start_iblk)
+        self.end_slot_idx = self.cutout_buffer.iblk2slot(self.end_iblk)            
         self.curr_slot_idx = self.start_slot_idx
+
+
         hdr = {'START_IBLK': self.start_iblk,
                'START_SLTID': self.start_slot_idx,
                 'END_IBLK': self.end_iblk,
@@ -153,7 +194,7 @@ class CandidateOutput:
 
         format = 'fits' # can be 'raw' or 'fits'
         use_uvws = False
-        self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr, format=format, use_uvws=use_uvws)
+        self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr, format=format, use_uvws=use_uvws, fcm=cutout_buffer.fcm)
 
         t.tick('mkoutfile')
         log.info('Writing canidate %s to %s from iblk=%s-%s or slot=%s-%s',
