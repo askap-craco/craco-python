@@ -93,14 +93,13 @@ class MpiTransposeReceiver(CustomMpiTransposer):
         assert my_beamid >= 0
         t = Timer()
         for irx in range(self.nrx):
-            sourcerx = (my_beamid - irx) % self.nrx
-            sourcerank = self.rank_of_rx(sourcerx)
+            sourcerank = self.rank_of_rx(irx)
             #print(f'r{self.rank} waiting for r{sourcerank} rx={sourcerx}')
             #print(drx[irx].dtype, drx[irx].shape, self.dtype, self.mpi_dtype)
             # Need to give it a length=1 array, otherwise it complains it's got 
             # a scalar and .... complains.
             self._post(self.comm.Irecv([drx[irx:irx+1], self.mpi_dtype], source=sourcerank))
-            t.tick('Irecv', args={'sourcerx':sourcerx, 'sourcerank':sourcerank})
+            t.tick('Irecv', args={'sourcerx':irx, 'sourcerank':sourcerank})
             #print(f'r{self.rank} recieved for r{sourcerank} rx={sourcerx}')
 
         return self.requests
@@ -136,11 +135,16 @@ def _main():
     cplx_dtype = np.float32
     nrx = 72
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, real_dtype, cplx_dtype)
+    vis_nc = nc // vis_fscrunch
+
     comm = MPI.COMM_WORLD
     nprocs = nrx + nbeam
     nranks = comm.Get_size()
     assert nranks  == nprocs, f'Expected {nprocs} but got size {nranks}'
     rank = comm.Get_rank()
+
+    if rank == 0:
+        print(f'Dtype is {dt}')
 
     niter = 100
     t = Timer()
@@ -150,6 +154,11 @@ def _main():
         if rank == 0:
             print(sender.dtype, sender.mpi_dtype)
         dtx = np.zeros((nbeam), dtype=dt)
+        irx = rank
+        for ibeam in range(nbeam):
+            dtx[ibeam]['ics'][:] = ibeam
+            dtx[ibeam]['cas'][0,:] = np.arange(nc) + irx*nc
+
         sender.send(dtx)
 
         t_start = MPI.Wtime()
@@ -169,6 +178,15 @@ def _main():
             receiver.wait()
             t.tick('recv')
         t_end = MPI.Wtime()
+        ibeam = rank - nrx
+        firstd = drx['ics'].flat[0]
+        assert np.all(drx['ics'] == firstd), f'ICS not equal to {firstd}'
+        assert np.all(drx['ics'] == ibeam), f'ICS not equal to {ibeam}'
+        #np.save(f'drx_b{ibeam:02d}', drx, allow_pickle=True)
+        chans = drx['cas'][:,0,:].flatten()
+        print(f'ibeam={ibeam} c[0]={chans[0]} clast={chans[-1]} cmin={chans.min()}  cmax={chans.max()} chans={chans}')
+        assert np.all(chans == np.arange(nrx*nc))
+        print('Data checks sucessfull')
         
     latency = (t_end - t_start)/niter
 
