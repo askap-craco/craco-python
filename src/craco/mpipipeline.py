@@ -613,7 +613,7 @@ def transpose_beam_run(proc:Processor):
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
-            #beam_data_arr = cutout_buffer.next_write_buffer()
+            beam_data_arr = cutout_buffer.next_write_buffer()
             beam_data = beam_data_arr
             t.tick('get writebuf')
             transposer.Irecv(beam_data_arr)
@@ -1045,7 +1045,7 @@ class CandMgrProcessor(Processor):
                 beamtran_rankinfo = self.pipe_info.get_beamtran_info_for_beam(ibeam)       
                 # disable for now - it's too slow         
                 log.info('Sending candidate to beamtran %s', beamtran_rankinfo)
-                #self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
+                self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
                 
             except:
                 log.exception('Failed to trigger cand dump')
