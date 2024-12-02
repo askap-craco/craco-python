@@ -373,11 +373,13 @@ class UvFitsFileSink:
         fits_sourceidx = 1
         inttime = self.obs_info.inttime.to(u.second).value*info.vis_tscrunch
         vis_nt = self.obs_info.vis_nt
+        tscrunch = values.uvfits_tscrunch
         self.prepper = DataPrepper(self.uvout, 
                                    baseline_info,
                                    vis_nt, 
                                    fits_sourceidx, 
-                                   inttime)
+                                   inttime,
+                                   tscrunch)
 
 
         with open(fileout+'.groupsize', 'w') as fout:
