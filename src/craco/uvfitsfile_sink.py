@@ -94,6 +94,59 @@ def write_data_slow(uvout, uvw_baselines,dreshape, weights, fits_sourceidx, mjds
         uvout.put_data_block(uvw_baselines, mjd, blids, inttime, dreshape[itime, ...], weights[itime, ...], fits_sourceidx)
 
 @njit(cache=True) # damn - njit doesn't support big endian on intel.
+def prep_data_fast_numba_tscrunch(dout, vis_data, uvw_baselines, iblk, inttim):
+    '''
+    dout is the dtype = np.dtype([('UU', dt), ('VV', dt), ('WW', dt), \
+            ('DATE', dt), ('BASELINE', dt), \
+            ('FREQSEL', dt), ('SOURCE', dt), ('INTTIM', dt), \
+            ('DATA', dt, (1, 1, 1, nchan, npol, self.ncomplex))])
+
+    it has shape (vis_nt_out, nbl)
+
+    ncomplex = 2 if no flags, and 3 if there are flags
+
+    vis_data is the input and is [nrx, nbl, vis_nc, vis_nt ]
+
+    inttim is the integration time in days per input sample
+    output data can be an integer fraction less than the input, in which case it does tscrunching
+    '''
+    nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+
+    vis_nt_out, nbl_out = dout.shape
+    assert vis_nt % vis_nt_out == 0
+    assert nbl_out == nbl
+
+    tscrunch = vis_nt // vis_nt_out
+    scale = np.float32(1./tscrunch)
+
+    vscrunch = np.zeros((2), dtype=np.float32)
+
+    for irx in range(nrx):
+        for ibl in range(nbl):
+            for ic in range(vis_nc):
+                cout = ic + vis_nc*irx
+                for it in range(vis_nt_out):
+                    isamp = (it + iblk)                    
+                    mjddiff = isamp*inttim
+                    d = dout[it, ibl]
+                    d['UU'], d['VV'], d['WW']= uvw_baselines[ibl,:]
+                    d['DATE'] = mjddiff
+                    data = d['DATA']
+                    vscrunch[:] = 0
+                    vstart = vis_data[irx, ibl, ic, it*tscrunch:(it+1)*tscrunch, :]
+                    for ix in range(tscrunch):
+                        vscrunch[0] += vstart[ix, 0]
+                        vscrunch[1] += vstart[ix, 1]
+
+                    vscrunch *= scale
+                    
+                    if vscrunch[0] == 0 and vscrunch[1] == 0:
+                        weight = 0
+                    else:
+                        weight = 1
+                    data[0,0,0,cout,0,:] = [vscrunch[0], vscrunch[1], weight]
+
+@njit(cache=True) # damn - njit doesn't support big endian on intel.
 def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
     '''
     dout is the dtype = np.dtype([('UU', dt), ('VV', dt), ('WW', dt), \
@@ -101,7 +154,7 @@ def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
             ('FREQSEL', dt), ('SOURCE', dt), ('INTTIM', dt), \
             ('DATA', dt, (1, 1, 1, nchan, npol, self.ncomplex))])
 
-    it has length()
+    it has shape (vis_nt_out, nbl)
 
     ncomplex = 2 if no flags, and 3 if there are flags
 
@@ -162,7 +215,7 @@ def prep_data_fast_numpy(dout, vis_data, uvw_baselines, mjds):
 
 
 class DataPrepper:    
-    def __init__(self, uvfitsout:CorrUvFitsFile, baselines, vis_nt:int, fits_sourceidx:int, inttim:float):
+    def __init__(self, uvfitsout:CorrUvFitsFile, baselines, vis_nt:int, fits_sourceidx:int, inttim:float, tscrunch:int=1):
         self.uvfitsout = uvfitsout
         dtbe = uvfitsout.dtype # big endian datatype
 
@@ -179,13 +232,17 @@ class DataPrepper:
                                     ('INTTIM', dt), 
                                     ('DATA', dt, dtbe['DATA'].shape)])
 
+        assert vis_nt % tscrunch == 0, f'Invalid tscrunch={tscrunch} for vis_nt={vis_nt}'
+
         self.baselines = baselines
         self.vis_nt = vis_nt
+        self.tscrunch = tscrunch
+        self.out_vis_nt = self.vis_nt // self.tscrunch
         self.fits_sourceidx = fits_sourceidx
         self.inttim = inttim
         nbl = len(self.baselines)
         self.uvw_baselines = np.empty((nbl, 3))
-        self.dout = np.zeros((vis_nt, nbl), dtype=self.dtype_le)
+        self.dout = np.zeros((self.out_vis_nt, nbl), dtype=self.dtype_le)
         dout = self.dout
         blids = [bl.blid for bl in baselines]
         self.blids =np.array(blids)
@@ -225,10 +282,14 @@ class DataPrepper:
         dout['FREQSEL'] = 1
         dout['SOURCE'] = self.fits_sourceidx
         dout['BASELINE'] = self.blids[None,:]
-        dout['INTTIM'] = self.inttim
+        dout['INTTIM'] = self.inttim*self.tscrunch
         #t.tick('Set constants')
 
-        prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
+        if self.tscrunch == 1:
+            prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
+        else:
+            prep_data_fast_numba_tscrunch(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days*self.tscrunch)
+
         #t.tick('prep fast')
         v = self.dout.view(np.float32)
         #t.tick('view')
@@ -237,7 +298,7 @@ class DataPrepper:
         v.tofile(self.uvfitsout.fout)
         #t.tick('tofile')
         self.uvfitsout.ngroups += self.dout.size
-        self.iblk += vis_nt
+        self.iblk += self.out_vis_nt
         return self.dout
 
     def compile(self, vis_data):
@@ -312,11 +373,13 @@ class UvFitsFileSink:
         fits_sourceidx = 1
         inttime = self.obs_info.inttime.to(u.second).value*info.vis_tscrunch
         vis_nt = self.obs_info.vis_nt
+        tscrunch = values.uvfits_tscrunch
         self.prepper = DataPrepper(self.uvout, 
                                    baseline_info,
                                    vis_nt, 
                                    fits_sourceidx, 
-                                   inttime)
+                                   inttime,
+                                   tscrunch)
 
 
         with open(fileout+'.groupsize', 'w') as fout:

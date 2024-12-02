@@ -197,8 +197,9 @@ class CandidateOutput:
         self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr, format=format, use_uvws=use_uvws, fcm=cutout_buffer.fcm)
 
         t.tick('mkoutfile')
-        log.info('Writing canidate %s to %s from iblk=%s-%s or slot=%s-%s',
-                 cand, cand_dir, self.start_iblk, self.end_iblk, self.start_slot_idx, self.end_slot_idx)
+        log.info('Writing candidate %s in %s format to %s from iblk=%s-%s or slot=%s-%s',
+                 cand, format, cand_dir, self.start_iblk, 
+                 self.end_iblk, self.start_slot_idx, self.end_slot_idx)
         
                 
     @property

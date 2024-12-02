@@ -363,7 +363,8 @@ def proc_rx_get_fid0(proc):
     log.info('made averager')
     dtype = get_transpose_dtype(info)
     
-    transposer = make_transposer(info, MpiTransposeSender)
+    #transposer = make_transposer(info, MpiTransposeSender)
+    transposer = TransposeSender(info)
     log.info('made transposer')
 
     # construct a typed list for numba - it's a bit of a pain but it needs to be done this way
@@ -527,7 +528,8 @@ class FilterbankSink:
 def transpose_beam_get_fid0(proc):
     info = proc.obs_info
 
-    transposer = make_transposer(info, MpiTransposeReceiver)
+    #transposer = make_transposer(info, MpiTransposeReceiver)
+    transposer = TransposeReceiver(info)
     # Find first frame ID
     log.info('Recieving dummy transpose for warmup')
     dummy_data = np.zeros((transposer.nrx, 1), dtype=transposer.dtype)
@@ -613,10 +615,10 @@ def transpose_beam_run(proc:Processor):
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
-            #beam_data_arr = cutout_buffer.next_write_buffer()
+            beam_data_arr = cutout_buffer.next_write_buffer()
             beam_data = beam_data_arr
             t.tick('get writebuf')
-            transposer.Irecv(beam_data_arr)
+            transposer.recv(beam_data_arr)
             t.tick('irecv')
 
 
@@ -635,7 +637,7 @@ def transpose_beam_run(proc:Processor):
                     log.exception('error writing block. Disabling write')
                     enable_write_block = False
 
-            transposer.wait()
+            #transposer.wait()
             t.tick('Transposer wait')
             if iblk == 0:
                 log.info('got block 0')
@@ -1045,7 +1047,7 @@ class CandMgrProcessor(Processor):
                 beamtran_rankinfo = self.pipe_info.get_beamtran_info_for_beam(ibeam)       
                 # disable for now - it's too slow         
                 log.info('Sending candidate to beamtran %s', beamtran_rankinfo)
-                #self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
+                self.pipe_info.mpi_app.world_comm.send(bestcand, dest=beamtran_rankinfo.rank)
                 
             except:
                 log.exception('Failed to trigger cand dump')
@@ -1094,6 +1096,7 @@ def get_parser():
     parser.add_argument('--test-mode', help='Send test data through transpose instead of real data', choices=('fid','cardid','none'), default='none')
     parser.add_argument('--proc-type', help='Process type')
     parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=9.0)
+    parser.add_argument('--uvfits-tscrunch', help='Factor to tscrunch uvfits writing by', type=int, default=1)
     parser.add_argument(dest='files', nargs='*')
     
     parser.set_defaults(verbose=False)
