@@ -75,6 +75,9 @@ def _main():
     cmplxplot(d[:,:,samp], title=f'Sample {samp}', xlabel='chan', ylabel='bl') #  sample
     cmplxplot(d[bl,:,:], title=f'Baseline {bl}', xlabel='chan', ylabel='t') # baseline
 
+    cmplxplot(d.mean(axis=2), title='sample average', xlabel='chan', ylabel='bl')
+
+
     pylab.show()
 
     
