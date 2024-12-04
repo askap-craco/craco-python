@@ -25,7 +25,14 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class CutoutBuffer:
     def __init__(self, dtype, ndtype, nslots:int, obs_info:MpiObsInfo, maxncand:int=1):
-        self.buf = np.zeros((nslots, ndtype), dtype=dtype)
+        #self.buf = np.zeros((nslots, ndtype), dtype=dtype)
+
+        # You have to do this as an array of buffers
+        # if you do this as a a single np.zeros the transpose runs extremely slowly
+        # for some stupid reason (probably alignment)
+        # this was a shocking level of pain for time that I'll never get back in my life
+
+        self.buf = [np.zeros(ndtype, dtype=dtype) for i in range(nslots)]
         self.buf_iblk = np.ones(nslots, dtype=int)*-1
         self.write_idx = -1
         self.nslots = nslots
@@ -97,7 +104,7 @@ class CutoutBuffer:
         
         self.write_idx = (self.write_idx + 1) % self.nslots
         self.buf_iblk[self.write_idx] = self.write_iblk
-        dout = self.buf[self.write_idx,:]
+        dout = self.buf[self.write_idx]
 
 
 
@@ -213,7 +220,7 @@ class CandidateOutput:
         '''
         if self.cutout_buffer is None: # shoudln't happen, but quit sillently if we've already finished
             return
-        data = self.cutout_buffer.buf[self.curr_slot_idx,:]
+        data = self.cutout_buffer.buf[self.curr_slot_idx]
         iblk = self.cutout_buffer.buf_iblk[self.curr_slot_idx]
         info = self.cutout_buffer.obs_info
         block = VisBlock(data['vis'], iblk, info)

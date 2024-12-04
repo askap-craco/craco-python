@@ -74,7 +74,6 @@ def test_check_buffer_dtypes():
     write_buffer_dtype = write_buffer.dtype
 
     print(transpose_buffer.shape, transpose_buffer.dtype)
-    print(c.buf.shape, c.buf.dtype)
     print(write_buffer.shape, write_buffer.dtype)
 
     assert transpose_buffer.dtype == write_buffer.dtype
