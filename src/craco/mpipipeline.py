@@ -616,11 +616,11 @@ def transpose_beam_run(proc:Processor):
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
             beam_data_arr = cutout_buffer.next_write_buffer()
+            beam_data_arr = transposer.drx
             beam_data = beam_data_arr
             t.tick('get writebuf')
             transposer.recv(beam_data_arr)
-            t.tick('irecv')
-
+            t.tick('recv')
 
             # check for candidate
             cand_received, cand = cand_req.test()
