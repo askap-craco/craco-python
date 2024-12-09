@@ -62,7 +62,7 @@ def make_scan_directories(sbid, scanid, target, craco_data_dir=None):
     # make node links
     noderoot = os.path.join(scandir, 'nodes')
     os.makedirs(noderoot)
-    for inode in range(18):
+    for inode in range(19):
         noded = f'/CRACO/DATA_{inode:02d}/craco/'
         nodedir = os.path.join(noded, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
         linkdir = os.path.join(noderoot, f'{inode:02d}')
