@@ -11,6 +11,7 @@ import numpy as np
 import os
 import sys
 import logging
+import tempfile
 from craco.candidate_writer import CandidateWriter
 from craco.uvfitsfile_sink import UvFitsFileSink
 from craco.mpi_obsinfo import MpiObsInfo
@@ -18,6 +19,7 @@ from craco.vissource import VisBlock
 from craco.timer import Timer
 from craft.parset import Parset
 from craco.uvfitsfile_sink import DataPrepper
+
 
 
 log = logging.getLogger(__name__)
@@ -50,14 +52,12 @@ class CutoutBuffer:
 
             # Precompile. But I don't know how to compile stuff ahead of 
             # time without compromosign performance
-            cutout_file_name = '/tmp/testfile.fits'
-            cutout_file = UvFitsFileSink(self.obs_info, 
-                                     cutout_file_name)
-            cutout_file.compile(VisBlock(self.buf[0], 0, self.obs_info))
-            try:
-                os.remove(cutout_file_name)
-            except:
-                pass
+            #with tempfile.TemporaryDirectory() as d:
+            #    cutout_file_name = os.path.join(d, 'testfile.fits')
+             #   cutout_file = UvFitsFileSink(self.obs_info, 
+             #                           cutout_file_name)
+                #cutout_file.compile(self.buf[0]) # doesnt' work. Typing error. can't fix now
+
 
 
         self.vis_nt = dtype['vis'].shape[2] # find vis_nt so we can count blocks
