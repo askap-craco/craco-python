@@ -134,7 +134,7 @@ def test_uvfitsfilesink_tscrunch_identical():
     input = np.zeros(nrx, dtype=dt)
     dt_scrunched = craco.card_averager.get_averaged_dtype(nbeam, nant, nc_per_card, nt, npol, vis_fscrunch, vis_tscrunch*tscrunch, real_dtype, cplx_dtype)
     input['vis'][:] = np.random.randn(*input['vis'].shape)
-    input['vis'][:] = np.arange(np.prod(input['vis'].shape)).reshape(input['vis'].shape)
+    #input['vis'][:] = np.arange(np.prod(input['vis'].shape)).reshape(input['vis'].shape)
 
     input_scrunched = np.zeros(nrx, dtype=dt_scrunched)
     _, nbl, vis_nc, vis_nt, _ = input['vis'].shape
@@ -184,7 +184,9 @@ def test_uvfitsfilesink_tscrunch_identical():
     n = slow.vis.size
     
     keys = ('DATA','UU','VV','WW','DATE', 'BASELINE','INTTIM','FREQSEL','SOURCE','INTTIM',)
+    # sanity check
     for k in keys:
+        assert np.all(slow.vis[0:n][k] != 0)
         np.testing.assert_allclose(slow.vis[0:n][k], fast.vis[0:n][k], err_msg=f'Incorrect values for {k}')
         
     print('Data identical!')

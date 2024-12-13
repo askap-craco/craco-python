@@ -15,6 +15,7 @@ import pytest
 from craco.cutout_buffer import *
 import craco.card_averager
 from craco.candidate_writer import CandidateWriter
+from craft.craco import baseline_iter
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ class DummyInfo:
     def __init__(self):
         self.beamid = 3
         self.values = DummyValues()
+
+    def baseline_iter(self):
+        return baseline_iter(np.arange(10))
         
 
 def make_cb(nslots=128):

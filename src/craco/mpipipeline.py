@@ -584,7 +584,7 @@ def transpose_beam_run(proc:Processor):
     # make cutout buffer
     nslots = 128 # number of 110ms write slots in cutout buffer
     cutout_buffer = CutoutBuffer(transposer.dtype, transposer.nrx, nslots, info)
-    beam_data_arr = cutout_buffer.next_write_buffer()
+    beam_data_arr = cutout_buffer.buf[0]
     beam_data = beam_data_arr
     beam_data_complex = beam_data.view(dtype=dtype_complex)
 
@@ -615,8 +615,7 @@ def transpose_beam_run(proc:Processor):
     try:
        for iblk in range(pipe_info.requested_nframe):
             t = Timer(args={'iblk':iblk})
-            beam_data_arr = cutout_buffer.next_write_buffer()
-            beam_data_arr = transposer.drx
+            beam_data_arr = cutout_buffer.next_write_buffer(iblk)
             beam_data = beam_data_arr
             t.tick('get writebuf')
             transposer.recv(beam_data_arr)
@@ -628,20 +627,19 @@ def transpose_beam_run(proc:Processor):
                 cutout_buffer.add_candidate_to_dump(cand)
                 cand_req = world_comm.irecv(source=pipe_info.cand_mngr_rankinfo.rank)
                 t.tick('Add cand')
-
-            if enable_write_block:
-                try:
-                    cutout_buffer.write_next_block()
-                    t.tick('Write blocks')
-                except:
-                    log.exception('error writing block. Disabling write')
-                    enable_write_block = False
+            else: # don't write block if we've just adddd a candidate. It takes too long.
+                if enable_write_block:
+                    try:
+                        cutout_buffer.write_next_block()
+                        t.tick('Write blocks')
+                    except:
+                        log.exception('error writing block. Disabling write')
+                        enable_write_block = False
 
             #transposer.wait()
             t.tick('Transposer wait')
             if iblk == 0:
                 log.info('got block 0')
-            #beam_data_complex = transposer.drx_complex # a view into the same data.
             beam_data_complex = beam_data.view(dtype=dtype_complex)
             t.tick('beam comlpex view')
             #cas_filterbank.write(beam_data['cas'])
@@ -671,8 +669,6 @@ def transpose_beam_run(proc:Processor):
 
             if t.total.perf > 0.120 and iblk > 0:
                 log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
-
-
 
 
     finally:

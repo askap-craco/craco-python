@@ -188,10 +188,10 @@ def test_uvfits_fast_time_blocks_with_istart():
     assert not np.all(uvw3 == uvw2)
     assert not np.all(d3 == d2)
 
-def test_uvfits_get_uvw(f1):
+def test_uvfits_uvw_nblocks(f1):
     nblocks = f1.nblocks
     assert f1.get_uvw_at_isamp(0) is not None, 'Shoudl get data at sample 0'
-    assert f1.get_uvw_at_isamp(nblocks-1) is not None, 'Should get data for alst sample'
+    assert f1.get_uvw_at_isamp(nblocks-2) is not None, 'Should get data for alst sample'
 
 
 def test_baselines_in_meta_match(f1,f2):
