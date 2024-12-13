@@ -119,32 +119,39 @@ def prep_data_fast_numba_tscrunch(dout, vis_data, uvw_baselines, iblk, inttim):
     tscrunch = vis_nt // vis_nt_out
     scale = np.float32(1./tscrunch)
 
-    vscrunch = np.zeros((2), dtype=np.float32)
 
-    for irx in range(nrx):
-        for ibl in range(nbl):
-            for ic in range(vis_nc):
-                cout = ic + vis_nc*irx
-                for it in range(vis_nt_out):
+    for ibl in range(nbl):
+        for it in range(vis_nt_out):
+            for irx in range(nrx):
+                for ic in range(vis_nc):
+                    cout = ic + vis_nc*irx
                     isamp = (it + iblk)                    
                     mjddiff = isamp*inttim
                     d = dout[it, ibl]
-                    d['UU'], d['VV'], d['WW']= uvw_baselines[ibl,:]
+                    d['UU']= uvw_baselines[ibl,0]
+                    d['VV']= uvw_baselines[ibl,1]
+                    d['WW'] = uvw_baselines[ibl,2]
                     d['DATE'] = mjddiff
                     data = d['DATA']
-                    vscrunch[:] = 0
+                    vs0 =  np.float32(0)
+                    vs1 = np.float32(0)
                     vstart = vis_data[irx, ibl, ic, it*tscrunch:(it+1)*tscrunch, :]
                     for ix in range(tscrunch):
-                        vscrunch[0] += vstart[ix, 0]
-                        vscrunch[1] += vstart[ix, 1]
+                        vs0 += vstart[ix, 0]
+                        vs1 += vstart[ix, 1]
 
-                    vscrunch *= scale
+                    vs0 *= scale
+                    vs1 *= scale
                     
-                    if vscrunch[0] == 0 and vscrunch[1] == 0:
+                    if vs0 == 0 and vs1 == 1:
                         weight = 0
                     else:
                         weight = 1
-                    data[0,0,0,cout,0,:] = [vscrunch[0], vscrunch[1], weight]
+
+                    this_dout = data[0,0,0,cout,0,:]
+                    this_dout[0] = vs0
+                    this_dout[1] = vs1
+                    this_dout[2] = weight
 
 @njit(cache=True) # damn - njit doesn't support big endian on intel.
 def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
@@ -178,6 +185,51 @@ def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
                     else:
                         weight = 1
                     data[0,0,0,cout,0,:] = [vis[0], vis[1], weight]
+
+                    
+@njit # damn - njit doesn't support big endian on intel.
+def prep_data_fast_numba2(dout, vis_data, uvw_baselines, iblk, inttim):
+    '''
+    Re=ordered loops.
+    RUns in < 10ms for nt=32
+    dout is the dtype = np.dtype([('UU', dt), ('VV', dt), ('WW', dt), \
+            ('DATE', dt), ('BASELINE', dt), \
+            ('FREQSEL', dt), ('SOURCE', dt), ('INTTIM', dt), \
+            ('DATA', dt, (1, 1, 1, nchan, npol, self.ncomplex))])
+
+    it has shape (vis_nt_out, nbl)
+
+    ncomplex = 2 if no flags, and 3 if there are flags
+
+    vis_data is the input and is [nrx, nbl, vis_nc, vis_nt ]
+    '''
+    nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
+    for ibl in range(nbl):
+        for it in range(vis_nt):
+            for irx in range(nrx):
+                for ic in range(vis_nc):
+                    cout = ic + vis_nc*irx            
+                    isamp = it + iblk
+                    mjddiff = isamp*inttim                
+                    d = dout[it, ibl]
+                    d['UU'] = uvw_baselines[ibl,0]
+                    d['VV'] = uvw_baselines[ibl,1]
+                    d['WW'] = uvw_baselines[ibl,2]
+                    d['DATE'] = mjddiff
+                    data = d['DATA']
+                    vis0 = vis_data[irx,ibl,ic,it,0]
+                    vis1 = vis_data[irx,ibl,ic,it,1]
+
+                    if vis0 == 0 and vis1 == 0:
+                        weight = 0
+                    else:
+                        weight = 1
+
+                    this_dout = data[0,0,0,cout,0,:]
+                    this_dout[0] = vis0
+                    this_dout[1] = vis1
+                    this_dout[2] = weight
+
 
 def prep_data_fast_numpy(dout, vis_data, uvw_baselines, mjds):
     '''
@@ -243,6 +295,7 @@ class DataPrepper:
         nbl = len(self.baselines)
         self.uvw_baselines = np.empty((nbl, 3))
         self.dout = np.zeros((self.out_vis_nt, nbl), dtype=self.dtype_le)
+        assert self.dout.flags['C_CONTIGUOUS'], 'Must be C contiguous otherwise .tofile is super slow'
         dout = self.dout
         blids = [bl.blid for bl in baselines]
         self.blids =np.array(blids)
@@ -258,21 +311,25 @@ class DataPrepper:
         self.iblk = 0
         self.inttime_days = self.inttim / 86400
 
+    def _set_uvw_baselines(self, vis_block:VisBlock):
+        uvw = vis_block.uvw
+        for blinfo in self.baselines:
+            ia1 = blinfo.ia1
+            ia2 = blinfo.ia2
+            ibl = blinfo.blidx
+            self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+
+
     def write(self, vis_block:VisBlock, use_uvws=True):
-        #t = Timer()
+        t = Timer()
         vis_data = vis_block.data
         vis_nt = vis_data.shape[3]
         assert self.vis_nt == vis_nt
         if use_uvws:
-            uvw = vis_block.uvw
-            for blinfo in self.baselines:
-                ia1 = blinfo.ia1
-                ia2 = blinfo.ia2
-                ibl = blinfo.blidx
-                self.uvw_baselines[ibl, :] = uvw[ia1, :] - uvw[ia2, :]
+            self._set_uvw_baselines(vis_block)
         else:
             self.uvw_baselines[:] = 0
-        #t.tick('calc baselines')
+        t.tick('calc baselines')
 
         dout = self.dout
         # Bulk set these values. IT's eaiser and probably not to slow. 
@@ -283,20 +340,20 @@ class DataPrepper:
         dout['SOURCE'] = self.fits_sourceidx
         dout['BASELINE'] = self.blids[None,:]
         dout['INTTIM'] = self.inttim*self.tscrunch
-        #t.tick('Set constants')
+        t.tick('Set constants')
 
         if self.tscrunch == 1:
-            prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
+            prep_data_fast_numba2(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days)
         else:
             prep_data_fast_numba_tscrunch(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days*self.tscrunch)
 
-        #t.tick('prep fast')
+        t.tick('prep fast')
         v = self.dout.view(np.float32)
-        #t.tick('view')
+        t.tick('view')
         v.byteswap(inplace=True) # FITS is big endian. Damn.
-        #t.tick('byteswap')
+        t.tick('byteswap')
         v.tofile(self.uvfitsout.fout)
-        #t.tick('tofile')
+        t.tick('tofile')
         self.uvfitsout.ngroups += self.dout.size
         self.iblk += self.out_vis_nt
         return self.dout
@@ -305,7 +362,8 @@ class DataPrepper:
         '''
         Run the numba funciton to compile it
         '''
-        prep_data_fast_numba(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days )
+        prep_data_fast_numba2(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days )
+        prep_data_fast_numba_tscrunch(self.dout, vis_data, self.uvw_baselines, self.iblk, self.inttime_days*self.tscrunch)
 
             
 
@@ -347,8 +405,13 @@ class UvFitsFileSink:
         self.source_list = obs_info.sources().values()
         source_list = self.source_list
         log.info('UVFits sink opening file %s fcent=%s foff=%s nchan=%s npol=%s tstart=%s sources=%s nant=%d', fileout, fcent, foff, nchan, npol, tstart, source_list, len(antennas))
-        
-        _extra_header = {'BEAMID': beamno, 'TSCALE':'UTC', 'FORMAT':self.format}
+        vis_nt = self.obs_info.vis_nt
+
+        _extra_header = {'BEAMID': beamno, 
+                         'TSCALE':'UTC', 
+                         'FORMAT':self.format,
+                         'TSTART': tstart,
+                         'VISNT': vis_nt}
         if extra_header is not None:
             _extra_header.update(extra_header)
             
@@ -372,7 +435,6 @@ class UvFitsFileSink:
         baseline_info = list(self.obs_info.baseline_iter())
         fits_sourceidx = 1
         inttime = self.obs_info.inttime.to(u.second).value*info.vis_tscrunch
-        vis_nt = self.obs_info.vis_nt
         tscrunch = values.uvfits_tscrunch
         self.prepper = DataPrepper(self.uvout, 
                                    baseline_info,
@@ -390,7 +452,7 @@ class UvFitsFileSink:
         if self.prepper is not None:
             self.prepper.compile(vis_data)
 
-    def write(self, vis_block):
+    def write(self, vis_block:VisBlock):
         '''
         vis_data has len(nrx) and shape inner shape
         vishape = (nbl, vis_nc, vis_nt, 2) if np.int16 or
@@ -449,14 +511,32 @@ class UvFitsFileSink:
             vis_block.uvw.tofile(self.uvout.fout)
             t.tick('write uvw')
             
-        vis_block.data.tofile(self.uvout.fout)
+        
+        # see if writing a memory view is faster than tofile()
+        # Actually this fails with BufferError: memoryview: underlying buffer is not C-contiguous
+        # The visblock.data.tofile knows it's not C-Contigjous and falls back to writing
+        # itemsize (=4 byte) values. - which is terribly slow.
+        
+        #self.uvout.fout.write(vis_block.data.data) 
+
+        # Answer: loop over the outer array, the inner parts are contiguous
+        for i in range(vis_block.data.shape[0]):
+            assert vis_block.data[i].flags['C_CONTIGUOUS'], 'Data arent contiguous. Write would be too slow'
+            vis_block.data[i].tofile(self.uvout.fout)
+            t.tick('Write blk')
+        
         t.tick('write vis')
 
 
     def close(self):
-        print(f'Closing file {self.uvout}')
         if self.uvout is not None:
-            self.uvout.close()
+            log.info('Closing file %s', self.uvout)
+            t = Timer()
+            if self.format == 'raw':
+                self.uvout.fout.close()
+            else:
+                self.uvout.fout.close() # we do a raw close in "FITS" mode too, because we can fix it afterwards with fixuvfits
+            t.tick('close')
 
     def __del__(self):
         self.close()
