@@ -96,7 +96,7 @@ class CardCapNetworkSource:
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
         self.pipe_info = pipe_info
-        self.skip_frames = 10*50 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
+        self.skip_frames = 10*30 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
         for blk in values.block:
