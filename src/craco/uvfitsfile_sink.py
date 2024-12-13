@@ -187,7 +187,7 @@ def prep_data_fast_numba(dout, vis_data, uvw_baselines, iblk, inttim):
                     data[0,0,0,cout,0,:] = [vis[0], vis[1], weight]
 
                     
-@njit # damn - njit doesn't support big endian on intel.
+@njit(cache=True) # damn - njit doesn't support big endian on intel.
 def prep_data_fast_numba2(dout, vis_data, uvw_baselines, iblk, inttim):
     '''
     Re=ordered loops.
