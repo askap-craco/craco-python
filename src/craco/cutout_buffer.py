@@ -11,12 +11,15 @@ import numpy as np
 import os
 import sys
 import logging
+import tempfile
 from craco.candidate_writer import CandidateWriter
 from craco.uvfitsfile_sink import UvFitsFileSink
 from craco.mpi_obsinfo import MpiObsInfo
 from craco.vissource import VisBlock
 from craco.timer import Timer
 from craft.parset import Parset
+from craco.uvfitsfile_sink import DataPrepper
+
 
 
 log = logging.getLogger(__name__)
@@ -25,7 +28,14 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
 class CutoutBuffer:
     def __init__(self, dtype, ndtype, nslots:int, obs_info:MpiObsInfo, maxncand:int=1):
-        self.buf = np.zeros((nslots, ndtype), dtype=dtype)
+        #self.buf = np.zeros((nslots, ndtype), dtype=dtype)
+
+        # You have to do this as an array of buffers
+        # if you do this as a a single np.zeros the transpose runs extremely slowly
+        # for some stupid reason (probably alignment)
+        # this was a shocking level of pain for time that I'll never get back in my life
+
+        self.buf = [np.zeros(ndtype, dtype=dtype) for i in range(nslots)]
         self.buf_iblk = np.ones(nslots, dtype=int)*-1
         self.write_idx = -1
         self.nslots = nslots
@@ -40,7 +50,25 @@ class CutoutBuffer:
         if self.obs_info is not None:
             self.fcm = Parset.from_file(obs_info.values.fcm)
 
+            # Precompile. But I don't know how to compile stuff ahead of 
+            # time without compromosign performance
+            #with tempfile.TemporaryDirectory() as d:
+            #    cutout_file_name = os.path.join(d, 'testfile.fits')
+             #   cutout_file = UvFitsFileSink(self.obs_info, 
+             #                           cutout_file_name)
+                #cutout_file.compile(self.buf[0]) # doesnt' work. Typing error. can't fix now
+
+
+
         self.vis_nt = dtype['vis'].shape[2] # find vis_nt so we can count blocks
+
+        # compile fast stuff in uvfits - gross
+        # actually, this is too hard. Forget it.
+        #baselines = list(self.obs_info.baseline_iter())
+        #prepper = DataPrepper(None, baselines, self.vis_nt, 0, 0, 1)
+        #prepper.compile(VisBlock(self.buf[0], 0, None, None, None))
+
+     
 
     @property
     def oldest_slot_idx(self):
@@ -97,7 +125,7 @@ class CutoutBuffer:
         
         self.write_idx = (self.write_idx + 1) % self.nslots
         self.buf_iblk[self.write_idx] = self.write_iblk
-        dout = self.buf[self.write_idx,:]
+        dout = self.buf[self.write_idx]
 
 
 
@@ -122,9 +150,11 @@ class CutoutBuffer:
         '''
         Add this candidate to the list of candidates to dump and write to disk
         '''
+        cout = None
         if len(self.candidates) < self.maxncand:
             cout = CandidateOutput(cand, self)
             self.candidates.append(cout)
+        
         return cout
 
     def flush_all(self):
@@ -132,7 +162,7 @@ class CutoutBuffer:
         Run this if you want to flush all the ringbuffer ot the candidates, if any
         '''
         while len(self.candidates) > 0:
-            self.do_writing()
+            self.write_next_block()
 
 
 class CandidateOutput:
@@ -165,7 +195,8 @@ class CandidateOutput:
         else: # dump the FRB only
             # input blocks are 110ms blocks = vis_nt samples. 
             # Candidate 'iblk' is in units of search blocks = 256 samples
-            cand_iblk = cand['iblk']*search_blocks_per_input_block
+            #cand_iblk = cand['iblk']*search_blocks_per_input_block # looks like cand_iblk might be incorrect
+            cand_iblk = cand['total_sample'] // vis_nt
             cand_nsamp = cand['dm'] # number of samples of DM delay
             cand_nblks = (cand_nsamp + vis_nt) // vis_nt + 1 # add an extra block for good measure
             # end iblk number. Clamp to the current slot
@@ -176,24 +207,27 @@ class CandidateOutput:
         self.start_slot_idx = self.cutout_buffer.iblk2slot(self.start_iblk)
         self.end_slot_idx = self.cutout_buffer.iblk2slot(self.end_iblk)            
         self.curr_slot_idx = self.start_slot_idx
+        self.start_samp = self.start_iblk * vis_nt
 
 
-        hdr = {'START_IBLK': self.start_iblk,
-               'START_SLTID': self.start_slot_idx,
-                'END_IBLK': self.end_iblk,
-                'END_SLTID': self.end_slot_idx,              
+        hdr = {'IBLKSTRT': (self.start_iblk, 'Starting iblk'),
+               'SLTSTRT': (self.start_slot_idx, 'Slot of starting iblk'),
+                'IBLKEND': (self.end_iblk, 'Iblk of final block'),
+                'SLTEND': (self.end_slot_idx, 'Slot of final blk'),
+                'SMPSTRT': (self.start_samp, 'Total sample of first sample in the block')
                }
         for k in CandidateWriter.out_dtype.names:
-            s = 'CAND_'+k.upper()
-            hdr[s] = cand[k]
+            s = ('CN'+k.upper()).replace('_','')[:8]
+            hdr[s] = (cand[k], f'Candidate {k}')
 
-        t.tick('mkdhdr')
+        t.tick('mkhdr')
 
         # why don't we just write out as much data as we have? That seems sensible?
         # OK so the current block being written to is self.cutout_buffer.write_iblk
 
         format = 'fits' # can be 'raw' or 'fits'
-        use_uvws = False
+        #format = 'raw'
+        use_uvws = True
         self.cutout_file = UvFitsFileSink(cutout_buffer.obs_info, cutout_file_name, extra_header=hdr, format=format, use_uvws=use_uvws, fcm=cutout_buffer.fcm)
 
         t.tick('mkoutfile')
@@ -213,7 +247,7 @@ class CandidateOutput:
         '''
         if self.cutout_buffer is None: # shoudln't happen, but quit sillently if we've already finished
             return
-        data = self.cutout_buffer.buf[self.curr_slot_idx,:]
+        data = self.cutout_buffer.buf[self.curr_slot_idx]
         iblk = self.cutout_buffer.buf_iblk[self.curr_slot_idx]
         info = self.cutout_buffer.obs_info
         block = VisBlock(data['vis'], iblk, info)

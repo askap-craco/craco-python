@@ -15,6 +15,7 @@ import pytest
 from craco.cutout_buffer import *
 import craco.card_averager
 from craco.candidate_writer import CandidateWriter
+from craft.craco import baseline_iter
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ class DummyInfo:
     def __init__(self):
         self.beamid = 3
         self.values = DummyValues()
+
+    def baseline_iter(self):
+        return baseline_iter(np.arange(10))
         
 
 def make_cb(nslots=128):
@@ -74,7 +78,6 @@ def test_check_buffer_dtypes():
     write_buffer_dtype = write_buffer.dtype
 
     print(transpose_buffer.shape, transpose_buffer.dtype)
-    print(c.buf.shape, c.buf.dtype)
     print(write_buffer.shape, write_buffer.dtype)
 
     assert transpose_buffer.dtype == write_buffer.dtype

@@ -356,7 +356,7 @@ class FpgaCapturer:
         #print(f'\rCompletions={ncompletions} {len(completions)}')
         beam = self.ccap.values.beam
         if ncompletions > self.max_ncompletions:
-            log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
             self.max_ncompletions = ncompletions
             
         d = None # in case something quits before it's set. We return None so we don't get an unboundLocalError
@@ -1019,7 +1019,7 @@ def add_arguments(parser):
     parser.add_argument('-b','--block',help='Correlator block to talk to', default=7, type=strrange) 
     parser.add_argument('-a','--card', help='Card range to talk to', default=1, type=strrange)
     parser.add_argument('-k','--fpga', help='FPGA range to talk to', default='1-6', type=strrange)
-    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_2,mlx5_0')
+    parser.add_argument('--devices', help='List of dievices to receive from, comman separated', default='mlx5_0,mlx5_2')
     parser.add_argument('--prefix', help='EPICS Prefix ma or ak', default='ak')
     parser.add_argument('--enable-test-data', help='Enable test data mode on FPGA', action='store_true', default=False)
     parser.add_argument('--beam', default=None, type=int, help='Which beam to save (default=all)')
