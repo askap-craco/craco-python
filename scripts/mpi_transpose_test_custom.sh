@@ -52,6 +52,6 @@ echo UCX_NET_DEVICES=$UCX_NET_DEVICES
 # save the rankfile
 extra_args="--hostfile $hostfile"
 
-cmd="mpirun --map-by ppr:3:socket -hostfile $HOSTFILE $ucxargs `which python` -m mpi4py /CRACO/SOFTWARE/ban115/craco-python/src/craco/mpi_transposer.py"
+cmd="mpirun --map-by ppr:5:socket --rank-by socket:span -hostfile $HOSTFILE $ucxargs --display-map --report-bindings `which python` -m mpi4py /CRACO/SOFTWARE/ban115/craco-python/src/craco/mpi_transposer.py $@"
 echo $cmd
 $cmd
