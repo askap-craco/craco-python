@@ -220,14 +220,15 @@ class Cand:
         self.vtend = int(self.ctend + padding)
         # these are for the visibility time range
 
-    def _get_pcb_mask(self,):
+    def _get_pcb_mask(self, tstart, tend):
         if self.pcbpath is None: 
             self.pcbmask = None
         else:
             try:
                 pcbdata = load_filterbank(
-                    self.pcbpath, self.vtstart + self.uvfits_startsample, 
-                    self.vtend - self.vtstart + 1
+                    self.pcbpath, 
+                    tstart + self.uvfits_startsample, 
+                    tend - tstart + 1
                 )
                 self.pcbmask = (pcbdata == 0.).T
             except:
@@ -236,8 +237,11 @@ class Cand:
     def extract_data(self, padding):
         ### get candidate/visibility time range
         self._get_cand_vis_range(padding = padding)
-        self._get_pcb_mask() # get mask from phase center filterbank
         self.canduvfits.snippet(self.vtstart, self.vtend)
+        ### get range for real snippet
+        dtstart, dtend = self.canduvfits.datarange
+        self._get_pcb_mask(dtstart, dtend) # get mask from phase center filterbank
+        
 
     ########## data manipulation ##########
     def process_data(
