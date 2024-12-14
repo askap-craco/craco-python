@@ -187,10 +187,13 @@ class Cand:
         ) ### all basic information are encoded in `self.canduvfits.plan`
         self.uvfits = uvfits; self.metafile = metafile 
         self.calfile = calfile; self.pcbpath = pcbpath
+        self.uvfits_startsample = self.canduvfits.sample_start
 
         ### put all information to the attribute
         self.ra_deg, self.dec_deg = ra_deg, dec_deg
-        self.dm_pccm3 = dm_pccm3; self.total_sample = total_sample
+        self.dm_pccm3 = dm_pccm3
+        ### this is for candidate snippet...
+        self.total_sample = total_sample - self.uvfits_startsample
         self.boxc_width = boxc_width
         self.lpix, self.mpix = lpix, mpix
 
@@ -223,7 +226,7 @@ class Cand:
         else:
             try:
                 pcbdata = load_filterbank(
-                    self.pcbpath, self.vtstart, 
+                    self.pcbpath, self.vtstart + self.uvfits_startsample, 
                     self.vtend - self.vtstart + 1
                 )
                 self.pcbmask = (pcbdata == 0.).T
@@ -481,6 +484,10 @@ class CandUvfits:
     @property
     def fmax(self):
         return self.plan.freqs[-1]
+    
+    @property
+    def sample_start(self):
+        return self.uvsource.header.get("SMPSTRT", default=0)
 
     @property
     def nchan(self):

@@ -319,6 +319,25 @@ class ScanDir:
 
         return self.scan_sizes
 
+### for candidate snippet directory
+class CandDir:
+    def __init__(self, sbid, beam, iblk, scan=None):
+        self.scandir = ScanDir(sbid, scan=scan)
+        self.scheddir = self.scandir.scheddir
+        self.datadirs = self.scandir.datadirs
+
+        self.beam_node_dict = self.scandir.beam_node_dict
+        self.beam = beam
+        self.iblk = iblk
+
+    @property
+    def cand_snippet_dir(self):
+        beam_scan_dir = self.scandir.beam_scandir_path(self.beam)
+        return f"{beam_scan_dir}/beam{self.beam:0>2}/candidates/iblk{self.iblk}"
+
+    @property
+    def cand_snippet_uvfits_path(self):
+        return f"{self.cand_snippet_dir}/candidate.uvfits"
 
 class RunDir:
     def __init__(self, sbid, scan=None, run="results"):
