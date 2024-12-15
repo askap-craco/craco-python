@@ -187,10 +187,13 @@ class Cand:
         ) ### all basic information are encoded in `self.canduvfits.plan`
         self.uvfits = uvfits; self.metafile = metafile 
         self.calfile = calfile; self.pcbpath = pcbpath
+        self.uvfits_startsample = self.canduvfits.sample_start
 
         ### put all information to the attribute
         self.ra_deg, self.dec_deg = ra_deg, dec_deg
-        self.dm_pccm3 = dm_pccm3; self.total_sample = total_sample
+        self.dm_pccm3 = dm_pccm3
+        ### this is for candidate snippet...
+        self.total_sample = total_sample - self.uvfits_startsample
         self.boxc_width = boxc_width
         self.lpix, self.mpix = lpix, mpix
 
@@ -217,14 +220,15 @@ class Cand:
         self.vtend = int(self.ctend + padding)
         # these are for the visibility time range
 
-    def _get_pcb_mask(self,):
+    def _get_pcb_mask(self, tstart, tend):
         if self.pcbpath is None: 
             self.pcbmask = None
         else:
             try:
                 pcbdata = load_filterbank(
-                    self.pcbpath, self.vtstart, 
-                    self.vtend - self.vtstart + 1
+                    self.pcbpath, 
+                    tstart + self.uvfits_startsample, 
+                    tend - tstart + 1
                 )
                 self.pcbmask = (pcbdata == 0.).T
             except:
@@ -233,8 +237,11 @@ class Cand:
     def extract_data(self, padding):
         ### get candidate/visibility time range
         self._get_cand_vis_range(padding = padding)
-        self._get_pcb_mask() # get mask from phase center filterbank
         self.canduvfits.snippet(self.vtstart, self.vtend)
+        ### get range for real snippet
+        dtstart, dtend = self.canduvfits.datarange
+        self._get_pcb_mask(dtstart, dtend) # get mask from phase center filterbank
+        
 
     ########## data manipulation ##########
     def process_data(
@@ -481,6 +488,10 @@ class CandUvfits:
     @property
     def fmax(self):
         return self.plan.freqs[-1]
+    
+    @property
+    def sample_start(self):
+        return self.uvsource.header.get("SMPSTRT", default=0)
 
     @property
     def nchan(self):
