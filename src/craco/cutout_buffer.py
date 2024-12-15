@@ -26,6 +26,12 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+'''
+Number of extra blocks to add before and after a cutout
+'''
+NEXTRA_BLOCKS = 16
+
+
 class CutoutBuffer:
     def __init__(self, dtype, ndtype, nslots:int, obs_info:MpiObsInfo, maxncand:int=1):
         #self.buf = np.zeros((nslots, ndtype), dtype=dtype)
@@ -190,7 +196,7 @@ class CandidateOutput:
         assert search_blocks_per_input_block >= 1
 
         if dumpall: # dump the entire buffer. Otherwise, try to dump only the bit of the buffer with the FRB in it
-            self.start_iblk = self.cutout_buffer.oldest_slot_iblk        
+            self.start_iblk = self.cutout_buffer.oldest_slot_iblk + 1       
             self.end_iblk = self.cutout_buffer.current_slot_iblk
         else: # dump the FRB only
             # input blocks are 110ms blocks = vis_nt samples. 
@@ -198,17 +204,22 @@ class CandidateOutput:
             #cand_iblk = cand['iblk']*search_blocks_per_input_block # looks like cand_iblk might be incorrect
             cand_iblk = cand['total_sample'] // vis_nt
             cand_nsamp = cand['dm'] # number of samples of DM delay
-            cand_nblks = (cand_nsamp + vis_nt) // vis_nt + 1 # add an extra block for good measure
-            # end iblk number. Clamp to the current slot
-            self.end_iblk = min(cand_iblk, self.cutout_buffer.current_slot_iblk)
-            # begining iblk. Clamp to the oldest available
-            self.start_iblk = max(self.end_iblk - cand_nblks, self.cutout_buffer.oldest_slot_iblk)
+            cand_nblks = (cand_nsamp + vis_nt) // vis_nt # number of of blocks of DM delay DM=0 is 1 block
+            total_nblks = 2*NEXTRA_BLOCKS + cand_nblks # Total number of blocks, including NEXTRA before and after
+                        
+            # This is the final block we save. It might not have appeared yet if the detection latency was pretty small
+            # I don't think this is a problem. By the time we get to saving it, it'll be there because we only save 1 block
+            # at a time
+            self.end_iblk = cand_iblk + NEXTRA_BLOCKS
+
+            # begining iblk. Clamp to the oldest available plus 1, because we don't write the first block when we're created.
+            # We can't start before that, right!
+            self.start_iblk = max(self.end_iblk - total_nblks, self.cutout_buffer.oldest_slot_iblk + 1)
         
         self.start_slot_idx = self.cutout_buffer.iblk2slot(self.start_iblk)
         self.end_slot_idx = self.cutout_buffer.iblk2slot(self.end_iblk)            
         self.curr_slot_idx = self.start_slot_idx
         self.start_samp = self.start_iblk * vis_nt
-
 
         hdr = {'IBLKSTRT': (self.start_iblk, 'Starting iblk'),
                'SLTSTRT': (self.start_slot_idx, 'Slot of starting iblk'),
