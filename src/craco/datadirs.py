@@ -322,7 +322,8 @@ class ScanDir:
 ### for candidate snippet directory
 class CandDir:
     def __init__(self, sbid, beam, iblk, scan=None):
-        self.scandir = ScanDir(sbid, scan=scan)
+        self.rundir = RunDir(sbid, scan=scan, run="results")
+        self.scandir = self.rundir.scandir
         self.scheddir = self.scandir.scheddir
         self.datadirs = self.scandir.datadirs
 
@@ -338,6 +339,10 @@ class CandDir:
     @property
     def cand_snippet_uvfits_path(self):
         return f"{self.cand_snippet_dir}/candidate.uvfits"
+
+    @property
+    def cand_info(self):
+        return f"{self.cand_snippet_dir}/candidate.txt"
 
 class RunDir:
     def __init__(self, sbid, scan=None, run="results"):
