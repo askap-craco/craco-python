@@ -309,7 +309,6 @@ class RealTimeCandAlarm:
 
     def run_plots(self, padding=75, zoom_r=10):
         fixuvfits(self.uvfitspath)
-        return 
         cand = craco_cand.Cand(
             uvfits=self.uvfitspath, calfile=self.calpath, 
             pcbpath=self.pcbpath, **self.candprop
