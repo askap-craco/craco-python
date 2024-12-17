@@ -309,6 +309,7 @@ def exit_function():
             auto_sched.queue_calibration(scandir)
         summarise_cands.run_with_tsp()
         summarise_scan.run_with_tsp()
+        auto_sched.run_post_cand_with_tsp()
         
         archive_location  = get_param_with_default(obsparams, 'craco.archive.location', '')
         log.info('craco.archive.location location is %s', archive_location)
