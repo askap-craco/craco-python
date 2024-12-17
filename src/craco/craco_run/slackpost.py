@@ -243,7 +243,9 @@ class RealTimeCandAlarm:
             (self.candall["snr"] >= self.snr - 0.1) &
             (abs(self.totalsample - self.candall["total_sample"]) <= timewindow)
         ]
-        return list(set(filtdf["MATCH_name"].unique()) - {np.nan})
+        matches = filtdf["MATCH_name"].unique()
+        strmatches = [i for i in matches if isinstance(i, str)]
+        return strmatches
 
     ### run function
     def run_flag_sidelobe(self, ):
@@ -467,7 +469,7 @@ class RealTimeScanAlarm:
             candalarm.send_alarm(main_ts=main_ts)
             candalarm.run_simple_filterbanks()
             candalarm.send_simple_filterbank_thread(main_ts=main_ts)
-            time.sleep(0.5)
+            time.sleep(5)
 
     def run_main(self):
         if self.postmethod == "none": return
