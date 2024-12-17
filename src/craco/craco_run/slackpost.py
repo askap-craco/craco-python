@@ -342,7 +342,7 @@ class RealTimeCandAlarm:
         warn_body = {
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*coord*\n{self.ra:.4f}d, {self.dec:.4f}d"},
+                {"type": "mrkdwn", "text": f"*coord*\n{self.coord.to_string('hmsdms')}"},
                 {"type": "mrkdwn", "text": f"*galcoord*\n{self.gl:.4f}d, {self.gb:.4f}d"},
                 {"type": "mrkdwn", "text": f"*SNR*\n{self.snr:.1f}"},
                 {"type": "mrkdwn", "text": f"*MJD*\n{self.mjd:.8f}"},
