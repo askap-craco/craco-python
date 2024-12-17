@@ -44,10 +44,11 @@ def fixuvfits(fitsfile):
     env = os.environ.copy()
     cmd = f"fixuvfits {fitsfile}"
     print(f"executing - {cmd}")
-    subprocess.run(
+    complete_process = subprocess.run(
         [cmd], shell=True, capture_output=True,
         text=True, env=env,
     )
+    log.info(complete_process.stdout)
 
 class SlackPostManager:
     def __init__(self, test=True, channel=None):
@@ -177,6 +178,7 @@ class RealTimeCandAlarm:
         ### work directory ###
         self.workdir = f"{snippetfolder}/post"
         os.makedirs(self.workdir, exist_ok=True)
+        os.system(f"rm {self.workdir}/*")
 
         ### load other attributes...
         self._load_cand_prop()
@@ -307,7 +309,11 @@ class RealTimeCandAlarm:
 
     def run_plots(self, padding=75, zoom_r=10):
         fixuvfits(self.uvfitspath)
-        cand = craco_cand.Cand(uvfits=self.uvfitspath, calfile=self.calpath, **self.candprop)
+        return 
+        cand = craco_cand.Cand(
+            uvfits=self.uvfitspath, calfile=self.calpath, 
+            pcbpath=self.pcbpath, **self.candprop
+        )
         cand.extract_data(padding=padding)
         
         ### normal data...
@@ -363,7 +369,7 @@ class RealTimeCandAlarm:
                     {"type": "mrkdwn", "text": f"*galcoord*\n{self.gl:.4f}d, {self.gb:.4f}d"},
                     {"type": "mrkdwn", "text": f"*SNR*\n{self.snr:.1f}"},
                     {"type": "mrkdwn", "text": f"*MJD*\n{self.mjd:.8f}"},
-                    {"type": "mrkdwn", "text": f"*DM*\n{self.dm:.1f}pc cm^-3"},
+                    {"type": "mrkdwn", "text": f"*DM*\n{self.dm:.1f} pc cm^-3"},
                     {"type": "mrkdwn", "text": f"*width*\n{self.boxcwidth} sample"},
                 ]
             }
@@ -422,12 +428,14 @@ class RealTimeCandAlarm:
     def run_all(self,):
         try: self.run_flag_sidelobe()
         except: pass
+
+        main_ts = self.send_alarm(main_ts=None)
+
         try: self.run_simple_filterbanks()
         except: pass
         try: self.run_plots()
         except: pass
 
-        main_ts = self.send_alarm(main_ts=None)
         self.send_image_thread(main_ts = main_ts)
 
 class RealTimeScanAlarm:
