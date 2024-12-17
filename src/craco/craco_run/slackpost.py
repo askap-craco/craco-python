@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import glob
+import subprocess
 
 import logging
 log = logging.getLogger(__name__)
@@ -37,6 +38,16 @@ def load_config(config=None, section="postgresql"):
         raise ValueError(f"Section {section} not found in {config}")
     params = parser.items(section)
     return {k:v for k, v in params}
+
+### for fixuvfits
+def fixuvfits(fitsfile):
+    env = os.environ.copy()
+    cmd = f"fixuvfits {fitsfile}"
+    print(f"executing - {cmd}")
+    subprocess.run(
+        [cmd], shell=True, capture_output=True,
+        text=True, env=env,
+    )
 
 class SlackPostManager:
     def __init__(self, test=True, channel=None):
@@ -162,6 +173,7 @@ class RealTimeCandAlarm:
         self.canddir = CandDir(**self._extract_info_from_path(snippetfolder))
         self.candrow = self._load_candidate(self.canddir.cand_info).iloc[0]
         self.candall = self._load_candidate(self.canddir.rundir.beam_unique_cand(self.canddir.beam))
+        self.snippetfolder = snippetfolder
         ### work directory ###
         self.workdir = f"{snippetfolder}/post"
         os.makedirs(self.workdir, exist_ok=True)
@@ -294,7 +306,7 @@ class RealTimeCandAlarm:
         plt.close("all")
 
     def run_plots(self, padding=75, zoom_r=10):
-
+        fixuvfits(self.uvfitspath)
         cand = craco_cand.Cand(uvfits=self.uvfitspath, calfile=self.calpath, **self.candprop)
         cand.extract_data(padding=padding)
         
@@ -325,35 +337,56 @@ class RealTimeCandAlarm:
         return url
     
     def _format_nice_candidate_block(self, ):
-        ### header about the warning
-        header_msg = f":sunny: *New CRACO Trigger in SB{self.sbid} BEAM{self.beam:0>2}*\n"
-        header_msg += f"*<{self._format_gui_link()}|Click the link to access the GUI>*"
-        if self.sidelobe_flag is not None:
-            header_msg += f"\nPotential Sidelobe From *{self.sidelobe_flag}*"
-
-        warn_header = {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": header_msg
-            }
-        }
-
         divider = {"type": "divider"}
+        ### header about the warning
+        try:
+            header_msg = f":sunny: *New CRACO Trigger in SB{self.sbid} BEAM{self.beam:0>2}*\n"
+            header_msg += f"*<{self._format_gui_link()}|Click the link to access the GUI>*"
+            try:
+                if self.sidelobe_flag is not None:
+                    header_msg += f"\nPotential Sidelobe From *{self.sidelobe_flag}*"
+            except:
+                header_msg += "\n**Unable to run sidelobe filter**"
 
-        warn_body = {
-            "type": "section",
-            "fields": [
-                {"type": "mrkdwn", "text": f"*coord*\n{self.coord.to_string('hmsdms')}"},
-                {"type": "mrkdwn", "text": f"*galcoord*\n{self.gl:.4f}d, {self.gb:.4f}d"},
-                {"type": "mrkdwn", "text": f"*SNR*\n{self.snr:.1f}"},
-                {"type": "mrkdwn", "text": f"*MJD*\n{self.mjd:.8f}"},
-                {"type": "mrkdwn", "text": f"*DM*\n{self.dm:.1f}pc cm^-3"},
-                {"type": "mrkdwn", "text": f"*width*\n{self.boxcwidth} sample"},
-            ]
-        }
+            warn_header = {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": header_msg
+                }
+            }
 
-        return [divider, warn_header, warn_body, divider]
+            warn_body = {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*coord*\n{self.coord.to_string('hmsdms')}"},
+                    {"type": "mrkdwn", "text": f"*galcoord*\n{self.gl:.4f}d, {self.gb:.4f}d"},
+                    {"type": "mrkdwn", "text": f"*SNR*\n{self.snr:.1f}"},
+                    {"type": "mrkdwn", "text": f"*MJD*\n{self.mjd:.8f}"},
+                    {"type": "mrkdwn", "text": f"*DM*\n{self.dm:.1f}pc cm^-3"},
+                    {"type": "mrkdwn", "text": f"*width*\n{self.boxcwidth} sample"},
+                ]
+            }
+
+            return [divider, warn_header, warn_body, divider]
+        except Exception as error:
+            header_msg = f":zap: Unable to load info for cand {self.snippetfolder}"
+            warn_header = {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": header_msg
+                }
+            }
+            error_msg = f"ERR INFO - {error}"
+            error_header = {
+                "type": "context",
+                "elements": [
+                    dict(type="mrkdwn", text=error_msg)
+                ]
+            } 
+            return [divider, warn_header, error_header, divider]
+
 
     def send_alarm(self, main_ts=None):
         main_msg = self._format_nice_candidate_block()
@@ -387,9 +420,12 @@ class RealTimeCandAlarm:
         else: self.slackbot.post_message("no ics/pcb filterbank image found...", thread_ts=main_ts)
 
     def run_all(self,):
-        self.run_flag_sidelobe()
-        self.run_simple_filterbanks()
-        self.run_plots()
+        try: self.run_flag_sidelobe()
+        except: pass
+        try: self.run_simple_filterbanks()
+        except: pass
+        try: self.run_plots()
+        except: pass
 
         main_ts = self.send_alarm(main_ts=None)
         self.send_image_thread(main_ts = main_ts)
