@@ -1297,4 +1297,28 @@ def queue_calibration(scandir):
     caljob.run()
 
 
-    
+##### for posting candidate to slack...
+def run_post_cand_with_tsp():
+    CAND_POST_TS_SOCKET = "/data/craco/craco/tmpdir/queues/cands"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    environment = {
+        "TS_SOCKET": CAND_POST_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        cmd = f"post_scan_cands_image.py -outdir '{scan_dir}'"
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued posting candidate job - with command - {cmd}")
