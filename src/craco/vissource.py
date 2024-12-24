@@ -16,6 +16,7 @@ from craco.cardcap import NCHAN, NFPGA
 from craco.cardcapfile import NSAMP_PER_FRAME
 from craco import cardcap
 from craco.cardcapmerger import CcapMerger, frame_id_iter
+from craco.mpi_obsinfo import MpiObsInfo
 import astropy.io.fits.header as header
 from mpi4py import MPI
 
@@ -95,7 +96,7 @@ class CardCapNetworkSource:
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
         self.pipe_info = pipe_info
-        self.skip_frames = 10*50 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
+        self.skip_frames = 10*30 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
         for blk in values.block:
@@ -176,7 +177,7 @@ class VisBlock:
     All baselines
     Block of NT integrations
     '''
-    def __init__(self, data, iblk, info, cas=None, ics=None):
+    def __init__(self, data, iblk, info:MpiObsInfo, cas=None, ics=None):
         self._d = data
         self.iblk = iblk
         self.info = info

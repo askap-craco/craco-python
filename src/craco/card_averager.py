@@ -8,6 +8,7 @@ import numpy as np
 import os
 import sys
 import logging
+from craco.timer import Timer
 os.environ['NUMBA_THREADING_LAYER'] = 'omp' # my TBB version complains
 os.environ['NUMBA_NUM_THREADS'] = '2'
 os.environ['NUMBA_ENABLE_AVX'] = '1'
@@ -507,7 +508,7 @@ def flatten_packets(packets):
     [packet_list_flat.append(pkt.view(flat_dtype)) for pkt in packets]
     return packet_list_flat
 
-@njit(fastmath=True, boundscheck=False, parallel=False)
+@njit(fastmath=True, boundscheck=True, parallel=False)
 def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
     '''
     input: packets with flattened few axes - see flatten_packets()
@@ -526,7 +527,7 @@ def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
     ncout = NCHAN
     ntout = nt1*nt2 // tscrunch
     scale = np.float32(1./(tscrunch*nfpga))
-
+    
     #nprod), dtype=np.float32)if scratch is None:
     #    scratch = np.zeros((ncout, ntout, 
             
@@ -548,6 +549,8 @@ def average15(packets_flat, valid, cross_idxs, output, tscrunch, scratch):
         visout = output[ibeam]['vis']
         for ibl in range(len(cross_idxs)):
             blidx = cross_idxs[ibl]
+            assert ibl < visout.shape[0]
+
             for ichan in range(ncout):
                 for it in range(ntout):
                     start = blidx*2
@@ -740,8 +743,10 @@ def accumulate_all3(output, rescale_scales, rescale_stats, count, nant, \
     FIxed vis fscrunch
     Doesnt do CAS 
     '''
+    t = Timer()
     assert vis_fscrunch == 6
     packets_flat = flatten_packets(beam_data)
+    t.tick('Flatten packets')
 
 
     # we average all FPGAs into all 4 channels. If any FPGA is not valid, then all 4 channels will be under-cooked
@@ -750,12 +755,14 @@ def accumulate_all3(output, rescale_scales, rescale_stats, count, nant, \
         # this takes 30ms and has no memory allocation. See the numba averaging
         # evaluation on athena
         average15(packets_flat, valid, cross_idxs, output, vis_tscrunch, scratch)
-        
+        t.tick('average15')
     else:
         output['vis'] = 0
+        t.tick('Flag0')
 
     # doint calc and rescape ics adds abotu 20mn to this call
     calc_ics1(packets_flat, valid, auto_idxs, output)
+    t.tick('calc_ics1')
     
     return output
 
@@ -793,7 +800,12 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     return dt
                 
 class Averager:
-    def __init__(self, nbeam, nant, nc, nt, npol, vis_fscrunch=6, vis_tscrunch=1,rdtype=np.float32, cdtype=np.float32, dummy_packet=None, exclude_ants=None, rescale_update_blocks=16, rescale_output_path=None):
+    def __init__(self, nbeam, nant, nc, nt, npol, 
+                 vis_fscrunch=6, vis_tscrunch=1,
+                 rdtype=np.float32, cdtype=np.float32, 
+                 dummy_packet=None, exclude_ants=None, 
+                 rescale_update_blocks=16, rescale_output_path=None,
+                 version=3):
 
         #numba.set_num_threads(2)
 
@@ -805,12 +817,14 @@ class Averager:
         self.nant_in = nant
         self.nant_out = self.nant_in - len(exclude_ants)
         nbl_with_autos = self.nant_out*(self.nant_out+1)//2
+        self.nbl_in_with_autos = nant*(nant+1)//2
         self.nbl_with_autos = nbl_with_autos
         self.nt = nt
         self.npol = npol
         self.nc = nc
         self.vis_fscrunch = vis_fscrunch
         self.vis_tscrunch = vis_tscrunch
+        self.version = version
         self.rescale_update_blocks = rescale_update_blocks
         self.dtype = get_averaged_dtype(nbeam, self.nant_out, nc, nt, npol, vis_fscrunch, vis_tscrunch, rdtype, cdtype)
         self.output = np.zeros(nbeam, dtype=self.dtype)
@@ -823,7 +837,7 @@ class Averager:
         self.auto_idxs = np.array(self.auto_idxs)
         self.cross_idxs = np.array(self.cross_idxs)
 
-        self.scratch = np.zeros((NCHAN, nt // vis_tscrunch, self.nbl_with_autos*2*self.npol), dtype=np.float32)
+        self.scratch = np.zeros((NCHAN, nt // vis_tscrunch, self.nbl_in_with_autos*2*self.npol), dtype=np.float32)
 
         assert self.output[0]['cas'].shape == self.output[0]['ics'].shape, f"do_accumulate assumes cas and ICS work on same shape. CAS shape={self.output[0]['cas'].shape} ICS shape={self.output[0]['ics'].shape}"
 
@@ -919,10 +933,15 @@ class Averager:
 
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
+        t = Timer()
         valid = np.array([pkt is not None for pkt in packets], dtype=bool)
+        t.tick('make valid')
         self.last_nvalid = valid.sum()
+        t.tick('sum nvalid')
         data = List()
+        t.tick('make list')
         [data.append(self.dummy_packet if pkt is None else pkt) for pkt in packets]
+        t.tick('append list')
         for idata, d in enumerate(data):
             if d.ndim == 1:
                 d.shape = (d.shape[0], 1)
@@ -931,6 +950,8 @@ class Averager:
 
             #log.info('Idata %d dhsape=%s', idata, d.shape)
             
+        t.tick('Do reshape')
+
         return self.accumulate_all(data, valid)
     
 
@@ -964,8 +985,9 @@ class Averager:
         :param: beam_data is numba List with the expected data
         '''
 
-        version = 3
+        version = self.version
 
+        t = Timer()
         if version == 3:
             accumulate_all3(self.output,
                         self.rescale_scales,
@@ -1009,11 +1031,13 @@ class Averager:
                         self.antenna_mask,
                         self.vis_fscrunch,
                         self.vis_tscrunch)
-            
+
+        t.tick('Run accumulate')            
 
         # update after first block and then every N thereafter
         if self.iblk == 0 or self.iblk % self.rescale_update_blocks == 0:
             self.update_scales()
+            t.tick('Update scales')
 
         self.iblk += 1
 

@@ -32,17 +32,27 @@ def _main():
         logging.basicConfig(level=logging.INFO)
 
 
-    cwd = os.getcwd()
-    cwdbits = cwd.split('/')
-    cwdbits[1] = 'CRACO'
-    cwdbits[2] = 'DATA*'
-    globpath = '/'.join(cwdbits) + '/rank*trace.json'
-    foutname = 'all_traces.json'
+    if len(values.files) == 0:
+        cwd = os.getcwd()
+        cwdbits = cwd.split('/')
+        cwdbits[1] = 'CRACO'
+        cwdbits[2] = 'DATA*'
+        globpath = '/'.join(cwdbits) + '/rank*trace.json'
+        dirs = os.getcwd().split('/') # '/data/SKADI_00_0/craco/SB067194/scans/00/20241027232156'
+        sbid = dirs[4]
+        scanid = dirs[-1]
+        foutname = f'{sbid}-{scanid}_traces.json'
+        files = glob.glob(globpath)
+        log.info('Got %d files in %s', len(files), globpath)
+
+    else:
+        foutname = 'all_traces.json'
+        files = values.files
+        
     fout = open(foutname, 'wt')
     # assumes array mode
     fout.write('[\n')
-    files = glob.glob(globpath)
-    log.info('Got %d files in %s', len(files), globpath)
+    
     oline = 0
     for f in files:
         with open(f, 'rt') as fin:
@@ -52,9 +62,12 @@ def _main():
 
                 if line.startswith('[') or line.startswith(']'):
                     continue
+
                 line = line.strip()
+
                 if line.endswith(','):
                     line = line[:-1]
+                    
                 if oline > 0:
                     line = ',\n'+line
 

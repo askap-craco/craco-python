@@ -52,6 +52,9 @@ class Timestamp:
 
 class Timer:
     def __init__(self, args=None):
+        '''
+        :args: Directionary of metadata to add to every tick
+        '''
         self.last_ts = Timestamp.now()
         self.init_ts = self.last_ts
         self.ticks = OrderedDict()
@@ -64,6 +67,9 @@ class Timer:
         self.args = {} if args is None else args
 
     def tick(self, name, args=None):
+        '''
+        :args: Directionary of metadata to add to this tick
+        '''
         ts = Timestamp.now()
         tdiff = ts - self.last_ts
         self.ticks[name] = tdiff

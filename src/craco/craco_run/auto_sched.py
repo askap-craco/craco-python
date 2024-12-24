@@ -339,7 +339,7 @@ class CracoCalSol:
 
 class CracoCalSol:
     def __init__(
-        self, sbid, flagfile="/home/craftop/share/fixed_freq_flags.txt"
+        self, sbid, flagfile="/home/craftop/share/fixed_freq_flags_calib.txt"
     ):
         self.sbid = sbid
         self.caldir = CalDir(sbid)
@@ -679,7 +679,7 @@ where sbid={self.sbid}""")
         assert len(res) == 1, f"found {len(res)} records in observation database for {self.sbid}..."
         self.freq, self.footprint, self.weight_sched, self.start_time, self.flagant, self.fcm_version = res[0]
 
-    def query_calib_table(self, timethreshold=1.5):
+    def query_calib_table(self, timethreshold=365):
         """
         query calibration table to find the most appropriate sbid
 
@@ -703,7 +703,7 @@ ORDER BY o.sbid DESC
             if flagcheck: return calsbid, calstatus
         return None, None
     
-    def query_observe_table(self, timethreshold=1.5):
+    def query_observe_table(self, timethreshold=365):
         """
         this is used to find potential calibration - need to run
         """
@@ -723,7 +723,7 @@ ORDER BY calib_rank DESC, SBID DESC
             if flagcheck: return calsbid
         return None
 
-    def get_cal_path(self, timethreshold=1.5):
+    def get_cal_path(self, timethreshold=365):
         calsbid, calstatus = self.query_calib_table(timethreshold=timethreshold)
         calpath = None
         if calsbid is not None and calstatus == 0: #status 0 means there is calibration
@@ -880,7 +880,7 @@ ORDER BY sbid ASC
         return [i[0] for i in res]
     
 
-    def _sbid_run(self, sbid, timethreshold=1.5, post=False):
+    def _sbid_run(self, sbid, timethreshold=365, post=False):
         """
         run a given sbid - either run prepare_skadi, or run run_calib or wait
         """
@@ -1297,4 +1297,28 @@ def queue_calibration(scandir):
     caljob.run()
 
 
-    
+##### for posting candidate to slack...
+def run_post_cand_with_tsp():
+    CAND_POST_TS_SOCKET = "/data/craco/craco/tmpdir/queues/cands"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    environment = {
+        "TS_SOCKET": CAND_POST_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        cmd = f"post_scan_cands_image.py -outdir '{scan_dir}'"
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued posting candidate job - with command - {cmd}")

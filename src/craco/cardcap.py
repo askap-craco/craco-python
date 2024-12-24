@@ -356,7 +356,7 @@ class FpgaCapturer:
         #print(f'\rCompletions={ncompletions} {len(completions)}')
         beam = self.ccap.values.beam
         if ncompletions > self.max_ncompletions:
-            log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
             self.max_ncompletions = ncompletions
             
         d = None # in case something quits before it's set. We return None so we don't get an unboundLocalError
@@ -915,7 +915,7 @@ class MpiCardcapController:
             if len(my_fpga) == 1:
                 devidx = my_fpga[0] % len(devices)
             else:
-                devidx = my_card % len(devices)
+                devidx = rank % len(devices)
 
             my_values.device = devices[devidx]
 

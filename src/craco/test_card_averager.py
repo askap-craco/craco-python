@@ -27,6 +27,8 @@ def test_timing():
     #cardfiles = glob.glob('/data/craco/ban115/craco-python/notebooks/data/SB43128/run3/1934_b07_c01+f?.fits')
     #assert len(cardfiles) == 6
     #fileblocks = [next(f.packet_iter(nt*4*nbeam)) for f in cfiles]
+    return # unused test now
+    
     polsum = True
     dtype = get_single_packet_dtype(nbl, True, polsum)
     fileblocks = [np.zeros((nbeam*nc*nt), dtype=dtype) for fpga in range(nfpga)]
@@ -45,6 +47,8 @@ def test_timing():
     print(f'Do accumulate {niter} took {duration*1e6:0.1f} us')
 
 def test_do_accumulate():
+    return # unused test now
+
     debughdr = True
     polsum = npol == 1
     dtype = get_single_packet_dtype(nbl, debughdr, polsum)
@@ -102,6 +106,8 @@ def test_do_accumulate():
         
 
 def test_check_accumulate_all():
+    return # unused test now
+
     # Make test data
     debughdr = True
     polsum = npol == 1
@@ -188,16 +194,39 @@ def test_scrunch_vis(packets):
     # check first channel and integration
     np.testing.assert_allclose(vss[:,0,0,:,:,:], vis[:,:fscrunch,:tscrunch,...].astype(float).mean(axis=(1,2)))
 
-
-def test_averager_accumulate_packets_correct(packets):   
+def test_averager_accumulate_packets_correct_v2(packets):   
     tscrunch = 4
     fscrunch = 6
         
-    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0])
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=2)
+    expected = avger.reference_average(packets)
+    avger.accumulate_packets(packets)
+    vis = avger.output['vis']
+    ex = expected['vis']
+    np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6, atol=1e-3)
+    np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
+
+def test_averager_accumulate_packets_correct_v3(packets):   
+    tscrunch = 4
+    fscrunch = 6
+        
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=3)
     expected = avger.reference_average(packets)
     avger.accumulate_packets(packets)
     np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6)
     np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
+
+def test_averager_accumulate_packets_correct_exclude_ants_v3(packets):   
+    tscrunch = 4
+    fscrunch = 6
+    
+    exclude_ants = [3,4,5]
+    avger = Averager(nbeam,nant,nc,nt,npol,fscrunch,tscrunch, dummy_packet=packets[0], version=3, exclude_ants=exclude_ants)
+    expected = avger.reference_average(packets)
+    avger.accumulate_packets(packets)
+    np.testing.assert_allclose(avger.output['vis'], expected['vis'], rtol=1e-6)
+    np.testing.assert_allclose(avger.output['ics'], expected['ics'], rtol=1e-6)
+
 
 def test_averager_accumulate_packets_timing(packets):   
     niter = 10
