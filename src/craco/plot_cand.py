@@ -96,7 +96,7 @@ def cand2str(c):
     coords = coord.to_string('hmsdms')
     t = Time(c['mjd'], scale='utc', format='mjd')
     
-    s =  f"snr={c['snr']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot}"
+    s =  f"snr={c['snr']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot} beam={c['ibeam']}"
     
     return s
 

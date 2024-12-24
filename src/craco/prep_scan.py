@@ -58,6 +58,16 @@ def make_scan_directories(sbid, scanid, target, craco_data_dir=None):
     os.makedirs(scandir)
     os.makedirs(targetdir, exist_ok=True)
     os.symlink(scandir, targetlink)
+
+    # make node links
+    noderoot = os.path.join(scandir, 'nodes')
+    os.makedirs(noderoot)
+    for inode in range(19):
+        noded = f'/CRACO/DATA_{inode:02d}/craco/'
+        nodedir = os.path.join(noded, f'SB{sbid:06}', 'scans', f'{scanid:02d}', nowstr)
+        linkdir = os.path.join(noderoot, f'{inode:02d}')
+        os.symlink(nodedir, linkdir)
+
     return scandir
 
 def first(x):
@@ -89,6 +99,7 @@ class ScanPrep:
         os.makedirs(self.outdir, exist_ok=True)
         self.fcmfile = self.copy_file(fcmfile, 'fcm.txt')
         self.fixed_flag_file = self.copy_file('/home/craftop/share/fixed_freq_flags.txt', 'fixed_freq_flags.txt')
+        
 
 
     def save(self):

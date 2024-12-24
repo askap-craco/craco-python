@@ -57,8 +57,9 @@ def test_compare_slow_and_fast():
     write_slow(0,block.data,block.baseline_flags,vs1.pipeline_data)
     write_fast(0,block.data,block.baseline_flags,vs2.pipeline_data)
 
-    assert np.all(vs1.pipeline_data == vs2.pipeline_data)
-
+    np.testing.assert_array_equal(vs1.pipeline_data['vis'], vs2.pipeline_data['vis'])
+    np.testing.assert_array_equal(vs1.pipeline_data['tf_weights'], vs2.pipeline_data['tf_weights'])
+    np.testing.assert_array_equal(vs1.pipeline_data['bl_weights'], vs2.pipeline_data['bl_weights'])
 
 def test_bool_and_uint8_views_equivalent():
     '''
