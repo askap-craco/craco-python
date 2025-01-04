@@ -18,10 +18,14 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+vis_fscrunch = 6
+vis_tscrunch = 1
+
 class MyVisBlock:
     def __init__(self, nbl, nrx, vis_nc, vis_nt):
         self.data = np.zeros((nrx, nbl, vis_nc, vis_nt), dtype=np.complex64)
         self.baseline_flags = np.zeros(nbl, dtype=np.uint8)
+        self.ics = np.zeros((nrx, vis_nt*vis_tscrunch, vis_nc*vis_fscrunch), dtype=np.float32) # un-fscrunched version
 
 
 def test_visblock_accum():
@@ -32,12 +36,31 @@ def test_visblock_accum():
     nrx = 72
     vis_nt = 32
     vis_nc = nchan // nrx
-    vs = VisblockAccumulatorStruct(nbl, nchan, nt)
+    vs = VisblockAccumulatorStruct(nbl, nchan, nt, vis_tscrunch, vis_fscrunch)
     block = MyVisBlock(nbl, nrx, vis_nc, vis_nt)
     nblocks = nt // vis_nt
 
     for iblk in range(nblocks):
-        vs.write(block) 
+        vs.write(block)
+
+    vs.finalise_weights()
+
+def test_scrunch_ics():
+    nrx = 72
+    vis_nc = 24
+    vis_nt = 32
+    nt = 256
+    nc = vis_nc * nrx
+    ics_data = np.arange(nrx*vis_nc*nt).reshape(nrx,nt,vis_nc)
+    expected = ics_data.transpose(0,2,1).reshape(nc,nt)
+    expected = expected.reshape(nc//vis_fscrunch, vis_fscrunch, nt).sum(axis=1)
+    scrunched_ics = np.zeros((nc // vis_fscrunch, nt), dtype=np.float32)
+    for i in range(nt // vis_nt):
+        tstart = i * vis_nt
+        scrunch_ics(tstart, ics_data[:,i*vis_nt:(i+1)*vis_nt,:],scrunched_ics, vis_tscrunch, vis_fscrunch)
+
+    np.testing.assert_allclose(scrunched_ics, expected)
+
 
 def test_compare_slow_and_fast():
     nant = 24
@@ -47,8 +70,8 @@ def test_compare_slow_and_fast():
     nrx = 72
     vis_nt = 32
     vis_nc = nchan // nrx
-    vs1 = VisblockAccumulatorStruct(nbl, nchan, nt)
-    vs2 = VisblockAccumulatorStruct(nbl, nchan, nt)
+    vs1 = VisblockAccumulatorStruct(nbl, nchan, nt, vis_tscrunch, vis_fscrunch)
+    vs2 = VisblockAccumulatorStruct(nbl, nchan, nt, vis_tscrunch, vis_fscrunch)
     block = MyVisBlock(nbl, nrx, vis_nc, vis_nt)
     block.data[:].real = np.rint(np.random.randn(*block.data.shape))
     block.data[:].imag = np.rint(np.random.randn(*block.data.shape))
