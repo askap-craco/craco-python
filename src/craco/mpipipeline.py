@@ -489,21 +489,21 @@ def proc_rx_run(proc):
 
 
 class FilterbankSink:
-    def __init__(self, prefix, vis_source):
+    def __init__(self, prefix, vis_source, fscrunch:int=1, nbits:int=32):
         values = vis_source.values
         beamid = vis_source.pipe_info.beamid
         fname = os.path.join(values.outdir, f'{prefix}_b{beamid:02d}.fil')
         pos = vis_source.skycoord
         npol = 1 # Card averager always outputs 1 pol
-        hdr = {'nbits':32,
-               'nchans':vis_source.nchan,
+        hdr = {'nbits':nbits,
+               'nchans':vis_source.nchan // fscrunch,
                'nifs':npol, 
                'src_raj_deg':pos.ra.deg,
                'src_dej_deg':pos.dec.deg,
                'tstart':vis_source.tstart.utc.mjd,
                'tsamp':vis_source.inttime.to(u.second).value,
-               'fch1':vis_source.fch1,
-               'foff':vis_source.foff,
+               'fch1':vis_source.fch1 + vis_source.foff*(fscrunch - 1)/2,
+               'foff':vis_source.foff*fscrunch,
                'source_name':vis_source.target
         }
         log.info('Creating filterbank %s with header %s', fname, hdr)
@@ -566,6 +566,10 @@ def transpose_beam_run(proc:Processor):
 
     #cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
+    ics_scrunch_filterbank = FilterbankSink('ics_scrunch',info, values.vis_fscrunch)
+    ics_weights_filterbank = FilterbankSink('ics_weights',info, values.vis_fscrunch, nbits=8)
+    tf_weights_filterbank = FilterbankSink('tf_weights',info, values.vis_fscrunch, nbits=8)
+
 
     if values.fcm is None or beamid not in info.values.save_uvfits_beams:
         log.info('Not writing UVFITS file as as FCM=%s not specified for beam %d not in obs_info.values.save_uvfits_beams: %s', values.fcm,
@@ -581,6 +585,7 @@ def transpose_beam_run(proc:Processor):
 
 
     dtype_complex =get_transpose_dtype(info, cplx_dtype=np.complex64)
+    # e.g.  dtype([('ics', '<f4', (32, 24)), ('cas', '<f4', (32, 24)), ('vis', '<f4', (66, 4, 32, 2))])
     # make cutout buffer
     nslots = 128 # number of 110ms write slots in cutout buffer
     cutout_buffer = CutoutBuffer(transposer.dtype, transposer.nrx, nslots, info)
@@ -591,7 +596,8 @@ def transpose_beam_run(proc:Processor):
 
     # Make make fake data to get vis_accum to compile. *sig*
     vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
-    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, comm=proc_comm, nblocks=NPROC_RING_SLOTS)
+    vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, values.vis_tscrunch, values.vis_fscrunch,
+                                          comm=proc_comm, nblocks=NPROC_RING_SLOTS)
     vis_accum.compile(vis_block_complex)
     
 
@@ -611,6 +617,7 @@ def transpose_beam_run(proc:Processor):
     world_comm = pipe_info.mpi_app.world_comm
     cand_req = world_comm.irecv(source=pipe_info.cand_mngr_rankinfo.rank)
     enable_write_block = True
+
 
     try:
        for iblk in range(pipe_info.requested_nframe):
@@ -655,14 +662,25 @@ def transpose_beam_run(proc:Processor):
             # We have to complete teh send request before writing to the vis_accum
 
             vis_accum.write(vis_block_complex, iblk=curr_blk)
+            #np.save(f'icsraw_b{beamid:02d}_iblk{iblk:03d}.npy', vis_block_complex.ics)
+            #np.save(f'icsscrunch_b{beamid:02d}_iblk{iblk:03d}.npy', vis_accum.scrunched_ics)
+            
             t.tick('accumulate')
             if vis_accum.is_full:
                 # Send asynchronously. It should finish by the time we get the next frame.
                 #vis_accum_send_req = beam_comm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
+                vis_accum.finalise_weights(iblk=curr_blk)
+                t.tick('finalise weights')
+                vis_accum.scrunched_ics.T.tofile(ics_scrunch_filterbank.fout.fin)
+                vis_accum.ics_weights.T.tofile(ics_weights_filterbank.fout.fin)
+                vis_accum.pipeline_data_array[curr_blk]['tf_weights'].T.tofile(tf_weights_filterbank.fout.fin)
+                t.tick('write ics weights')
+                
                 ring_buffer.close_write()
                 curr_blk = ring_buffer.open_write()
-                vis_accum.reset(iblk=curr_blk)
                 t.tick('close open')
+                vis_accum.reset(iblk=curr_blk) # reset ready for next block
+                
 
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
