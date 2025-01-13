@@ -18,6 +18,7 @@ from craco import cardcap
 from craco.cardcapmerger import CcapMerger, frame_id_iter
 from craco.mpi_obsinfo import MpiObsInfo
 import astropy.io.fits.header as header
+from craco.mpi_appinfo import MpiPipelineInfo
 from mpi4py import MPI
 
 log = logging.getLogger(__name__)
@@ -89,7 +90,7 @@ class CardCapFileSource:
     
 
 class CardCapNetworkSource:
-    def __init__(self, pipe_info):
+    def __init__(self, pipe_info:MpiPipelineInfo):
         block_cards  = []
         procid = 0
         cardno = 0
@@ -109,9 +110,11 @@ class CardCapNetworkSource:
 
         log.debug('numprocs %s block_cards %s', numprocs, block_cards)
 
+        net_device = pipe_info.my_rank_info.net_dev
         self.ctrl = cardcap.MpiCardcapController(pipe_info.rx_comm,
                                                   pipe_info.values,
-                                                  block_cards)
+                                                  block_cards,
+                                                  device=net_device)
         # make dummy merger so othe rpeople can get dtype and
         # other useful parameters
         self.merger = CcapMerger.from_headers(self.fpga_headers)
@@ -161,7 +164,7 @@ class CardCapNetworkSource:
         self.ctrl.stop()
                 
 
-def open_source(pipe_info):
+def open_source(pipe_info:MpiPipelineInfo):
     values = pipe_info.values
     if values.cardcap_dir is not None:
         src = CardCapFileSource(pipe_info)
