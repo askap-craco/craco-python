@@ -30,7 +30,9 @@ if username == 'gup037':
 elif username == 'craftop':
     logname = "/CRACO/SOFTWARE/craco/craftop/logs/summarise_scan.log"
 else:
-    raise RuntimeError("Oi - what are you doing with my code -- shoo!")
+    #raise RuntimeError("Oi - what are you doing with my code -- shoo!")
+    # Need to remove this runtime error as it breaks unit test discover running as ban115
+    logname = 'summarise_scan.log'
 
 logging.basicConfig(filename=logname,
                     format='[%(asctime)s] %(levelname)s: %(message)s',
