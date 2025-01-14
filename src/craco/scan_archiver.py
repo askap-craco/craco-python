@@ -12,10 +12,15 @@ from craco.fixuvfits import fix
 
 logname = "/CRACO/SOFTWARE/craco/craftop/logs/archive_scan.log"
 log = logging.getLogger(__name__)
-stdout_handler = logging.StreamHandler(sys.stdout)
-file_handler = RotatingFileHandler(logname, maxBytes=10000000, backupCount=10000)
-logging.basicConfig(handlers=[file_handler, stdout_handler],
+
+try:
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    file_handler = RotatingFileHandler(logname, maxBytes=10000000, backupCount=10000)
+    logging.basicConfig(handlers=[file_handler, stdout_handler],
                     format='[%(asctime)s] %(levelname)s: %(message)s',
+                    level=logging.DEBUG)
+except: # unit tests won't run with the fixed logname
+    logging.basicConfig(format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
 
 class TrivialEncoder(json.JSONEncoder):

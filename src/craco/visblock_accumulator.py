@@ -15,6 +15,8 @@ from craco.timer import Timer
 import mpi4py.util.dtlib
 from numba import njit
 from mpi4py import MPI
+from craco.ics_preprocess import get_ics_masks
+
 
 
 log = logging.getLogger(__name__)
@@ -126,6 +128,34 @@ def write_fast(tstart:int, vis_data, blflags, pipeline_data):
         #chan_weights = abs(vis_data[irx, ...]) != 0
         #pipeline_data['tf_weights'][fstart:fend, tstart:tend] = np.all(chan_weights == True, axis=0)
 
+@njit(cache=True)
+def write_ics(tstart:int, ics_data, all_ics):
+    '''
+    Writes ICS and transposes
+    ICS is [nrx, nt, nc]
+    VIS is [nrx, nbl, nc, nt]
+    '''
+    nrx, ics_nt, ics_nc = ics_data.shape
+    for irx in range(nrx):
+        for ichan in range(ics_nc):
+            ochan = ichan + irx*ics_nc            
+            for itime in range(ics_nt):                
+                otime = tstart + itime
+                all_ics[ochan, otime] = ics_data[irx, itime, ichan]
+
+@njit(cache=True)
+def scrunch_ics(tstart:int, ics_data, scrunched_ics, vis_tscrunch:int, vis_fscrunch:int):
+    nrx, ics_nt, ics_nc = ics_data.shape
+    for irx in range(nrx):
+        for ichan in range(ics_nc):
+            chan = ichan + irx*ics_nc
+            ochan = chan // vis_fscrunch
+            for itime in range(ics_nt):                
+                otime = (itime + tstart) // vis_tscrunch
+                din = ics_data[irx, itime, ichan]
+                scrunched_ics[ochan, otime] += din
+
+
 def allocate_shared_buffer(dt, nblocks, comm):
     disp_unit = dt.itemsize
     win = MPI.Win.Allocate_shared(nblocks * disp_unit if comm.rank == 0 else 0, disp_unit, comm = comm)
@@ -136,11 +166,12 @@ def allocate_shared_buffer(dt, nblocks, comm):
 
 
 class VisblockAccumulatorStruct:
-    def __init__(self, nbl:int, nf:int, nt:int, comm=None, nblocks=1):
+    def __init__(self, nbl:int, nf:int, nt:int, vis_tscrunch:int=1, vis_fscrunch:int=1, comm=None, nblocks=1):
         '''
         If comm is not None, alocates a shared memory buffer
         '''
-        shape = (nbl, nf, nt)
+        self.vis_tscrunch = vis_tscrunch
+        self.vis_fscrunch = vis_fscrunch
         dt = np.dtype([
             ('vis', np.complex64, (nbl,nf,nt)),
             ('tf_weights', np.uint8, (nf,nt)),
@@ -153,6 +184,11 @@ class VisblockAccumulatorStruct:
 
         self.pipeline_data_array = d
         self.pipeline_data = self.pipeline_data_array[0]
+
+        self.scrunched_ics = np.zeros((nf,nt), dtype=np.float32) # scrunched version of ICS - used for DM0 flagging
+        self.all_ics = np.zeros((nf*vis_fscrunch, nt*vis_tscrunch), dtype=np.float32)
+        self.ics_weights = np.zeros((nf,nt), dtype=bool)
+
         self.dtype = dt
         self.t = 0
         self.nt = nt
@@ -173,6 +209,8 @@ class VisblockAccumulatorStruct:
 
 
     def write(self, vis_block, iblk=0):
+        t = Timer()
+
         vis_data = vis_block.data
         assert len(vis_data.shape) >= 4, f'Invalid vis data shape {vis_data.shape} {vis_data.dtype}'
         nrx, nbl, vis_nc, vis_nt = vis_data.shape[:4]
@@ -189,7 +227,15 @@ class VisblockAccumulatorStruct:
         blflags = vis_block.baseline_flags # True = Bad, False=Good
         #write_slow(tstart, vis_data, blflags, self.pipeline_data)
         assert 0<= iblk < self.nblocks
+        t.tick('init')
         write_fast(tstart, vis_data, blflags, self.pipeline_data_array[iblk])
+        t.tick('write vis')
+        write_ics(tstart, vis_block.ics, self.all_ics)
+        t.tick('write ics')
+        scrunch_ics(tstart, vis_block.ics, self.scrunched_ics, self.vis_tscrunch, self.vis_fscrunch)
+        t.tick('scrunch ics')
+
+
         self.t += vis_nt
         assert self.t <= self.nt, f'Wrote too many blocks without reset {self.t} {self.nt}'
 
@@ -203,9 +249,16 @@ class VisblockAccumulatorStruct:
     def is_full(self):
         return self.t == self.nt
     
+    def finalise_weights(self, iblk):
+        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool))
+        self.pipeline_data_array[iblk]['tf_weights'] *= self.ics_weights
+
+    
     def reset(self, iblk=0):
         self.t = 0
-        self.pipeline_data_array[iblk]['bl_weights'][:] = True # make them all good again
+        self.pipeline_data_array[iblk]['bl_weights'][:] = 1 # make them all good again
+        self.pipeline_data_array[iblk]['tf_weights'][:] = 1
+        self.scrunched_ics[:] = 0
         # Don't need to reset 'vis' and 'tf_weights' as they will be overidden
 
     def close(self):

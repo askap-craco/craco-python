@@ -858,7 +858,7 @@ def dump_rankfile(values):
                     rank += 1
                     
 class MpiCardcapController:
-    def __init__(self, comm, values, block_cards):
+    def __init__(self, comm, values, block_cards, device:str=None):
         rank = comm.Get_rank()
         numprocs = comm.Get_size()
         self.comm = comm
@@ -912,13 +912,16 @@ class MpiCardcapController:
 
             devices = values.devices.split(',')
             #devices =['mlx5_0','mlx5_0']
-            if len(my_fpga) == 1:
-                devidx = my_fpga[0] % len(devices)
-            else:
-                devidx = rank % len(devices)
+            if device is None:
+                if len(my_fpga) == 1:
+                    devidx = my_fpga[0] % len(devices)
+                else:
+                    devidx = rank % len(devices)
 
-            my_values.device = devices[devidx]
+                device = devices[devidx]
 
+            my_values.device  = device
+            
             if values.outfile is None:
                 my_values.outfile = None
             else:

@@ -314,7 +314,7 @@ def populate_ranks(pipe_info, total_cards):
         
     nrx_per_host = ncards_per_host
     nbeams_per_host = nbeams //len(hosts)
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
+    log.info(f'Spreading {nranks} over {len(hosts)} hosts with {ncards_per_host} cards per host totalling {total_cards} {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
     rxrank = 0
@@ -338,8 +338,10 @@ def populate_ranks(pipe_info, total_cards):
                 host = hosts[hostidx]
                 ncores_per_proc = 2
                 #net_dev_idx = cardno % len(net_devices) # this is the same logic as cardcap.py - ideally we'd pass it down.
-                net_dev_idx = rxrank % len(net_devices) # Changed cardcap.py to use this logic now
-                assert net_dev_idx == slotidx, f'Incorrect logic net_dev_idx={net_dev_idx} slotidx={slotidx} rank={rank} rxrank={rxrank} card={card} block={block}'
+                #net_dev_idx = rxrank % len(net_devices) # Changed cardcap.py to use this logic now
+                # cardcap.py now uses the netdevice from ReceiverRankInfo
+                #assert net_dev_idx == slotidx, f'Incorrect logic net_dev_idx={net_dev_idx} slotidx={slotidx} rank={rank} rxrank={rxrank} card={card} block={block}'
+                net_dev_idx = slotidx
                 net_dev = net_devices[net_dev_idx]
                 icore = (slotrank * ncores_per_proc) % ncores_per_socket
                 #icore = (slotrank*ncores_per_proc) % ncores_per_socket 

@@ -78,7 +78,7 @@ class Obsman:
 
     def sighup_handler(self, signal, frame):
         log.info('Got sighup')
-        self.restart_process()
+        self.terminate_process()
 
     def sigint_handler(self, signal, frame):
         log.info('Got sigint')
