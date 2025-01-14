@@ -203,10 +203,12 @@ def get_subblock_rms(input_data, rmses, bl_weights, tf_weights, isubblock, fines
                 v = input_data[i_bl, i_f, isubblock * finest_nt + i_t]
                 rmses[i_f] += v.real*v.real + v.imag*v.imag
 
-def get_phase_varying_dynamic_rfi_masks(input_data, finest_nt, bl_weights, tf_weights, freq_radius, freq_threshold):
+def get_phase_varying_dynamic_rfi_masks(input_data, rmses, finest_nt, bl_weights, tf_weights, freq_radius, freq_threshold):
     '''
     input_data - np.ndarray - complex64
                 Numpy array containing the visibility data
+    rmses -     np.ndarray - float64
+                Numpy array which will store the rms values
     finest_nt - int
                 finest timescale (in samples) on which rms needs to be measured to do RFI mitigation
     bl_weights - np.ndarray - boolean
@@ -221,7 +223,8 @@ def get_phase_varying_dynamic_rfi_masks(input_data, finest_nt, bl_weights, tf_we
     '''
     nbl, nf, nt = input_data.shape
     assert nt % finest_nt == 0, "nt has to be a integral multiple of finest_nt"
-    rmses = np.zeros(nf, dtype='float64')
+    assert rmses.size == nf, "rmses array has to have shape (nf,)"
+    #rmses = np.zeros(nf, dtype='float64')
     nsubblock = int(nt / finest_nt)
     for isubblock in prange(nsubblock):
         rmses[:] = 0
@@ -1078,6 +1081,7 @@ class FastPreprocess:
 
         self.cas_block = np.zeros((nf, nt), dtype=np.float64)
         self.crs_block = np.zeros((nf, nt), dtype=np.float64)
+        self.rmses = np.zeros(nf, dtype=np.float64)
 
         self.output_buf = np.zeros(self.blk_shape, dtype=np.complex64)
 
@@ -1251,6 +1255,7 @@ class FastPreprocess:
         self.update_preflagging_statistics(input_tf_weights, bl_weights)
 
         get_phase_varying_dynamic_rfi_masks(input_block,
+                                            rmses = self.rmses,
                                             finest_nt = self.dflag_nt,
                                             bl_weights = bl_weights,
                                             tf_weights = input_tf_weights,
