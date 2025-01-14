@@ -168,6 +168,7 @@ def _main():
 
 
     calibration = '' if do_calibration else f'--calibration {calpath}'
+    uvfits_required = 'craco.uvfits.int_time_exp' in obsparams.keys()
     int_time_exp = int(get_param_with_default(obsparams, 'craco.uvfits.int_time_exp', values.int_time_exp))
     
     if do_calibration:
@@ -209,7 +210,7 @@ def _main():
     else:
         search_beams = ''
 
-    if values.save_uvfits or do_calibration:
+    if values.save_uvfits or do_calibration or uvfits_required:
         save_uvfits = f'--save-uvfits-beams 0-35'
     else:
         save_uvfits = ''
