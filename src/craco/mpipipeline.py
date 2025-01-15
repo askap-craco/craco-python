@@ -200,13 +200,13 @@ class DtypeTransposer:
                   self.rx_counts, self.rx_displacements,drx.shape, drx.dtype)  
 
         s_msg = [dtx,
-                 (np2array(self.tx_counts),
-                  np2array(self.tx_displacements)),
+                 (self.tx_counts,
+                  self.tx_displacements),
                  self.mpi_dtype]
             
         r_msg = [drx,
-                 (np2array(self.rx_counts),
-                  np2array(self.rx_displacements)),
+                 (self.rx_counts,
+                  self.rx_displacements),
                  self.mpi_dtype]
         
         #self.comm.Barrier() # Does this hurt rank0 more than everyone else???
@@ -479,8 +479,8 @@ def proc_rx_run(proc):
                      timer)
 
         t_start = MPI.Wtime()
-        if timer.total.perf > 0.120:
-            log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
+        #if timer.total.perf > 0.120:
+        #    log.warning('RX loop ibuf=%d proctime exceeded 110ms: %s',ibuf,timer)
             
         timer = Timer(args={'ibuf':ibuf+1})
         values = proc.pipe_info.values
@@ -685,8 +685,8 @@ def transpose_beam_run(proc:Processor):
             if beamid == 0 and False:
                 log.info('Beam processing time %s. Pipeline processing time: %s', t, pipeline_sink.last_write_timer)
 
-            if t.total.perf > 0.120 and iblk > 0:
-                log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
+            #if t.total.perf > 0.120 and iblk > 0:
+            #    log.warning('Beam loop iblk=%d proctime exceeded 110ms: %s', iblk, t)
 
 
     finally:
