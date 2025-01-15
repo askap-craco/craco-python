@@ -34,7 +34,7 @@ class TestValues:
 class TestPipeInfo:
     def __init__(self):
         self.values = TestValues()        
-        self.hosts = ['skadi-{i:02d}' for i in range(18)]
+        self.hosts = [f'skadi-{i:02d}' for i in range(18)]
         self.ranks = []
 
 
@@ -43,13 +43,22 @@ class TestPipeInfo:
         self.ranks.append(rank)
     
               
-        
-
+def test_is_beam_processor_correct():
+    assert not CandMgrRankInfo.is_beam_processor 
+    assert not ReceiverRankInfo.is_beam_processor
+    assert BeamTranRankInfo.is_beam_processor
+    assert BeamProcRankInfo.is_beam_processor
+    assert PlannerRankInfo.is_beam_processor
+    assert BeamCandRankInfo.is_beam_processor
         
 def test_populate_ranks():
     pipe_info = TestPipeInfo()
-    total_cards = 84
+    total_cards = len(pipe_info.values.block)*len(pipe_info.values.card)
     populate_ranks(pipe_info, total_cards)
+    
+    for r in pipe_info.ranks:
+        if r.is_beam_processor:
+            assert r.beamid // 18 == r.slot
 
     
 
