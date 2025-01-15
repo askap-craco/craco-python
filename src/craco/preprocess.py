@@ -5,6 +5,7 @@ import warnings, pdb, os
 from craft.craco import bl2ant, bl2array
 from craft import craco, sigproc
 from numba import njit, jit, prange
+import IPython
 
 def get_isMasked_nPol(block):
 
@@ -113,6 +114,8 @@ def average_pols(block, keepdims = True):
         #    block = block.squeeze()
     return block
 
+
+ 
 @njit(parallel=False, cache=True)
 def fast_cas_crs(input_data, bl_weights, fixed_freq_weights, input_tf_weights, cas, crs):
     '''
@@ -179,6 +182,55 @@ def get_complicated_dynamic_rfi_masks(cas, crs, finest_nt, rmses, Ai, Qi, N):
     nsubblocks = nt / finest_nt
 
     #Plan to do multi-layer rms computation where we measure the rms over different time scales
+        
+
+@njit(cache=True)
+def get_subblock_rms(input_data, rmses, bl_weights, tf_weights, isubblock, finest_nt, nbl, nf, nt):
+    '''
+    Computes the rms (squared) along the time axis (across all baselines) as a function of frequency
+    Saves the output in the rmses array. Does the computation on a subblock of data defined by finest_nt and isubblock
+    '''
+    for i_f in prange(nf):
+        for i_bl in range(nbl):
+            
+            if bl_weights[i_bl] == 0:
+                continue
+                
+            for i_t in range(finest_nt):
+                if tf_weights[i_f, isubblock * finest_nt + i_t] == 0:
+                    continue
+
+                v = input_data[i_bl, i_f, isubblock * finest_nt + i_t]
+                rmses[i_f] += v.real*v.real + v.imag*v.imag
+
+def get_phase_varying_dynamic_rfi_masks(input_data, finest_nt, bl_weights, tf_weights, freq_radius, freq_threshold):
+    '''
+    input_data - np.ndarray - complex64
+                Numpy array containing the visibility data
+    finest_nt - int
+                finest timescale (in samples) on which rms needs to be measured to do RFI mitigation
+    bl_weights - np.ndarray - boolean
+                Numpy array of shape nbl containing the baseline weights
+    tf_weights - (nf, nt) - np.ndarray - boolean
+                Numpy array containing the input_tf_weights
+                This array will get modified in-place and newly identified bad channels will be set to 0 weight
+    freq_radius - int
+                Radius of influence to consider when finding outliers in freq (units of nchan)
+    freq_threshold - float
+                Threshold above which the channels with higher rmses would get zapped (units of sigma)
+    '''
+    nbl, nf, nt = input_data.shape
+    assert nt % finest_nt == 0, "nt has to be a integral multiple of finest_nt"
+    rmses = np.zeros(nf, dtype='float64')
+    nsubblock = int(nt / finest_nt)
+    for isubblock in prange(nsubblock):
+        rmses[:] = 0
+        get_subblock_rms(input_data, rmses, bl_weights, tf_weights, isubblock, finest_nt, nbl, nf, nt)
+        
+        freq_flags, _ = iqrm_mask(rmses, freq_radius, freq_threshold)
+        tf_weights[freq_flags, isubblock*finest_nt:(isubblock+1)*finest_nt] = 0
+        
+        
 
 
 #import pdb
@@ -1196,20 +1248,14 @@ class FastPreprocess:
             assert len(bl_weights) == self.blk_shape[0]
             assert input_tf_weights.shape == self.blk_shape[1:]
     
-        fast_cas_crs(input_data=input_data, 
-                        bl_weights=bl_weights, 
-                        fixed_freq_weights=self.fixed_freq_weights,
-                        input_tf_weights=input_tf_weights,
-                        cas = self.cas_block, 
-                        crs = self.crs_block)
-        
         self.update_preflagging_statistics(input_tf_weights, bl_weights)
 
-        get_simple_dynamic_rfi_masks(self.cas_block, self.crs_block,
-                                        finest_nt = self.dflag_nt,
-                                        tf_weights=input_tf_weights,
-                                        freq_radius=self.dflag_fradius,
-                                        freq_threshold=self.dflag_fthreshold)
+        get_phase_varying_dynamic_rfi_masks(input_block,
+                                            finest_nt = self.dflag_nt,
+                                            bl_weights = bl_weights,
+                                            tf_weights = input_tf_weights,
+                                            freq_radius= self.dflag_fradius,
+                                            freq_threshold = self.dflag_fthreshold)
 
         self.update_postflagging_statistics(input_tf_weights, bl_weights)
         self.num_nblks += 1
