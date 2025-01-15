@@ -66,7 +66,7 @@ class Step(ProcessingStep):
 
         # Only run if an injection file is given.
         if p.args.injection is None:
-            log.warning('No input injection file for %s', p.cand_fname)
+            log.debug('No input injection file for %s', p.cand_fname)
             return cands
 
         # Read yaml.
