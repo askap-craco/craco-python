@@ -168,7 +168,7 @@ def _main():
 
 
     calibration = '' if do_calibration else f'--calibration {calpath}'
-    uvfits_required = 'craco.uvfits.int_time_exp' in obsparams.keys()
+    uvfits_required = obsparams.get_value('craco.uvfits.int_time_exp', '').strip() != ''
     int_time_exp = int(get_param_with_default(obsparams, 'craco.uvfits.int_time_exp', values.int_time_exp))
     
     if do_calibration:
@@ -176,7 +176,8 @@ def _main():
 
     int_time = 0.864*2**(int_time_exp)
     spi_val, tscrunch_val = calc_inttime_tscrunch(int_time_exp)
-    log.info('Using integration time=%sms spi=%s tscrunch=%s', int_time, spi_val, tscrunch_val)
+    log.info('Using integration time=%sms spi=%s tscrunch=%s uvfits_required=%s', 
+             int_time, spi_val, tscrunch_val, uvfits_required)
    
     spi = f'--samples-per-integration {spi_val}'
     vis_tscrunch = f'--vis-tscrunch {tscrunch_val}'
