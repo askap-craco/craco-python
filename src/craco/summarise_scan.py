@@ -10,6 +10,7 @@ from astropy import time as T
 import logging
 import os
 import subprocess
+import datetime
 import argparse
 import numpy as np
 import sys
@@ -77,6 +78,16 @@ def search_dict(d, key):
             return search_dict(v, key)
     return None
     
+def parse_tstart_as_ISO_time(tstart):
+    '''
+    Takes tstart string in the format YYYYMMDDHHMMSS
+    and converts it into the ISO time format string
+    i.e. yyyy-MM-ddTHH:mm:ss.SSSXXX
+    '''
+    time = datetime.datetime.strptime(tstart, "%Y%m%d%H%M%S")
+    isot = time.isoformat()
+    return isot
+
 def find_beam0_min_max_values(d, key):
     '''
     Takes a dictionary d and a key and finds the value of key for beam0,
@@ -728,7 +739,8 @@ class ObsInfo:
 
     def run(self, runcandpipe=True):
         try:
-            self._dict["_index"] = f"{self.sbid}_scan_{self.scanid}_tstart_{self.tstart}_run_{self.runname}"
+            self._dict["docid"] = f"{self.sbid}_scan_{self.scanid}_tstart_{self.tstart}_run_{self.runname}"
+            self._dict["tstamp"] = parse_tstart_as_ISO_time(self.tstart)
             log.debug("Reading pcb info")
             self.pcb_stats = read_pcb_stats(self.scandir)
             log.debug("Reading plan info")
@@ -843,7 +855,14 @@ class ObsInfo:
                 '&dec=' + cands['dec_deg'].astype(str) 
 
         return urls.tolist()
-
+    
+    def _form_unknown_cand_str(self, cands, beamid):
+        try:
+            snrs = cands['snr']
+        except KeyError as ke:
+            snrs = cands['SNR']
+        strs = "B{beamid:02g}_MJD{cands['mjd']}_DM{cands['dm_pccm3']:.2f}_SNR{snrs:.1f}_BOX{cands['boxc_width']}_RA{cands['ra_deg']:.4f_DEC{cands['dec_deg']:.3f}"
+        return strs.tolist()
 
     def _get_classified_candidates(self, candfiles, label='PSR', snr=None):
         '''
@@ -887,8 +906,11 @@ class ObsInfo:
                     classified_cands += classified_rows['MATCH_name'].unique().tolist()
                 else:
                     # return a list of urls for unknown candidates 
-                    classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
-                    classified_cands += self._form_url(classified_rows, candfile.beamid)
+                    #classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_url(classified_rows, candfile.beamid)
+                    #classified_cands += self._form_url(classified_rows, candfile.beamid)
+
+                    classified_cands_per_beam[f'beam_{candfile.beamid:0>2}'] = self._form_unknown_cand_str(classified_rows, candfile.beamid)
+                    classified_cands += self._form_unknown_cand_str(classified_rows, candfile.beamid)
                 
         return list(set(classified_cands)), classified_cands_per_beam
         
@@ -1092,6 +1114,8 @@ class ObsInfo:
         search_params = {}
         search_params['num_dm_trials'] = planinfo['values']['ndm']
         search_params['dm_samps_min'] = 0
+        search_params['hw_threshold'] = planinfo['values']['threshold']
+        search_params['trigger_threshold'] = planinfo['values']['trigger_threshold']
         search_params['dm_samps_max'] = planinfo['values']['ndm'] - 1
         search_params['dm_trial_steps'] = 'linear'
         search_params['dm_trial_spacing'] = 1
@@ -1232,7 +1256,7 @@ class ObsInfo:
         msg += "----------------\n"
         msg += "Scan info -> \n"
         if self.filtered_scan_info != {}:
-            msg += f"- Target [Beam 0]: {self.filtered_scan_info['target']}\n"
+            msg += f"- Target [Beam 0]: {self.filtered_scan_info['target'].strip('beam_00')}\n"
         
         msg += "----------------\n"
         msg += "Obs info ->\n"
@@ -1250,6 +1274,8 @@ class ObsInfo:
             msg += f"- Nchan: {self.filtered_obs_info['num_channels']}\n"
             msg += f"- Ndm (min-max): {self.filtered_search_info['num_dm_trials']} ({self.filtered_search_info['dm_samps_min']} - {self.filtered_search_info['dm_samps_max']}) samples\n"
             msg += f"- Nboxcar (min-max): {self.filtered_search_info['num_boxcar_width_trials']} ({self.filtered_search_info['boxcar_width_samps_min']} - {self.filtered_search_info['boxcar_width_samps_max']}) samples\n"
+            msg += f"- Threshold (trigger): {self.filtered_search_info['trigger_threshold']}\n"
+            msg += f"- Threshold (HW): {self.filtered_search_info['hw_threshold']}\n"
 
         msg += "----------------\n"
         msg += "Candidate info -> \n"
@@ -1263,12 +1289,12 @@ class ObsInfo:
             msg += f"- List of pulsars detected: {self.filtered_cands_info['pulsar_cands_bright']}\n"
             msg += f"- List of RACS sources detected: {self.filtered_cands_info['racs_cands_bright']}\n"
             msg += f"- List of custom catalog sources detected: {self.filtered_cands_info['custom_cands_bright']}\n"
-            msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
+            #msg += f"- List of unknwon sources detected (URLs): {convert_urls_to_readable_links(self.filtered_cands_info['unknown_cands_bright'])}\n"
         
         msg += "----------------\n"
         msg += "Data quality info ->\n"
         if self.filtered_dq_info != {}:
-            msg += f"- Dropped packets fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_mean']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
+            msg += f"- Dropped packets + DM0 flag fraction avg [Beam 0 (min-max)]: {self.filtered_dq_info['dropped_packets_fraction_mean']:.2f} ({self.filtered_dq_info['dropped_packets_fraction_min']:.2f} - {self.filtered_dq_info['dropped_packets_fraction_max']:.2f})\n"
             msg += f"- Static freq flag fraction: {self.filtered_dq_info['bad_channels_fraction_mean']:.2f}\n"
             msg += f"- Flagged baselines fraction [Beam 0 (min-max)]: {self.filtered_dq_info['bad_baselines_fraction_mean']:.2f} ({self.filtered_dq_info['bad_baselines_fraction_min']:.2f} - {self.filtered_dq_info['bad_baselines_fraction_max']:.2f})\n"
             msg += f"- Dynamic rfi flagging fraction [Beam 0 (min-max)]: {self.filtered_dq_info['rfi_dynamic_flagging_fraction_mean']:.2f} ({self.filtered_dq_info['rfi_dynamic_flagging_fraction_min']:.2f} - {self.filtered_dq_info['rfi_dynamic_flagging_fraction_max']:.2f})\n"
