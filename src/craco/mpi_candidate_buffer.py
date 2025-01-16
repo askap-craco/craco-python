@@ -60,7 +60,7 @@ class MpiCandidateBuffer:
         diffs = now - Time(cands['mjd'], format='mjd', scale='utc')        
         latency = 0 if len(cands) == 0 else diffs.to(u.millisecond).max().value
         maxsnr = 0 if len(cands) == 0 else cands['snr'].max()
-        log.info('Tracing cands %d %f %f', len(cands), maxsnr, latency)
+        log.debug('Tracing cands %d %f %f', len(cands), maxsnr, latency)
         self.trace_file += tracing.CounterEvent('Candidates', args={'ncands':len(cands)},ts=None)
         self.trace_file += tracing.CounterEvent('SNR', args={'maxsnr':maxsnr},ts=None)
         self.trace_file += tracing.CounterEvent('Latency',args={'latency':latency},ts=None)
