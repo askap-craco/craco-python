@@ -229,6 +229,8 @@ class MpiAppInfo:
 
 class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slot','core','block','card','fpga', 'net_dev'])):
     APP_ID = MpiAppInfo.RX_APPNUM
+    is_beam_processor = False
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga} on {self.net_dev}'
@@ -243,6 +245,8 @@ class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slo
     
 class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAMTRAN_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} transpose receiver '
@@ -257,6 +261,8 @@ class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','s
     
 class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     APP_ID = MpiAppInfo.BEAMPROC_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} processor xrtdevid={self.xrt_device_id}'
@@ -268,6 +274,9 @@ class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','s
 
 class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.PLANNER_APPNUM
+    is_beam_processor = True
+
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Planner'
@@ -279,6 +288,8 @@ class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slo
 
 class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAM_CAND_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Cand processor'
@@ -291,6 +302,8 @@ class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','s
 
 class CandMgrRankInfo(namedtuple('CandMgrRankInfo', ['rank','host','slot','core'])):
     APP_ID = MpiAppInfo.CAND_MGR_APPNUM
+    is_beam_processor = False
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Cand manager'
@@ -370,13 +383,10 @@ def populate_ranks(pipe_info, total_cards):
         xrt_devices = host_cards[host]
         this_host_search_beams = host_search_beams.get(host,[])
         host_search_beams[host] = this_host_search_beams
-        if beam in values.search_beams:
-            this_host_search_beams.append(beam)
+        this_host_search_beams.append(beam)
             
-        devid = None
-        if beam in this_host_search_beams:
-            devindex = this_host_search_beams.index(beam)            
-            devid = xrt_devices[devindex] if devindex < len(xrt_devices) else None
+        devindex = this_host_search_beams.index(beam)            
+        devid = xrt_devices[devindex] if devindex < len(xrt_devices) else None
 
         # dev 0,1 on slot 0. dev 2,3 on slot 1. 
         if devid in (0,1):
@@ -384,7 +394,12 @@ def populate_ranks(pipe_info, total_cards):
         elif devid in (2,3):
             slot = 1
         else:
-            slot = 0 # just put it there for now.
+            # we don't want to seacrch this beam, because we are calibrating or
+            # its not on the command line, for example
+            #assert devid in (0,1,2,3), f'Invalid value of devid:{devid} for beam {beam} this_host={this_host_search_beams} {host}[{hostidx}] {xrt_devices}'        
+            # inthis case, we choose slot, not based on which card it's mapped to, but w
+            slot = beam // 2
+            # assume
 
 
         log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, xrt_devices, host, this_host_search_beams)
