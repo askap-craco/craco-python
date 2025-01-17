@@ -3,7 +3,7 @@ from numba import njit
 import IPython
 from iqrm import iqrm_mask
 
-def get_ics_masks(ics_data, new_tf_weights, subnt=128, nsubf = 4, zap_along_freq = False, freq_radius = None, freq_threshold = 5, zap_along_time = True, time_radius = None, time_threshold=5):
+def get_ics_masks(ics_data, new_tf_weights, subnt=128, nsubf = 8, zap_along_freq = False, freq_radius = None, freq_threshold = 5, zap_along_time = True, time_radius = None, time_threshold=5):
     '''
     This function takes in a block of ICS data - derives new tf mask from it after taking into account
     the existing fixed_freq_weights and input_tf_weights, and ORs the newly derived weights with the input_tf_weights
@@ -64,14 +64,14 @@ def get_ics_masks(ics_data, new_tf_weights, subnt=128, nsubf = 4, zap_along_freq
                 if time_radius is None:
                     time_radius = subnt // 2
 
-                for isubf in range(nsubf):
-                    fslice = slice(isubf * subnf, (isubf+1)*subnf, 1)
-                    d_subband = ics_data[fslice, tslice]
-                    subband_mean = d_subband.mean(axis=0)
-
-                    t_mask = iqrm_mask(subband_mean, time_radius, time_threshold)[0]
-                    new_tf_weights[fslice, tslice][:, t_mask] = False
-                    ics_data[fslice, tslice][:, t_mask] = 0
+                #for isubf in range(nsubf):
+                #    fslice = slice(isubf * subnf, (isubf+1)*subnf, 1)
+                #    d_subband = ics_data[fslice, tslice]
+                #    subband_mean = d_subband.mean(axis=0)
+                #
+                #    t_mask = iqrm_mask(subband_mean, time_radius, time_threshold)[0]
+                #    new_tf_weights[fslice, tslice][:, t_mask] = False
+                #    ics_data[fslice, tslice][:, t_mask] = 0
 
                 t_total = ics_data[:, tslice].mean(axis=0)
                 t_mask = iqrm_mask(t_total, time_radius, time_threshold)[0]
