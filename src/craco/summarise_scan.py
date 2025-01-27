@@ -683,7 +683,8 @@ def get_num_classified_candidates(candfiles, snr=None):
         
     return dict(num_classified_cands)#, num_classified_cands_per_beam
 
-
+def format_pandas_row_as_string(row, beamid, snr_key):
+    return f"B{int(beamid):02g}_MJD{row['mjd']}_DM{row['dm_pccm3']:.2f}_SNR{row[snr_key]:.1f}_BOX{row['boxc_width']}_RA{row['ra_deg']:.4f}_DEC{row['dec_deg']:.3f}"
 
 def run_with_tsp():
     log.info(f"Queuing up summarise scan")
@@ -859,10 +860,13 @@ class ObsInfo:
     def _form_unknown_cand_str(self, cands, beamid):
         try:
             snrs = cands['snr']
+            snr_key = 'snr'
         except KeyError as ke:
-            snrs = cands['SNR']
-        strs = "B{beamid:02g}_MJD{cands['mjd']}_DM{cands['dm_pccm3']:.2f}_SNR{snrs:.1f}_BOX{cands['boxc_width']}_RA{cands['ra_deg']:.4f_DEC{cands['dec_deg']:.3f}"
-        return strs.tolist()
+            snr_key = "SNR"
+            #snrs = cands['SNR']
+
+        return cands.apply(format_pandas_row_as_string, axis=1, args=[beamid, snr_key]).tolist()
+        #strs = f"B{int(beamid):02g}_MJD{cands['mjd']}_DM{cands['dm_pccm3']:.2f}_SNR{snrs:.1f}_BOX{cands['boxc_width']}_RA{cands['ra_deg']:.4f}_DEC{cands['dec_deg']:.3f}"
 
     def _get_classified_candidates(self, candfiles, label='PSR', snr=None):
         '''
