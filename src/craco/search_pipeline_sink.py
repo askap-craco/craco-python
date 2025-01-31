@@ -19,6 +19,7 @@ from astropy import units as u
 import pyxrt
 import scipy
 from craco.candidate_writer import CandidateWriter
+from craco.mpi_appinfo import MpiPipelineInfo
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class VisInfoAdapter:
 
 
 class SearchPipelineSink:
-    def __init__(self, info, plan):
+    def __init__(self, info:MpiPipelineInfo, plan):
         '''
         Includes info and pre-made initial plan. 
         '''
@@ -162,7 +163,8 @@ class SearchPipelineSink:
         devid = info.xrt_device_id
         self.pipeline = None
         self._next_plan_data = None
-        if devid is not None:
+        log.info('SearchPipelineSink devid=%s beamid=%s search_beams=%s', devid, self.info.beamid, self.info.values.search_beams)
+        if devid is not None and self.info.beamid in self.info.values.search_beams:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
                 self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=True, plan=plan)
@@ -183,6 +185,9 @@ class SearchPipelineSink:
             except MemoryError: # useually pyxrt.syncbo fails due to dead card
                 log.exception(f'MemoryError to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
+        else:
+            log.info('SearchPielineSink not searching beamid=%s, device or search beam not specified', self.info.beamid)
+                
 
     def set_next_plan(self, next_plan_data):
         '''

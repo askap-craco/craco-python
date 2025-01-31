@@ -699,7 +699,7 @@ def transpose_beam_run(proc:Processor):
             vis_file.close()
 
 
-def proc_beam_run(proc):
+def proc_beam_run(proc:Processor):
     #set_scheduler(BEAM_PRIORITY)
     t = Timer()
     pipe_info = proc.pipe_info
