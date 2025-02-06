@@ -95,7 +95,7 @@ def get_ant_idx(nbl, flag_ant=None):
         return (~np.isin(blant[:, 0], flag_ant)) & (~np.isin(blant[:, 1], flag_ant))
 
 
-def open_after_seeking(fname, seek_sec = None, seek_samps = None, metadata_file = None):
+def open_after_seeking(fname, seek_sec = None, seek_samps = None, metadata_file = None, flag_ant = None):
     tmp = uvfits.open(fname)
     nsamps_total = int(tmp.vis.size // tmp.nbl)
 
@@ -108,6 +108,9 @@ def open_after_seeking(fname, seek_sec = None, seek_samps = None, metadata_file 
     tmp.close()
 
     f = uvfits_meta.open(fname, skip_blocks=seek_samps, metadata_file = metadata_file)
+    if flag_ant is not None: 
+        if isinstance(flag_ant, str): flag_ant = strrange()
+        f = f.set_flagants(flag_ant)
 
     return f
 
@@ -117,7 +120,10 @@ def run(f, values):
     block_dtype = np.ma.core.MaskedArray
     
 
-    uvsource = open_after_seeking(values.uv, seek_samps = values.seek_samps, metadata_file = values.metadata_file)
+    uvsource = open_after_seeking(
+        values.uv, seek_samps = values.seek_samps, metadata_file = values.metadata_file,
+        flag_ant=values.flag_ant
+    )
     nsamps_total = int(uvsource.vis.size // uvsource.nbl)
     nsamps_to_process = values.process_samps
 
