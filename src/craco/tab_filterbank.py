@@ -109,7 +109,7 @@ def open_after_seeking(fname, seek_sec = None, seek_samps = None, metadata_file 
 
     f = uvfits_meta.open(fname, skip_blocks=seek_samps, metadata_file = metadata_file)
     if flag_ant is not None: 
-        if isinstance(flag_ant, str): flag_ant = strrange()
+        if isinstance(flag_ant, str): flag_ant = strrange(flag_ant)
         f = f.set_flagants(flag_ant)
 
     return f
