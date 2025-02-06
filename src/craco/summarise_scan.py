@@ -718,7 +718,7 @@ def run_with_tsp():
 
 class ObsInfo:
 
-    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results', runcandpipe=True):
+    def __init__(self, sbid:str, scanid:str, tstart:str, runname:str = 'results', runcandpipe=True, block_slack_post=False):
         '''
         sbid: str, SBIDs - Can accept SB0xxxxx, 0xxxxx, xxxx formats
         scanid: str, scanid - needs to be in 00 format
@@ -735,6 +735,7 @@ class ObsInfo:
         self.tstart = tstart
         self.runname = runname
         self.tstart = tstart
+        self.block_slack_post = block_slack_post
         self._dict = {}
         self.run(runcandpipe = runcandpipe)
 
@@ -776,7 +777,7 @@ class ObsInfo:
             msg = f"End of scan: {self.sbid}/{self.scanid}/{self.tstart}, runname={self.runname}\n" + msg
             self.post_on_slack(msg)
             
-        self.dump_json()
+            self.dump_json()
 
     def dump_json(self):
         outname = os.path.join(self.scandir.scan_head_dir, "scan_summary.json")
@@ -1260,7 +1261,7 @@ class ObsInfo:
         msg += "----------------\n"
         msg += "Scan info -> \n"
         if self.filtered_scan_info != {}:
-            msg += f"- Target [Beam 0]: {self.filtered_scan_info['target'].strip('beam_00')}\n"
+            msg += f"- Target [Beam 0]: {self.filtered_scan_info['target']}\n"
         
         msg += "----------------\n"
         msg += "Obs info ->\n"
@@ -1306,6 +1307,8 @@ class ObsInfo:
         return msg
     
     def post_on_slack(self, msg):
+        if self.block_slack_post:
+            return
         log.debug(f"Posting message - \n{msg}")
         slack_poster = SlackPostManager(test=False, channel="C06FCTQ6078")
         slack_poster.post_message(msg)
@@ -1329,7 +1332,8 @@ def _main():
     obsinfo = ObsInfo(sbid = args.sbid,
                       scanid = args.scanid,
                       tstart = args.tstart,
-                      runcandpipe = args.run_candpipe)
+                      runcandpipe = args.run_candpipe,
+                      block_slack_post = args.block_slack_post)
     #obsinfo.run()
 
 def get_parser():
@@ -1338,6 +1342,7 @@ def get_parser():
     a.add_argument("-scanid", type=str, help="scanid", required=True)
     a.add_argument("-tstart", type=str, help="tstart", required=True)
     a.add_argument("-no_candpipe", dest='run_candpipe', action='store_false', help="Don't run candpipe (def:False)", default=True)
+    a.add_argument('-no_slack', dest='block_slack_post', action='store_true', help="Don't post a message on slack (def: False)", default = False)
 
     args = a.parse_args()
     return args
