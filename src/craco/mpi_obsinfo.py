@@ -144,6 +144,10 @@ class MpiObsInfo:
         return self.pipe_info.beamid
 
     @property
+    def beam_dir(self):
+        return self.pipe_info.beam_dir
+
+    @property
     def nbeams(self):
         '''
         Number of beams being processed

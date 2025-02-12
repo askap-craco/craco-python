@@ -525,6 +525,15 @@ class MpiPipelineInfo:
     def beamid(self):
         return self.mpi_app.beamid
 
+    @property
+    def beam_dir(self):
+        '''
+        Returns a parth to the beam output directory
+                        Makes it if ncessary
+        '''
+        beamdir = os.path.join(self.values.outdir, f'beam{self.beamid:02d}')
+        os.makedirs(beamdir, exist_ok=True)
+        return beamdir
 
     @property
     def is_beam_processor(self):

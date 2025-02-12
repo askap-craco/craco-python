@@ -20,6 +20,8 @@ import pyxrt
 import scipy
 from craco.candidate_writer import CandidateWriter
 from craco.mpi_appinfo import MpiPipelineInfo
+from craco.mpi_obsinfo import MpiObsInfo
+
 
 log = logging.getLogger(__name__)
 
@@ -151,7 +153,7 @@ class VisInfoAdapter:
 
 
 class SearchPipelineSink:
-    def __init__(self, info:MpiPipelineInfo, plan):
+    def __init__(self, info:MpiObsInfo, plan):
         '''
         Includes info and pre-made initial plan. 
         '''
@@ -263,12 +265,18 @@ class SearchPipelineSink:
 
         Also updates plan if necessary
         '''
+        t = Timer()
+        save_pipeline_data = True
+        if save_pipeline_data:
+            pth = os.path.join(self.info.beam_dir, f'pipeline_data_{self.iblk}.npy')
+            np.save(pth, pipeline_data)
+            t.tick('Save pipeline data', args={'iblk':self.iblk, 'path':pth})
+            log.info('Saved pipeline data to %s iblk=%s', pth, self.iblk)
 
         out_cands = None
         if self.pipeline is None:
             return out_cands
         
-        t = Timer()
 
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
