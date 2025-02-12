@@ -21,7 +21,10 @@ class MpiRingBufferManager:
     Pretends to manage a ringbuffer via send/recv
     in an asynchronous way
     '''
-    def __init__(self, comm, nblocks:int, tx_rank:int=0, rx_rank:int=1):
+    def __init__(self, comm, nblocks:int, tx_rank:int=0, rx_rank:int=1, block:bool=False):
+        '''
+        If block == true, then we block if we're full
+        '''
         self.nblocks = nblocks
         self.comm = comm
         self.widx = -1 # write index
@@ -33,6 +36,7 @@ class MpiRingBufferManager:
 
         self.tx_rank = tx_rank
         self.rx_rank = rx_rank
+        self.block = block
 
     def _update_requests(self, requests):
         for ir, r in enumerate(requests):
@@ -41,9 +45,27 @@ class MpiRingBufferManager:
                 if complete:
                     requests[ir] = None
 
+    def _wait_and_update(self, requests):
+        '''
+        just wait on the wurrent requests on widx
+        Once it's waited we go through again and update them all
+        
+        '''
+        r = requests[self.widx]
+        if r is not None:
+            r.wait()
+        self._update_requests(requests)
+
     def _check_writable(self):
-        self._update_requests(self.tx_requests)
-        self._update_requests(self.rx_requests)
+
+        if self.block:
+            self._wait_and_update(self.tx_requests)
+            self._wait_and_update(self.rx_requests)
+        else:
+            self._update_requests(self.tx_requests)
+            self._update_requests(self.rx_requests)
+
+                        
         assert self.tx_requests[self.widx] is None, f'Outstanding tx request {self.widx}'
         assert self.rx_requests[self.widx] is None, f'Outstanding rx request {self.widx}'
 
@@ -53,7 +75,7 @@ class MpiRingBufferManager:
         :returns: index of write slot
         '''
         self.widx = (self.widx + 1) % self.nblocks
-        self._check_writable()
+        self._check_writable() # may block
         return self.widx
 
     def close_write(self):
@@ -61,7 +83,11 @@ class MpiRingBufferManager:
         Called by writer to close block for writing. Will send info to receiver
         '''
         assert self.widx >= 0
-        self._check_writable()        
+        #self._check_writable() 
+
+        # We checked it was writable when we opened this slot, but it's worth checking it's still writable when we closed it.
+        assert self.tx_requests[self.widx] is None, f'Outstanding tx request {self.widx}'
+        assert self.rx_requests[self.widx] is None, f'Outstanding rx request {self.widx}'      
         self.tx_requests[self.widx] = self.comm.isend(self.widx, dest=self.rx_rank)
         self.rx_requests[self.widx] = self.comm.irecv(source=self.rx_rank)        
 

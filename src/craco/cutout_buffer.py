@@ -19,7 +19,7 @@ from craco.vissource import VisBlock
 from craco.timer import Timer
 from craft.parset import Parset
 from craco.uvfitsfile_sink import DataPrepper
-
+import warnings
 
 
 log = logging.getLogger(__name__)
@@ -109,12 +109,12 @@ class CutoutBuffer:
     def iblk2slot(self, iblk:int):
         '''
         Convert iblk numeer to slot idx
-        raise ValueError if iblk is not in the ringbuffer for some reason
+        warn if iblk is not in the ringbuffer for some reason
         '''
         nback = self.current_slot_iblk - iblk
         slot_idx = (self.current_slot_idx - nback) % self.nslots
         if self.buf_iblk[slot_idx] != iblk:
-            raise ValueError(f'Iblk {iblk} not found at slot {slot_idx} with current slot iblk={self.current_slot_iblk} and idx={self.current_slot_idx}')
+            warnings.warn(f'Iblk {iblk} not found at slot {slot_idx} with current slot iblk={self.current_slot_iblk} and idx={self.current_slot_idx}')
         
         return slot_idx
     
@@ -220,6 +220,7 @@ class CandidateOutput:
         self.end_slot_idx = self.cutout_buffer.iblk2slot(self.end_iblk)            
         self.curr_slot_idx = self.start_slot_idx
         self.start_samp = self.start_iblk * vis_nt
+        self.expected_iblk = self.start_iblk
 
         hdr = {'IBLKSTRT': (self.start_iblk, 'Starting iblk'),
                'SLTSTRT': (self.start_slot_idx, 'Slot of starting iblk'),
@@ -263,6 +264,9 @@ class CandidateOutput:
         info = self.cutout_buffer.obs_info
         block = VisBlock(data['vis'], iblk, info)
 
+        if iblk != self.expected_iblk:
+            warnings.warn(f'Expected iblk {self.expected_iblk} but got {iblk}')
+
         self.cutout_file.write(block)        
         finished = self.curr_slot_idx == self.end_slot_idx
         log.info('Wrote iblk %s to %s, finished=%s', iblk, self.cutout_file_name, finished)
@@ -272,6 +276,7 @@ class CandidateOutput:
         else:
             # increment slot number. 
             self.curr_slot_idx = (self.curr_slot_idx + 1) % self.cutout_buffer.nslots
+            self.expected_iblk += 1
         
 
         return finished

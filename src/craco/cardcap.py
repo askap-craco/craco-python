@@ -461,7 +461,7 @@ class FpgaCapturer:
 
             self.issue_requests()
 
-    def fake_packet_iterator(self, nblk=None):
+    def fake_packet_iterator(self, nblk=None, fake_data=None):
         iblk = 0
         start_bat = 0
         sync_bat = 0
@@ -475,18 +475,19 @@ class FpgaCapturer:
             block_index = 0
             message_index = 0
             d = self.rdma_buffers[block_index][message_index]
-            d['data'] = 0
+            d['data'] = (np.random.randn(*d['data'].shape)*50).astype(np.int16)
             d['bat'][0] = fid
             d['frame_id'][0][0] = fid
             d = self.post_process(d)
+            log.info(f'Sending fake data iblk={iblk} fid={fid} d={d["data"][:4]}')
             fid += NSAMP_PER_FRAME
             
             yield fid, d
             iblk += 1
 
     def packet_iterator(self, nblk=None):
-        if self.values.fake_cardcap_data:
-            it = self.fake_packet_iterator(nblk=None)
+        if self.values.fake_cardcap_data is not None:
+            it = self.fake_packet_iterator(None, self.values.fake_cardcap_data)
         else:
             it = self.real_packet_iterator(nblk=None)
 
@@ -595,7 +596,8 @@ class CardCapturer:
         # lsbposition=0 is bits 15-0 from 27-bit accumulator ouput.
         # lsbPosition=1 is bits 16-1
         # ..
-        # lsbPosition=11 = bits 27-11 (see discussion from john on mattermost)
+        # lsbPosition=11 
+        # = bits 27-11 (see discussion from john on mattermost)
         assert 0 <= lsbPosition <= 11, 'Unsupported LSB position'
         sumPols = 1 if values.pol_sum else 0
         integSelectMap = {16:0, 32:1, 64:2}

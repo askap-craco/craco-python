@@ -798,6 +798,31 @@ def get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, rd
     assert dt.itemsize > 0, f'Averaged dtype is equal to zero dt={dt}  vishape={vishape}'
 
     return dt
+
+def packets_to_data(packets, dummy_packet):
+    '''
+    Converts the List of packets potentially containing None
+    To a numba list of packets, with the None's replaced by the dummy packet
+    And a numpy bool array (valid) which is Ture where the packet was not None
+    '''
+    t = Timer()
+    valid = np.array([pkt is not None for pkt in packets], dtype=bool)
+    t.tick('make valid')
+
+    data = List()
+    t.tick('make list')
+    [data.append(dummy_packet if pkt is None else pkt) for pkt in packets]
+    t.tick('append list')
+    for idata, d in enumerate(data):
+        if d.ndim == 1:
+            d.shape = (d.shape[0], 1)
+        
+        assert d.shape == dummy_packet.shape, f'Invalid shape for packet[{idata}] expected={dummy_packet.shape} but got {d.shape}'
+
+        #log.info('Idata %d dhsape=%s', idata, d.shape)
+        
+    t.tick('Do reshape')
+    return (data, valid)
                 
 class Averager:
     def __init__(self, nbeam, nant, nc, nt, npol, 
@@ -933,25 +958,8 @@ class Averager:
 
         # also, if a packet is missing the iterator returns None, but Numba List() doesn't like None.
 
-        t = Timer()
-        valid = np.array([pkt is not None for pkt in packets], dtype=bool)
-        t.tick('make valid')
-        self.last_nvalid = valid.sum()
-        t.tick('sum nvalid')
-        data = List()
-        t.tick('make list')
-        [data.append(self.dummy_packet if pkt is None else pkt) for pkt in packets]
-        t.tick('append list')
-        for idata, d in enumerate(data):
-            if d.ndim == 1:
-                d.shape = (d.shape[0], 1)
-            
-            assert d.shape == self.dummy_packet.shape, f'Invalid shape for packet[{idata}] expected={self.dummy_packet.shape} but got {d.shape}'
-
-            #log.info('Idata %d dhsape=%s', idata, d.shape)
-            
-        t.tick('Do reshape')
-
+ 
+        data, valid = packets_to_data(packets, self.dummy_packet)
         return self.accumulate_all(data, valid)
     
 
@@ -986,8 +994,10 @@ class Averager:
         '''
 
         version = self.version
-
+    
         t = Timer()
+        self.last_nvalid = valid.sum()
+        t.tick('sum nvalid')
         if version == 3:
             accumulate_all3(self.output,
                         self.rescale_scales,

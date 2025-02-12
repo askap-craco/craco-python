@@ -258,7 +258,7 @@ class CardcapFile:
         return f
 
     @property
-    def syncbat(self):
+    def syncbat(self) -> int:
         '''
         Returns sync bat as an int
         '''
