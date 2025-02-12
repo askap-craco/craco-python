@@ -221,6 +221,7 @@ class VisblockAccumulatorStruct:
         assert output_nt % vis_nt == 0, f'Output must be a multiple of input NT. output={output_nt} vis={vis_nt} vis_data.shape'
         assert vis_nc*nrx == vis_out.shape[1], f'Output NC should be first of {self.pipeline_data.shape} but got {vis_nc*nrx} {vis_data.shape}'
         assert vis_out.shape[0] == nbl, f'Expected different nbl {self.pipeline_data.shape} != {nbl} {vis_data.shape}'
+        #assert vis_nt == self.nt // self.vis_tscrunch, f'Vis NT should be {self.nt//self.vis_tscrunch} but got {vis_nt}. nt= {self.nt} tscrunch={self.vis_tscrunch}'
 
         tstart = self.t
         vis_data = vis_block.data

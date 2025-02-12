@@ -21,7 +21,7 @@ from craft.craco_plan import PipelinePlan
 from craco import cardcap
 from craco.cardcap import NCHAN, NFPGA, NSAMP_PER_FRAME
 import craco.card_averager
-from craco.card_averager import Averager
+from craco.card_averager import Averager, packets_to_data
 from craco.cardcapmerger import CcapMerger
 from craco.mpiutil import np2array
 from craco.vissource import VisSource,open_source, VisBlock
@@ -52,6 +52,7 @@ from craco.mpi_ring_buffer_manager import MpiRingBufferManager
 from craco.cutout_buffer import CutoutBuffer
 from craco.mpi_obsinfo import MpiObsInfo
 from craco.mpi_transposer import MpiTransposeSender, MpiTransposeReceiver
+from craco.injection.packet_injector import PacketInjector
 
 from craco.tracing import tracing
 import pickle
@@ -70,7 +71,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 BEAM_PRIORITY = 90
 RX_PRIORITY = 91
 
-NPROC_RING_SLOTS = 4
+NPROC_RING_SLOTS = 2
 
 
 # rank ordering
@@ -149,13 +150,13 @@ REAL_DTYPE = np.float32 # Transpose/averaging type for real types
 CPLX_DTYPE = np.float32 
 
 
-def get_transpose_dtype(values, real_dtype=REAL_DTYPE, cplx_dtype=CPLX_DTYPE):
-    nbeam = values.nbeams
-    nt = values.nt
-    nant = values.nant_valid
+def get_transpose_dtype(info, real_dtype=REAL_DTYPE, cplx_dtype=CPLX_DTYPE):
+    nbeam = info.nbeams
+    nt = info.nt
+    nant = info.nant_valid
     nc = NCHAN*NFPGA
-    vis_fscrunch = values.vis_fscrunch
-    vis_tscrunch = values.vis_tscrunch
+    vis_fscrunch = info.vis_fscrunch
+    vis_tscrunch = info.vis_tscrunch
     npol = 1 # card averager always averagers pol
     dt = craco.card_averager.get_averaged_dtype(nbeam, nant, nc, nt, npol, vis_fscrunch, vis_tscrunch, real_dtype, cplx_dtype)
     return dt
@@ -337,7 +338,7 @@ def proc_rx_get_headers(proc):
     proc.ccap = ccap
     return all_hdrs
 
-def proc_rx_get_fid0(proc):
+def proc_rx_get_fid0(proc:Processor):
     #all_hdrs = world.bcast(all_hdrs, root=0)
     #info = MpiObsInfo(all_hdrs, pipe_info)
     #log.info('got info')
@@ -356,10 +357,11 @@ def proc_rx_get_fid0(proc):
     assert pipe_info.mpi_app.app_comm.Get_size() == nrx
 
     dummy_packet = np.zeros((NCHAN*nbeam, ccap.merger.ntpkt_per_frame), dtype=ccap.merger.dtype)
-    log.info('made packet %s this is a thing', dummy_packet.shape)
+    log.info('made dummy packet %s this is a thing', dummy_packet.shape)
     rsout = os.path.join(pipe_info.values.outdir, f'rescale/b{ccap.block:02d}/c{ccap.card:02d}/') if pipe_info.values.save_rescale else None
 
     averager = Averager(nbeam, nant, nc, nt, npol_in, values.vis_fscrunch, values.vis_tscrunch, REAL_DTYPE, CPLX_DTYPE, dummy_packet, values.flag_ants, rescale_output_path=rsout)
+    injector = PacketInjector(averager, info)
     log.info('made averager')
     dtype = get_transpose_dtype(info)
     
@@ -378,6 +380,7 @@ def proc_rx_get_fid0(proc):
 
     proc.transposer = transposer
     proc.averager = averager
+    proc.injector = injector
     
     fid0 = ccap.start()
     # send fid0 to all beams
@@ -390,6 +393,7 @@ def proc_rx_run(proc):
     ccap = proc.ccap
     info = proc.obs_info
     averager = proc.averager
+    injector = proc.injector
     transposer = proc.transposer
     cardidx = proc.pipe_info.mpi_app.cardid
     
@@ -423,14 +427,18 @@ def proc_rx_run(proc):
                 assert pkt is None or pktfid == expected_fid, f'FID did not match expected ibuf {ibuf} . Expected {expected_fid} but got {pktfid}'
             timer.tick('check fids')
 
-        if test_mode == 'none':
-            averaged = averager.accumulate_packets(packets)
+        if test_mode == 'none':            
+            data, valid = packets_to_data(packets, averager.dummy_packet)
+            timer.tick('packets to data')
+            injector.inject(data, valid)
+            timer.tick('inject')
+            averaged = averager.accumulate_all(data, valid)
+            timer.tick('accumulate')
             #if ibuf == 0:
                 #np.save(f'iblk0_cardid{cardidx:02d}_packets.npz', packets, allow_pickle=True)
                 #np.save(f'iblk0_cardid{cardidx:02d}_averaged.npz', averaged, allow_pickle=True)
                 #timer.tick('saveaverage')
 
-            timer.tick('average')
         elif test_mode == 'fid':
             fidnos = np.array([0 if pkt is None else fid for pkt, fid in zip(packets, fids)])
             averaged['ics'] = np.repeat(fidnos, 4)[np.newaxis, np.newaxis, :]
@@ -580,7 +588,9 @@ def transpose_beam_run(proc:Processor):
         
     proc_comm = pipe_info.mpi_app.beamproc_comm
     assert proc_comm.rank == 0, 'Expected to be rank 0'
-    ring_buffer = MpiRingBufferManager(proc_comm, NPROC_RING_SLOTS)
+    # if we're reading from files it can go to fast. So we block so it doesn't go too fast.
+    blocking = pipe_info.values.cardcap_dir is not None
+    ring_buffer = MpiRingBufferManager(proc_comm, NPROC_RING_SLOTS, block=blocking)
     curr_blk = ring_buffer.open_write()
 
 
@@ -595,14 +605,11 @@ def transpose_beam_run(proc:Processor):
 
 
     # Make make fake data to get vis_accum to compile. *sig*
+    log.info('Transpose data type=%s nbl=%s, nf=%s nt=%s vs_tscrunch=%s vis_fscrunch=%s', dtype_complex, nbl, nf, nt, values.vis_tscrunch, values.vis_fscrunch)
     vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, values.vis_tscrunch, values.vis_fscrunch,
                                           comm=proc_comm, nblocks=NPROC_RING_SLOTS)
     vis_accum.compile(vis_block_complex)
-    
-
-    beam_proc_rank = pipe_info.mpi_app.BEAMPROC_RANK
-    beam_comm = pipe_info.mpi_app.beam_chain_comm
 
     # requested block to planner to get moving
 
@@ -668,7 +675,7 @@ def transpose_beam_run(proc:Processor):
             t.tick('accumulate')
             if vis_accum.is_full:
                 # Send asynchronously. It should finish by the time we get the next frame.
-                #vis_accum_send_req = beam_comm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
+                #vis_accum_send_req = beam_commm.Isend(vis_accum.mpi_msg, dest=beam_proc_rank)
                 vis_accum.finalise_weights(iblk=curr_blk)
                 t.tick('finalise weights')
                 vis_accum.scrunched_ics.T.tofile(ics_scrunch_filterbank.fout.fin)

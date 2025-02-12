@@ -20,6 +20,7 @@ from craco.cardcapmerger import CcapMerger
 from craco.prep_scan import ScanPrep
 from craco.metadatafile import MetadataFile,MetadataDummy
 from craft.craco import ant2bl, baseline_iter
+from craco.mpi_appinfo import MpiPipelineInfo
 
 
 log = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class MpiObsInfo:
     Gets headers from everyone and tells everyone what they need to know
     uses lots of other classes in a hacky way to interpret the headers, and merge of the headers
     '''
-    def __init__(self, hdrs, pipe_info):
+    def __init__(self, hdrs, pipe_info:MpiPipelineInfo):
         '''
         '''
         self.pipe_info = pipe_info

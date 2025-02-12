@@ -288,7 +288,7 @@ class SearchPipelineSink:
             vis = pipeline_data['vis']
             bl_weights = pipeline_data['bl_weights']
             tf_weights = pipeline_data['tf_weights']
-            summarise_input = False
+            summarise_input = True
 
             # this can take a long time, especially on a slow node - like 1000ms
             if summarise_input:

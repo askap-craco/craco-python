@@ -318,7 +318,7 @@ class Pipeline:
 
 
                 
-        # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
+        
         log.info('Allocating FDMT Input')
 
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
@@ -1172,6 +1172,8 @@ class PipelineWrapper:
         }
 
         os.makedirs(values.outdir, exist_ok=True)
+        self.beamdir = os.path.join(values.outdir, f'beam{beamid:02d}')
+        os.makedirs(self.beamdir, exist_ok=True)
 
         if values.phase_center_filterbank is None:
             self.pc_filterbank = None
@@ -1283,7 +1285,7 @@ class PipelineWrapper:
             input_flat_cal = self.fast_preprocessor.output_buf
 
         if do_dump(values.dump_input, iblk):
-            input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+            input_flat_cal.dump(os.path.join(self.beamdir, f'input_iblk{iblk}.npy'))# Saves as a pickle load with np.load(allow_pickle=True)
             t.tick('dump input')
         
         if values.injection_file:
@@ -1294,6 +1296,7 @@ class PipelineWrapper:
             d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
+            pc_filterbank.fin.flush()
             t.tick('PC filterbank')
 
         p.prepare_inbuf(input_flat_cal, values)
@@ -1334,25 +1337,25 @@ class PipelineWrapper:
 
         # must be after running pipeline otehrwise you copy old data from card into host memory before you dump!
         if do_dump(values.dump_uvdata, iblk): 
-            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
+            p.inbuf.saveto(os.path.join(self.beamdir, f'uv_data_iblk{iblk}.npy'))
             t.tick('dump uv')
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
-            p.candidates.saveto(f'candidate_buf_iblk{iblk}.npy') # also save whole buffer because  ... debugging
+            p.candidates.saveto(os.path.join(self.beamdir, f'candidate_buf_iblk{iblk}.npy')) # also save whole buffer because  ... debugging
             t.tick('dump candidates')
         if do_dump(values.dump_mainbufs, iblk):
             for ib, mainbuf in enumerate(p.all_mainbufs):
-                mainbuf.saveto(f'mainbuf_iblk{iblk}_ib{ib}.npy')
+                mainbuf.saveto(os.path.join(self.beamdir, f'mainbuf_iblk{iblk}_ib{ib}.npy'))
 
             t.tick('dump mainbuf')
 
         if do_dump(values.dump_fdmt_hist_buf, iblk):
-            p.fdmt_hist_buf.saveto(f'fdmt_hist_buf_iblk{iblk}.npy')
+            p.fdmt_hist_buf.saveto(os.path.join(self.beamdir, f'fdmt_hist_buf_iblk{iblk}.npy'))
             t.tick('dump fdmt hist')
 
         if do_dump(values.dump_boxcar_hist_buf, iblk):
-            p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
+            p.boxcar_history.saveto(os.path.join(self.beamdir, f'boxcar_hist_iblk{iblk}.npy'))
             t.tick('dump boxcar')
 
         logging.info('Write for iblk %d timer: %s', iblk, t)
