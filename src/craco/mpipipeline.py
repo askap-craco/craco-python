@@ -404,6 +404,10 @@ def proc_rx_run(proc):
     t_start = MPI.Wtime()
     timer = Timer()
     
+    save_packets = False
+    if save_packets:
+        carddir = os.path.join(proc.pipe_info.values.outdir, 'cards', f'{cardidx:02d}')
+        os.makedirs(carddir, exist_ok=True)
 
     for ibuf, (packets, fids) in enumerate(pktiter):
         timer.tick('read')
@@ -432,8 +436,13 @@ def proc_rx_run(proc):
             timer.tick('packets to data')
             injector.inject(data, valid)
             timer.tick('inject')
-            averaged = averager.accumulate_all(data, valid)
+            if save_packets:                
+                np.savez(os.path.join(carddir, f'packets_cardid{cardidx:02d}_iblk{ibuf:03d}.npz'),
+                          data=np.array(data), valid=valid, fids=fids)                
+                timer.tick('savepackets')
+            averaged = averager.accumulate_all(data,pkt valid)
             timer.tick('accumulate')
+
             #if ibuf == 0:
                 #np.save(f'iblk0_cardid{cardidx:02d}_packets.npz', packets, allow_pickle=True)
                 #np.save(f'iblk0_cardid{cardidx:02d}_averaged.npz', averaged, allow_pickle=True)
