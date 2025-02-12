@@ -111,7 +111,7 @@ class SyntheticVisSource:
         self.packets = [[np.zeros((NBEAM*NCHAN, self.merger.ntpkt_per_frame), dtype=self.merger.dtype) for f in range(NFPGA)] for c in range(ncache)]
         for cache in self.packets:
             for pkt in cache:
-                pkt[...] = np.random.randn(*pkt.shape)*8000
+                pkt['data'] = np.random.randn(*pkt['data'].shape)*1000
 
         self.__icache = 0
     
@@ -127,6 +127,8 @@ class SyntheticVisSource:
 
         while True:            
             packets = self.packets[self.__icache]
+            # make a copy of the packets so we can modify with injections
+            packets = [p.copy() for p in packets]
             
             for d in packets:
                 #d['data'] = (np.random.randn(*d['data'].shape)*50).astype(np.int16)
