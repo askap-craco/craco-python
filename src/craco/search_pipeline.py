@@ -1313,7 +1313,7 @@ class PipelineWrapper:
         out_cands = None
 
         if self.parallel_mode and self.doing_dumps:
-            log.info('Sleepign for 2 seconds as were dumping data but running in parallel mode so we should wait')
+            log.info('Sleeping for 2 seconds as were dumping data but running in parallel mode so we should wait')
             time.sleep(2)
 
         if len(candidates) > 0:
