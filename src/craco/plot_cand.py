@@ -127,6 +127,7 @@ def _main():
     parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
     parser.add_argument('--newfig', action='store_true', help='Start new figure for each file')
+    parser.add_argument('--raw-units', action='store_true', help='Use raw units')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -137,6 +138,15 @@ def _main():
 
     fig, ax = pylab.subplots(2,2)
     tolerance = 3
+
+    if values.raw_units:
+        snfields = ('rawsn', 'rawsn')
+        dmfields = ('dm','idm')
+        tfields = ('total_sample', 'total_sample')
+    else:
+        snfields = ('snr', 'S/N')
+        dmfields = ('dm_pccm3', 'DM (pc/cm3)')
+        tfields = ('obstime_sec', 'Obstime (sec)')
 
     for ifile, f in enumerate(values.files):
         if ifile >= 1 and values.newfig:
@@ -166,21 +176,21 @@ def _main():
         candvt = ax[1,0]
         candimg = ax[1,1]
 
-        snhist.hist(c['snr'], histtype='step', bins=50)
-        snhist.set_xlabel('S/N')
+        snhist.hist(c[snfields[0]], histtype='step', bins=50)
+        snhist.set_xlabel(snfields[1])
         snhist.set_ylabel('count')
 
-        dmhist.hist(c['dm_pccm3'], histtype='step', bins=50)
-        dmhist.set_xlabel('DM (pc/cm3)')
+        dmhist.hist(c[dmfields[0]], histtype='step', bins=50)
+        dmhist.set_xlabel(dmfields[1])
         dmhist.set_ylabel('count')
 
-        ms = c['snr']**2 * values.sn_gain
+        ms = c[snfields[0]]**2 * values.sn_gain
 
-        points1 = candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms, picker=tolerance)
+        points1 = candvt.scatter(c[tfields[0]], c[dmfields[0]]+1, s=ms, picker=tolerance)
         all_artists.append(CandfileArtist(candfile, points1))
         candvt.set_yscale('log')
-        candvt.set_xlabel('Obstime (sec)')
-        candvt.set_ylabel('1+DM (pc/cm3)')
+        candvt.set_xlabel(tfields[1])
+        candvt.set_ylabel(f'1+{dmfields[1]}')
 
         if values.pixel is None:
             points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
@@ -195,10 +205,10 @@ def _main():
             candimg.set_xlabel('RA (deg)')
             candimg.set_ylabel('Dec (deg)')
         else:
-            line = candimg.plot(c['obstime_sec'], c['snr'], picker=tolerance, ls='-', marker='o')
+            line = candimg.plot(c[tfields[0]], c[snfields[0]], picker=tolerance, ls='-', marker='o')
             all_artists.append(CandfileArtist(candfile, line))
-            candimg.set_xlabel('Obstime (sec)')
-            candimg.set_ylabel('S/N')
+            candimg.set_xlabel(tfields[0])
+            candimg.set_ylabel(snfields[1])
 
 
 
