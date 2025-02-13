@@ -440,7 +440,8 @@ def proc_rx_run(proc):
                 np.savez(os.path.join(carddir, f'packets_cardid{cardidx:02d}_iblk{ibuf:03d}.npz'),
                           data=np.array(data), valid=valid, fids=fids)                
                 timer.tick('savepackets')
-            averaged = averager.accumulate_all(data,pkt valid)
+                
+            averaged = averager.accumulate_all(data, valid)
             timer.tick('accumulate')
 
             #if ibuf == 0:
