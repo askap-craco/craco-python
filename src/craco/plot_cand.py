@@ -176,18 +176,25 @@ def _main():
         candvt.set_xlabel('Obstime (sec)')
         candvt.set_ylabel('1+DM (pc/cm3)')
 
-        points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
-        all_artists.append(CandfileArtist(candfile, points2))
-        
-        dec = c['dec_deg']
-        ra = c['ra_deg']
-        if len(c) == 0:
-            print(f, 'is empty')
-        else:
-            print(f, 'decrange', dec.max() - dec.min(), 'rarange', ra.max() - ra.min())
+        if values.pixel is None:
+            points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
+            all_artists.append(CandfileArtist(candfile, points2))            
+            dec = c['dec_deg']
+            ra = c['ra_deg']
+            if len(c) == 0:
+                print(f, 'is empty')
+            else:
+                print(f, 'decrange', dec.max() - dec.min(), 'rarange', ra.max() - ra.min())
 
-        candimg.set_xlabel('RA (deg)')
-        candimg.set_ylabel('Dec (deg)')
+            candimg.set_xlabel('RA (deg)')
+            candimg.set_ylabel('Dec (deg)')
+        else:
+            line = candimg.plot(c['obstime_sec'], c['snr'], picker=tolerance, ls='-', marker='o')
+            all_artists.append(CandfileArtist(candfile, line))
+            candimg.set_xlabel('Obstime (sec)')
+            candimg.set_ylabel('S/N')
+
+
 
         fig.tight_layout()
 
