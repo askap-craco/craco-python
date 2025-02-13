@@ -126,6 +126,7 @@ def _main():
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
     parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
+    parser.add_argument('--newfig', action='store_true', help='Start new figure for each file')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -137,7 +138,12 @@ def _main():
     fig, ax = pylab.subplots(2,2)
     tolerance = 3
 
-    for f in values.files:
+    for ifile, f in enumerate(values.files):
+        if ifile >= 1 and values.newfig:
+            fig, ax = pylab.subplots(2,2)
+            all_artists[:] = []
+            
+        fig.suptitle(f)
         c = load_cands(f)
         print(f'Loaded {len(c)} candidates from {f}')
         
