@@ -38,13 +38,17 @@ stopped = False
 do_calibration = None
 obsparams = None
 
+def is_parset_specified(obsparams, key):
+    v = obsparams.get_value(key, '')
+    return v != '' and v != 'None' and v != 'default'
+
 def get_param_with_default(obsparams, key, default_value):
     '''
     Gets key from obsparams with get_value. If value is not specified or equals
     '', 'None' or 'default' returns the default value. Otherwise returns the default value
     '''
     v = obsparams.get_value(key, '')
-    if v == '' or v == 'None' or v == 'default':
+    if is_parset_specified(obsparams, key):
         v = default_value
     
     return v
@@ -168,7 +172,8 @@ def _main():
 
 
     calibration = '' if do_calibration else f'--calibration {calpath}'
-    uvfits_required = obsparams.get_value('craco.uvfits.int_time_exp', '').strip() != ''
+    
+    uvfits_required = is_parset_specified(obsparams, 'craco.uvfits.int_time_exp')
     int_time_exp = int(get_param_with_default(obsparams, 'craco.uvfits.int_time_exp', values.int_time_exp))
     
     if do_calibration:
