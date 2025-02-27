@@ -104,7 +104,12 @@ def cand2str(c):
 all_artists = []
 def on_pick(event):
     # shoudl just return one thing
-    candf= next(filter(lambda x: x.artist == event.artist, all_artists))
+    try:
+        candf= next(filter(lambda x: x.artist == event.artist, all_artists))
+    except StopIteration:
+        print(f'Could not find artist {event} {event.artist}, {all_artists}')
+        return
+
     candfile = candf.candfile
 #    print('Artist picked:', event.artist)
 #    print(f'{len(ind)} vertices picked:{ind}')
@@ -124,6 +129,7 @@ def _main():
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
+    parser.add_argument('-w','--boxcwidth', help='Boxcar with to filter by', type=int)
     parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
     parser.add_argument('--newfig', action='store_true', help='Start new figure for each file')
@@ -154,7 +160,7 @@ def _main():
             all_artists[:] = []
             
         fig.suptitle(f)
-        c = load_cands(f)
+        c = load_cands(f, maxcount=values.maxcount)
         print(f'Loaded {len(c)} candidates from {f}')
         
         if values.threshold is not None:
@@ -166,6 +172,10 @@ def _main():
 
         if values.dm is not None:
             c = c[c['dm'] == values.dm]
+
+        if values.boxcwidth is not None:
+            c = c[c['boxc_width'] == values.boxcwidth]
+            
             
         if len(c) == 0:
             print(f'{f} contained no candidates after applying thresholds')
