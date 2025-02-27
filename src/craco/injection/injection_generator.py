@@ -43,19 +43,19 @@ def dm0_pc_regular(nbeam:int, nbl:int, nc:int, delta_t:int=256, delta_beam:int=1
     
     # DM 0 pulse at t=0
     tfmap = np.zeros((nc, 1), dtype=np.float32) 
-    tfmap[::2,0] = amplitude
+    tfmap[::,0] = amplitude
     
     tstart = 0
     while True:
         for ibeam in range(nbeam):
-            chan_delays[ibeam,:] = tstart + ibeam*delta_beam
+            chan_delays[ibeam,:] = tstart + ibeam*delta_beam + start_t
 
         yield Injection(phasors, chan_delays, tfmap)
         tstart += delta_t
 
 
 def get_injector(info):
-    return dm0_pc_regular(36, 465, NFPGA*NCHAN, delta_t=256, delta_beam=1, amplitude=1, start_t=254)
+    return dm0_pc_regular(36, 465, NFPGA*NCHAN, delta_t=256, delta_beam=1, amplitude=10*3, start_t=247)
 
 def _main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter

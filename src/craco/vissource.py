@@ -108,10 +108,14 @@ class SyntheticVisSource:
         self._filesource = CardCapFileSource(pipe_info)
         self.merger = self._filesource.merger
         
+        # Seed the RNG with the cardid
+        cardid = pipe_info.cardid
+        rng = np.random.default_rng(seed=cardid)
+        
         self.packets = [[np.zeros((NBEAM*NCHAN, self.merger.ntpkt_per_frame), dtype=self.merger.dtype) for f in range(NFPGA)] for c in range(ncache)]
         for cache in self.packets:
             for pkt in cache:
-                pkt['data'] = np.random.randn(*pkt['data'].shape)*1000
+                pkt['data'] = rng.standard_normal(pkt['data'].shape) * 1000
 
         self.__icache = 0
     

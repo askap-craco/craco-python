@@ -251,7 +251,7 @@ class VisblockAccumulatorStruct:
         return self.t == self.nt
     
     def finalise_weights(self, iblk):
-        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool))
+        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool), time_threshold=2500)
         self.pipeline_data_array[iblk]['tf_weights'] *= self.ics_weights
 
     
