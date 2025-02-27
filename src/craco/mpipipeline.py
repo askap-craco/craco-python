@@ -434,8 +434,8 @@ def proc_rx_run(proc):
         if test_mode == 'none':            
             data, valid = packets_to_data(packets, averager.dummy_packet)
             timer.tick('packets to data')
-            injector.inject(data, valid)
-            timer.tick('inject')
+            #injector.inject(data, valid)
+            #timer.tick('inject')
             if save_packets:                
                 np.savez(os.path.join(carddir, f'packets_cardid{cardidx:02d}_iblk{ibuf:03d}.npz'),
                           data=np.array(data), valid=valid, fids=fids)                
