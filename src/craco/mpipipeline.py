@@ -572,7 +572,7 @@ def transpose_beam_run(proc:Processor):
     assert numprocs ==  nbeam, f'Invalid MPI setup numprocs={numprocs} nrx={nrx} nbeam={nbeam} expected {nrx + nbeam}'
 
     if pipe_info.mpi_app.app_rank == 0:
-        print(f'ObsInfo {info}')
+        log.info(f'ObsInfo {info}')
 
     os.makedirs(values.outdir, exist_ok=True)
 
@@ -707,7 +707,7 @@ def transpose_beam_run(proc:Processor):
 
 
     finally:
-        print(f'Closing beam files for {beamid}')
+        log.info(f'Closing beam files for {beamid}')
         #cas_filterbank.close()
         ics_filterbank.close()        
         vis_accum.close()
