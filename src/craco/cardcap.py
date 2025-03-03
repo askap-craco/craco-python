@@ -479,7 +479,7 @@ class FpgaCapturer:
             d['bat'][0] = fid
             d['frame_id'][0][0] = fid
             d = self.post_process(d)
-            log.info(f'Sending fake data iblk={iblk} fid={fid} d={d["data"][:4]}')
+            #log.info(f'Sending fake data iblk={iblk} fid={fid} d={d["data"][:4]}')
             fid += NSAMP_PER_FRAME
             
             yield fid, d
@@ -1038,7 +1038,7 @@ def add_arguments(parser):
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
     parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=None)
-    parser.add_argument('--fake-cardcap-data', help='If running network cardcap, dont actually start, but send fake cardcap data instead', action='store_true', default=False)
+    parser.add_argument('--fake-cardcap-data', help='If running network cardcap, dont actually start, but send fake cardcap data instead', action='store_true', default=None)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')

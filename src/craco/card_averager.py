@@ -154,7 +154,7 @@ def accumulate_all(output, rescale_scales, rescale_stats, count, nant, beam_data
     nc_per_fpga = 4
     #npkt_per_accum = npkt // (nbeam * nc_per_fpga)
     dshape = beam_data[0].shape
-    print(type(beam_data), len(beam_data), type(beam_data[0]), beam_data[0].shape, beam_data[0].dtype)
+    #print(type(beam_data), len(beam_data), type(beam_data[0]), beam_data[0].shape, beam_data[0].dtype)
 
     assert len(dshape) == 2 # expected (nmsgs, npkt_per_accum)
     nmsgs = dshape[0]
