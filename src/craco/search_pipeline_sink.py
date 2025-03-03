@@ -266,7 +266,7 @@ class SearchPipelineSink:
         Also updates plan if necessary
         '''
         t = Timer()
-        save_pipeline_data = True
+        save_pipeline_data = False
         if save_pipeline_data:
             pth = os.path.join(self.info.beam_dir, f'pipeline_data_{self.iblk}.npy')
             np.save(pth, pipeline_data)
@@ -296,7 +296,7 @@ class SearchPipelineSink:
             vis = pipeline_data['vis']
             bl_weights = pipeline_data['bl_weights']
             tf_weights = pipeline_data['tf_weights']
-            summarise_input = True
+            summarise_input = False
 
             # this can take a long time, especially on a slow node - like 1000ms
             if summarise_input:
