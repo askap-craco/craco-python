@@ -166,7 +166,7 @@ def allocate_shared_buffer(dt, nblocks, comm):
 
 
 class VisblockAccumulatorStruct:
-    def __init__(self, nbl:int, nf:int, nt:int, vis_tscrunch:int=1, vis_fscrunch:int=1, comm=None, nblocks=1):
+    def __init__(self, nbl:int, nf:int, nt:int, vis_tscrunch:int=1, vis_fscrunch:int=1, comm=None, nblocks:int=1, ics_time_threshold:int=5):
         '''
         If comm is not None, alocates a shared memory buffer
         '''
@@ -197,6 +197,7 @@ class VisblockAccumulatorStruct:
                         self.pipeline_data_array.size, 
                         self.mpi_dtype]
         self.nblocks = nblocks
+        self.ics_time_threshold = ics_time_threshold
         self.reset() # set bl_weights to True - otherwise preprocess fails with zerodivisionerror
 
     def compile(self, vis_block):
@@ -251,7 +252,7 @@ class VisblockAccumulatorStruct:
         return self.t == self.nt
     
     def finalise_weights(self, iblk):
-        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool), time_threshold=2500)
+        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool), time_threshold=self.ics_time_threshold)
         self.pipeline_data_array[iblk]['tf_weights'] *= self.ics_weights
 
     

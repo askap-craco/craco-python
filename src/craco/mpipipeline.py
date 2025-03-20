@@ -618,7 +618,7 @@ def transpose_beam_run(proc:Processor):
     log.info('Transpose data type=%s nbl=%s, nf=%s nt=%s vs_tscrunch=%s vis_fscrunch=%s', dtype_complex, nbl, nf, nt, values.vis_tscrunch, values.vis_fscrunch)
     vis_block_complex = VisBlock(beam_data_complex['vis'], iblk, info, cas=beam_data['cas'], ics=beam_data['ics'])
     vis_accum = VisblockAccumulatorStruct(nbl, nf, nt, values.vis_tscrunch, values.vis_fscrunch,
-                                          comm=proc_comm, nblocks=NPROC_RING_SLOTS)
+                                          comm=proc_comm, nblocks=NPROC_RING_SLOTS, ics_time_threshold=values.ics_dm0_time_threshold)
     vis_accum.compile(vis_block_complex)
 
     # requested block to planner to get moving
@@ -1128,6 +1128,7 @@ def get_parser():
     parser.add_argument('--proc-type', help='Process type')
     parser.add_argument('--trigger-threshold', help='Threshold for trigger to send for voltage dump', type=float, default=9.0)
     parser.add_argument('--uvfits-tscrunch', help='Factor to tscrunch uvfits writing by', type=int, default=1)
+    parser.add_argument('--ics-dm0-time-threshold', help='Threshold for DM0 ICS time-based flagging', type=float, default=5)
     parser.add_argument(dest='files', nargs='*')
     
     parser.set_defaults(verbose=False)
