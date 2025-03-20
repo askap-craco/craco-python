@@ -48,7 +48,7 @@ def get_param_with_default(obsparams, key, default_value):
     '', 'None' or 'default' returns the default value. Otherwise returns the default value
     '''
     v = obsparams.get_value(key, '')
-    if is_parset_specified(obsparams, key) or v == '':
+    if not is_parset_specified(obsparams, key) or v == '':
         v = default_value
     
     return v
