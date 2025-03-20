@@ -286,20 +286,41 @@ class ScanArchiver:
 
 def get_parser():
     a = argparse.ArgumentParser()
-    a.add_argument("-sbid", type=str, help="SBID", required=True)
-    a.add_argument("-scanid", type=str, help="scanid", required=True)
-    a.add_argument("-tstart", type=str, help="tstart", required=True)
-    a.add_argument("-dest", type=str, help="Destination string (hostname:/path/to/dest) - acacia:GSPs/AS400/", required=True)
+    a.add_argument("-sbid", type=str, help="SBID", required=False)
+    a.add_argument("-scanid", type=str, help="scanid", required=False)
+    a.add_argument("-tstart", type=str, help="tstart", required=False)
+    a.add_argument("-dest", type=str, help="Destination string (hostname:/path/to/dest) - acacia:as305/", required=True)
     a.add_argument("-exclude_uvfits", action='store_true', help="Exclude uvfits (def:False)", default=False)
     a.add_argument("-dry", action='store_true', help="Do a dry run only (def:False)", default=False)
-
+    a.add_argument('dirnames', nargs='*', help='Directory names of the scan')
+    
     args = a.parse_args()
     return args
 
 def main():
     args = get_parser()
-    sa = ScanArchiver(args.sbid, args.scanid, args.tstart, args.dest, args.exclude_uvfits)
-    sa.run(dry = args.dry)
+    if args.dirnames is None or len(args.dirnames) == 0:
+        targets = [args.sbid, args.scanid, args.tstart]
+    else:
+        targets = []
+        for dirname in args.dirnames:
+            if not os.path.isdir(dirname):
+                log.info('%s is not a directory. skipping', dirname)
+                continue
+            if dirname.endswith('/'):
+                dirname = dirname[:-1]
+            bits = dirname.split('/')
+            print(len(bits), dirname, bits)
+            # dirname should look like this /../../../SB071974/scans/00/20250319001933
+            # possibly with trailing slash
+            sbid, scanid, tstart = bits[-4], bits[-2], bits[-1]
+            assert bits[-3] == 'scans', f'Directory name should be a scan directory. Was: {dirname}'
+            targets.append([sbid, scanid, tstart])
+
+    
+    for sbid, scanid, tstart in targets:
+        sa = ScanArchiver(sbid, scanid, tstart, args.dest, args.exclude_uvfits)
+        sa.run(dry = args.dry)
 
 if __name__ == '__main__':
     main()
