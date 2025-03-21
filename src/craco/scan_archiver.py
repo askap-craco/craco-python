@@ -300,7 +300,7 @@ def get_parser():
 def main():
     args = get_parser()
     if args.dirnames is None or len(args.dirnames) == 0:
-        targets = [args.sbid, args.scanid, args.tstart]
+        targets = [[args.sbid, args.scanid, args.tstart]]
     else:
         targets = []
         for dirname in args.dirnames:
