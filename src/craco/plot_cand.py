@@ -129,6 +129,8 @@ def _main():
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
+    parser.add_argument('--dmgt', help='DM  > to filter for', type=float)
+
     parser.add_argument('-w','--boxcwidth', help='Boxcar with to filter by', type=int)
     parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
@@ -172,6 +174,9 @@ def _main():
 
         if values.dm is not None:
             c = c[c['dm'] == values.dm]
+
+        if values.dmgt is not None:
+            c = c[c['dm'] == values.dmgt]
 
         if values.boxcwidth is not None:
             c = c[c['boxc_width'] == values.boxcwidth]
