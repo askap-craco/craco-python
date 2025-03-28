@@ -76,6 +76,19 @@ def _main():
     cmplxplot(d[bl,:,:], title=f'Baseline {bl}', xlabel='chan', ylabel='t') # baseline
 
     cmplxplot(d.mean(axis=2), title='sample average', xlabel='chan', ylabel='bl')
+    
+    pylab.figure()
+    pylab.plot(abs(d.mean(axis=2)).T) # sample average
+    pylab.title('Sample average')
+    pylab.figure()
+    pylab.plot(abs(d.mean(axis=(0,2)).T)) # averag spectrum
+    pylab.title('Average spectrum')
+    pylab.figure()
+    pylab.plot(abs(d).std(axis=2).T) # sample std
+    pylab.title('sample std')
+    pylab.plot()
+               
+
 
 
     pylab.show()
