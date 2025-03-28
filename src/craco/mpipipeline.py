@@ -507,7 +507,7 @@ def proc_rx_run(proc):
 
 
 class FilterbankSink:
-    def __init__(self, prefix, vis_source, fscrunch:int=1, nbits:int=32):
+    def __init__(self, prefix, vis_source, fscrunch:int=1, nbits:int=32, tscrunch:int=1):
         values = vis_source.values
         beamid = vis_source.pipe_info.beamid
         fname = os.path.join(values.outdir, f'{prefix}_b{beamid:02d}.fil')
@@ -519,7 +519,7 @@ class FilterbankSink:
                'src_raj_deg':pos.ra.deg,
                'src_dej_deg':pos.dec.deg,
                'tstart':vis_source.tstart.utc.mjd,
-               'tsamp':vis_source.inttime.to(u.second).value,
+               'tsamp':vis_source.inttime.to(u.second).value*tscrunch,
                'fch1':vis_source.fch1 + vis_source.foff*(fscrunch - 1)/2,
                'foff':vis_source.foff*fscrunch,
                'source_name':vis_source.target
@@ -584,9 +584,9 @@ def transpose_beam_run(proc:Processor):
 
     #cas_filterbank = FilterbankSink('cas',info)
     ics_filterbank = FilterbankSink('ics',info)
-    ics_scrunch_filterbank = FilterbankSink('ics_scrunch',info, values.vis_fscrunch)
-    ics_weights_filterbank = FilterbankSink('ics_weights',info, values.vis_fscrunch, nbits=8)
-    tf_weights_filterbank = FilterbankSink('tf_weights',info, values.vis_fscrunch, nbits=8)
+    ics_scrunch_filterbank = FilterbankSink('ics_scrunch',info, values.vis_fscrunch, tscrunch=values.vis_tscrunch)
+    ics_weights_filterbank = FilterbankSink('ics_weights',info, values.vis_fscrunch, nbits=8, tscrunch=values.vis_tscrunch)
+    tf_weights_filterbank = FilterbankSink('tf_weights',info, values.vis_fscrunch, nbits=8, tscrunch=values.vis_tscrunch)
 
 
     if values.fcm is None or beamid not in info.values.save_uvfits_beams:

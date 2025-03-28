@@ -143,7 +143,7 @@ def write_ics(tstart:int, ics_data, all_ics):
                 otime = tstart + itime
                 all_ics[ochan, otime] = ics_data[irx, itime, ichan]
 
-@njit(cache=True)
+#@njit(cache=True)
 def scrunch_ics(tstart:int, ics_data, scrunched_ics, vis_tscrunch:int, vis_fscrunch:int):
     nrx, ics_nt, ics_nc = ics_data.shape
     for irx in range(nrx):
@@ -151,9 +151,11 @@ def scrunch_ics(tstart:int, ics_data, scrunched_ics, vis_tscrunch:int, vis_fscru
             chan = ichan + irx*ics_nc
             ochan = chan // vis_fscrunch
             for itime in range(ics_nt):                
-                otime = (itime + tstart) // vis_tscrunch
+                otime = tstart + itime // vis_tscrunch
                 din = ics_data[irx, itime, ichan]
                 scrunched_ics[ochan, otime] += din
+                if chan == 0:
+                    print(irx, ichan, itime, otime, ochan, din, scrunched_ics[ochan, otime])
 
 
 def allocate_shared_buffer(dt, nblocks, comm):
@@ -169,6 +171,7 @@ class VisblockAccumulatorStruct:
     def __init__(self, nbl:int, nf:int, nt:int, vis_tscrunch:int=1, vis_fscrunch:int=1, comm=None, nblocks:int=1, ics_time_threshold:int=5):
         '''
         If comm is not None, alocates a shared memory buffer
+        :nt: usually 256 - length of the output buffer
         '''
         self.vis_tscrunch = vis_tscrunch
         self.vis_fscrunch = vis_fscrunch
@@ -187,7 +190,7 @@ class VisblockAccumulatorStruct:
 
         self.scrunched_ics = np.zeros((nf,nt), dtype=np.float32) # scrunched version of ICS - used for DM0 flagging
         self.all_ics = np.zeros((nf*vis_fscrunch, nt*vis_tscrunch), dtype=np.float32)
-        self.ics_weights = np.zeros((nf,nt), dtype=bool)
+        self.ics_weights = np.ones((nf,nt), dtype=bool)
 
         self.dtype = dt
         self.t = 0
@@ -252,7 +255,7 @@ class VisblockAccumulatorStruct:
         return self.t == self.nt
     
     def finalise_weights(self, iblk):
-        get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool), time_threshold=self.ics_time_threshold)
+        #get_ics_masks(self.scrunched_ics, self.ics_weights.view(dtype=bool), time_threshold=self.ics_time_threshold)
         self.pipeline_data_array[iblk]['tf_weights'] *= self.ics_weights
 
     

@@ -26,7 +26,7 @@ from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
-from craco.preprocess import FastPreprocess
+from craco.preprocess import FastPreprocess, TAB_handler
 from craco.candidate_writer import CandidateWriter
 from craco import write_psf as PSF
 
@@ -1226,6 +1226,10 @@ class PipelineWrapper:
                                                 self.fixed_freq_weights, 
                                                 beamid = beamid,
                                                 sky_sub = True, global_norm = True)
+        
+        tabdir = os.path.join(values.outdir, f'beam{beamid:02d}','tabs')
+        target_corods = []
+        #self.tab_handler = TAB_handler(target_coords, plan, tabdir)
 
         self.pipeline = p
         p.clear_buffers(values)
