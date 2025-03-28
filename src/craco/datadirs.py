@@ -338,6 +338,8 @@ class CandDir:
 
     @property
     def cand_snippet_uvfits_path(self):
+        uvfitspath = self.scandir.beam_uvfits_path(self.beam)
+        if os.path.exists(uvfitspath): return uvfitspath
         return f"{self.cand_snippet_dir}/candidate.uvfits"
 
     @property
