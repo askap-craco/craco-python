@@ -39,8 +39,8 @@ fi
 cardcap --hostfile $hostfile --dump-rankfile $rankfile $@
 
 echo "Created rankfile $rankfile"
-
-commonargs="--mca oob_tcp_if_include eno8303 --mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll"
+# --mca oob_tcp_if_include eno8303 doesn't work if the interface doesn't exist
+commonargs="--mca oob_base_verbose $verbose --mca coll_hcoll_enable $enable_hcoll"
 ucxargs="--mca pml ucx -x UCX_TLS -x UCX_IB_GID_INDEX -x UCX_NET_DEVICES --mca pml_ucx_verbose $verbose"
 tcpargs="--mca pml ob1 --mca btl tcp,self" # --mca btl_tcp_if_include $ifaces"
 
