@@ -12,6 +12,7 @@ import os
 import sys
 import logging
 from craco import uvfits_meta
+from craco.calibration import load_gains
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ def _main():
     parser.add_argument('-b','--bl', type=int, default=0, help='Baseline to plot')
     parser.add_argument('-c','--chan', type=int, default=0, help='Chan to plot')
     parser.add_argument('-t','--sample', type=int, default=0, help='sample to plot')
+    parser.add_argument('--extra', action='store_true', help='Extra plots')
+    parser.add_argument('--calibration', help='Calibration file')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -76,18 +79,31 @@ def _main():
     cmplxplot(d[bl,:,:], title=f'Baseline {bl}', xlabel='chan', ylabel='t') # baseline
 
     cmplxplot(d.mean(axis=2), title='sample average', xlabel='chan', ylabel='bl')
-    
-    pylab.figure()
-    pylab.plot(abs(d.mean(axis=2)).T) # sample average
-    pylab.title('Sample average')
-    pylab.figure()
-    pylab.plot(abs(d.mean(axis=(0,2)).T)) # averag spectrum
-    pylab.title('Average spectrum')
-    pylab.figure()
-    pylab.plot(abs(d).std(axis=2).T) # sample std
-    pylab.title('sample std')
-    pylab.plot()
-               
+
+    if values.calibration:
+        gains, freqs = load_gains(values.calibration)
+        gains = gains.squeeze()
+        gains  = gains.mean(axis=2) # polsum
+        print(f'Loaded gains {gains.shape} {gains.dtype} {freqs.shape} from {values.calibration}')
+        cmplxplot(gains, title='Gains', xlabel='chan', ylabel='ant')
+
+    if values.extra:
+        
+        pylab.figure()
+        pylab.plot(abs(d.mean(axis=2)).T) # sample average
+        pylab.title('Sample average')
+        pylab.figure()
+        pylab.plot(abs(d.mean(axis=(0,2)).T), label='mean') # average spectrum
+        pylab.plot(d.real.std(axis=(0,2)).T, label='real std') # sample std
+        pylab.plot(d.imag.std(axis=(0,2)).T, label='imag std') # sample std
+
+        pylab.legend()
+
+
+        pylab.title('Average spectrum')
+
+
+                
 
 
 
