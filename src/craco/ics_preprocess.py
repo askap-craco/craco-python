@@ -77,7 +77,7 @@ def get_ics_masks(ics_data, new_tf_weights, subnt=128, nsubf = 8, zap_along_freq
                 t_mask = iqrm_mask(t_total, time_radius, time_threshold)[0]
                 new_tf_weights[:, tslice][:, t_mask] = False
     except Exception as e:
-        print(e)
+        #print(e)
         raise
         #IPython.embed()
 

@@ -63,7 +63,7 @@ def load_cands(sbid, scanid="*", tstart="*", beam=None, runname="results"):
 
 def parse_candpath(fname):
     sections = fname.strip().split("/")
-    print(sections)
+    #print(sections)
     assert sections[0] == "" and sections[1] == "CRACO" and sections[3] == "craco", f"Doesn't look like a correction path - {fname}"
     sbid = sections[4]
     scanid = sections[6]

@@ -143,7 +143,7 @@ def write_ics(tstart:int, ics_data, all_ics):
                 otime = tstart + itime
                 all_ics[ochan, otime] = ics_data[irx, itime, ichan]
 
-#@njit(cache=True)
+@njit(cache=True)
 def scrunch_ics(tstart:int, ics_data, scrunched_ics, vis_tscrunch:int, vis_fscrunch:int):
     nrx, ics_nt, ics_nc = ics_data.shape
     for irx in range(nrx):
@@ -154,8 +154,8 @@ def scrunch_ics(tstart:int, ics_data, scrunched_ics, vis_tscrunch:int, vis_fscru
                 otime = tstart + itime // vis_tscrunch
                 din = ics_data[irx, itime, ichan]
                 scrunched_ics[ochan, otime] += din
-                if chan == 0:
-                    print(irx, ichan, itime, otime, ochan, din, scrunched_ics[ochan, otime])
+                #if chan == 0:
+                #    print(irx, ichan, itime, otime, ochan, din, scrunched_ics[ochan, otime])
 
 
 def allocate_shared_buffer(dt, nblocks, comm):
