@@ -319,7 +319,8 @@ def main():
 
     
     for sbid, scanid, tstart in targets:
-        sa = ScanArchiver(sbid, scanid, tstart, args.dest, args.exclude_uvfits)
+        dest = args.dest.lower()
+        sa = ScanArchiver(sbid, scanid, tstart, dest, args.exclude_uvfits)
         sa.run(dry = args.dry)
 
 if __name__ == '__main__':
