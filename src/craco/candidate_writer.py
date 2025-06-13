@@ -159,7 +159,7 @@ class CandidateWriter:
         else:
             self.snr_multiplier = compute_dm_width_scaling(max_dm_samps, max_boxcar_width, freqs)
             # ignore widest boxcars
-            self.snr_multiplier[:,-1] = 0
+            #self.snr_multiplier[:,-1] = 0
             
         self.open_files()
         
