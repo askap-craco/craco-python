@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 from craco.cardcapfile import CardcapFile, NCHAN,NSAMP_PER_FRAME, NBEAM, get_fid0_from_bat_and_header
+from rdma_transport import TimeoutException
 from numba.types import List
 from craco.utils import get_target_beam
 from typing import List
@@ -47,6 +48,7 @@ def frame_id_iter(i, fid0, maxnframes=None):
     It will yield a block with the given frame id startign at fid0 and incrementing
     by fidoff
     if no block has the given frame ID, it will yield None
+    If it receives one timeout, it will continue to yield None for the rest of the time
     '''
 
     expected_frame_id = fid0
@@ -58,52 +60,63 @@ def frame_id_iter(i, fid0, maxnframes=None):
     curr_frameid = np.uint64(0)
     trace_file =  MpiTracefile.instance()
     nframes = 0
+    num_timeouts = 0
+
     while True:
         if maxnframes is not None and nframes >= maxnframes:
             log.info('Finished %s frames. Quitting', maxnframes)
             break
 
+        # only read from the sub iterator if we have not yet received the expected frame ID
+        # otherwise we're going to return None until we get the next expected frame ID
+        # if in the process of reading, we get a timeout, or we've received a timeout
+        # in the past, we'll just return None forever
         if curr_frameid < expected_frame_id:
             try:
-                curr_frameid, currblock = next(i)
+                if num_timeouts > 0: # already received timeout. Dont' read it again. 
+                    curr_frameid = expected_frame_id
+                    currblock = None
+                else:
+                    curr_frameid, currblock = next(i)
             except StopIteration:
                 break
+            except TimeoutException:
+                log.warning('Timeout reading frame_id=%d. fid0=%d nframes=%d Disabling card', expected_frame_id, fid0, nframes)
+                # if we get a timeout, we will just return None forever until the next expected frame ID
+                num_timeouts += 1
+                curr_frameid = expected_frame_id
+                currblock = None
 
-        curr_bat = currblock['bat'][0,0]
 
         # skipping frames earlier than fid0.
         # This lets us setup a time in advance so we can get settled before data starts
         # crashing into us 
         if curr_frameid < fid0:
             continue
-
     
-        if curr_frameid == expected_frame_id:
+        if curr_frameid == expected_frame_id: # got what we expected. But currblk None if we timed out
             b = currblock
-            log.debug('HIT frame_id=%d bat=%d', expected_frame_id, curr_bat)
-        else:
+            if currblock is not None:
+                curr_bat = currblock['bat'][0,0]
+                log.debug('HIT frame_id=%d bat=%d', expected_frame_id, curr_bat)
+        else: # missed a frame.
+            b = None # output block is none.
+
+            # log missed frame in various ways.
             nlost_frames = int(curr_frameid) - int(last_frameid)
             nlost_curr = curr_frameid - expected_frame_id
             log.info(f'MISS expected frame_id={expected_frame_id} current={curr_frameid} fidoffset ={fidoff} last_frameid={last_frameid} curr-last={nlost_frames} curr-expected={nlost_curr} BAT curr-last={curr_bat - last_bat} fid0={fid0}')
             ts = trace_file.now_ts()
-            #args = {'lost_frames':nlost_frames, 
-            #        'curr_minus_expected':nlost_curr, 
-             #       'expected_frame_id':expected_frame_id, 
-             #       'current_frameid':curr_frameid,
-              #      'last_frameid':last_frameid}
             args = {'lost_frames':nlost_frames}
             trace_file += tracing.InstantEvent('PacketLoss', ts)
             trace_file += tracing.CounterEvent('PacketLoss', ts, args)
-            b = None
 
 
         assert b is None or (curr_frameid == expected_frame_id), f'Logic error. Block should be none or Frame IDs should be equal. curr_frameid={curr_frameid} frameid={expected_frame_id} block is None?{b is None}'
         
         yield expected_frame_id, b
-        expected_frame_id += fidoff
-        
+        expected_frame_id += fidoff        
         last_frameid = curr_frameid
-        last_bat = curr_bat
         nframes += 1
 
 

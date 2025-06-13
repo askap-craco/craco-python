@@ -452,8 +452,14 @@ class FpgaCapturer:
         if nblk is None:
             nblk = self.values.num_msgs
 
+        # set timeout to 20 seconds while it's getting organised
+        # after that don't wait longer than 225 milliseconds
+        # on timeout it will throw an rdma_transport.TimeoutException
+        self.rx.timeoutMillis = 20*1000 
+
         while iblk < nblk:
             for fid, d in self.get_data(): # loop through completions
+                self.rx.timeoutMillis = 225 # milliseconds
                 yield fid, d
                 iblk += 1
                 if iblk >= self.values.num_msgs:
