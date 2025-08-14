@@ -166,6 +166,10 @@ class CracoSchedBlock:
     @property
     def template(self, ):
         return self.askap_schedblock.template
+    
+    @property
+    def onwer(self, ):
+        return self.askap_schedblock._service.getOwner(self.sbid)
       
     @property
     def spw(self, ):
@@ -671,6 +675,7 @@ class CalFinder:
         if len(res) == 0:
             log.info(f"no sbid information found for sbid{self.sbid}... will query the aces survey to update...")
             push_sbid_observation(self.sbid)
+            dump_casda_metainfo(self.sbid)
 
     def __get_sbid_property(self):
         self.cur.execute(f"""select central_freq,footprint,weight_sbid,start_time,flagant,fcm_version from observation
@@ -788,6 +793,21 @@ def push_sbid_observation(sbid, conn=None, cur=None):
         _update_craco_sched_status(craco_sched_info=d, conn=conn, cur=cur)
     except Exception as error:
         log.critical(f"failed to push schedblock status for {sbid}... please check... \n error - {error}")
+
+######### for national facility ########
+def dump_casda_metainfo(sbid, fname="obs_metadata.txt"):
+    try: 
+        cracosched = CracoSchedBlock(sbid=sbid)
+        os.makedirs(cracosched.scheddir.sched_head_dir, exist_ok=True)
+        metapath = f"{cracosched.scheddir.sched_head_dir}/{fname}"
+
+        metainfo = f"{sbid}\n{cracosched.onwer}"
+        log.info(f"dump meta information to head node - {metapath}...")
+
+        with open(metapath, "w") as fp:
+            fp.write(metainfo)
+    except Exception as error:
+        log.warning(f"not able to dump metadata for casda... error msg - {error}")
 
 ######### function to update observation #######
 def get_db_max_sbid(conn=None, cur=None):

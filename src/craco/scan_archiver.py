@@ -213,6 +213,12 @@ class ScanArchiver:
                 log.info(f"Jobid {jobid} raised an exception {generic_e}")
                 self.jobs_errored[jobid] = {'datadir':datadir, 'result':result}
         
+        log.info("copying observation metadata file...")
+        options = ["copy", f"{self.scan.scheddir.sched_head_dir}/obs_metadata.txt", self.dest_scan_path]
+        if dry: options += ["--dry-run"]
+        cmd = self.base_cmd + options
+        result = execute(cmd)
+        
         #stats_cmd = self.base_cmd + ["size", f"{self.destination[0]}:{self.dest_scan_path}"]
         stats_cmd = self.base_cmd + ["size", f"{self.dest_scan_path}"]
         stats = execute(stats_cmd)
