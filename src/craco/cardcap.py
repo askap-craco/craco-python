@@ -331,15 +331,21 @@ class FpgaCapturer:
         rx = self.rx
         msg_size = self.ccap.msg_size
 
-        start_sleep_ns = 0#time.time_ns()
-        #time.sleep(1)
-        stop_sleep_ns = 0# time.time_ns()
+        
+        # debug timeout problems
+        if self.total_completions <= 1:
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Doing initial {self.rx.timeoutMillis}ms wait')
+
+        start_wait_ns = time.time_ns()
+
         if wait:
             rx.waitRequestsCompletion()
 
-        finish_wait_ns = 0 #time.time_ns()
-        sleep_ns = stop_sleep_ns - start_sleep_ns
-        wait_ns = finish_wait_ns - stop_sleep_ns
+        stop_wait_ns = time.time_ns()
+        wait_ns = stop_wait_ns - start_wait_ns
+        # debug timeout problems
+        if self.total_completions <= 1:
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Completed wait in {wait_ns/1e6}ms')
 
         rx.pollRequests()
         ncompletions = rx.get_numCompletionsFound()
