@@ -108,6 +108,36 @@ def parse_scandir_env(path):
 
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
 
+def keep_with_tsp():
+    log.info(f"keep uvfits files for archiving")
+
+    KEEP_TS_SOCKET = "/data/craco/craco/tmpdir/queues/keep"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    environment = {
+        "TS_SOCKET": KEEP_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""keep_archive_scan.sh {sbid} {scanid} {tstart}"""
+        
+        S.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued keep scan job - with command - {cmd}")
+
 
 def run_with_tsp(destination_str, exclude_uvfits:bool = False):
     '''
