@@ -165,11 +165,19 @@ class SearchPipelineSink:
         devid = info.xrt_device_id
         self.pipeline = None
         self._next_plan_data = None
-        log.info('SearchPipelineSink devid=%s beamid=%s search_beams=%s', devid, self.info.beamid, self.info.values.search_beams)
+        vis_nt = info.vis_nt
+        # do parallel mode if vis_nt >= 32, i.e. time resolution is less than or equals to 3.4ms
+        # at 6.8ms or above we have 1700ms to complete the pipeline, so we can use serial mode.
+        self.parallel_mode = vis_nt >= 32
+
+
+        log.info('SearchPipelineSink devid=%s beamid=%s search_beams=%s vis_nt=%s parallel_mode=%s', 
+            devid, self.info.beamid, self.info.values.search_beams, vis_nt, self.parallel_mode)
+
         if devid is not None and self.info.beamid in self.info.values.search_beams:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
-                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=True, plan=plan)
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=self.parallel_mode, plan=plan)
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
