@@ -71,7 +71,7 @@ __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 BEAM_PRIORITY = 90
 RX_PRIORITY = 91
 
-NPROC_RING_SLOTS = 2
+NPROC_RING_SLOTS = 3
 
 
 # rank ordering
@@ -607,7 +607,7 @@ def transpose_beam_run(proc:Processor):
     dtype_complex =get_transpose_dtype(info, cplx_dtype=np.complex64)
     # e.g.  dtype([('ics', '<f4', (32, 24)), ('cas', '<f4', (32, 24)), ('vis', '<f4', (66, 4, 32, 2))])
     # make cutout buffer
-    nslots = 128 # number of 110ms write slots in cutout buffer
+    nslots = 196 # number of 110ms write slots to keep cutout buffer
     cutout_buffer = CutoutBuffer(transposer.dtype, transposer.nrx, nslots, info)
     beam_data_arr = cutout_buffer.buf[0]
     beam_data = beam_data_arr
