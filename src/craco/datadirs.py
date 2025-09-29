@@ -15,6 +15,8 @@ import glob
 import json
 import pandas as pd
 
+from astropy.io import fits
+
 import logging
 log = logging.getLogger(__name__)
 
@@ -449,6 +451,82 @@ class CalDir:
 
     def beam_cal_smoothfile(self, beam):
         return f"{self.beam_cal_dir(beam)}/b{beam:0>2}.aver.4pol.smooth.npy"
+
+class UvfitsDir:
+    """
+    this is prepared for casda...
+    """
+    def __init__(self, uvfitspath):
+        self.uvfitspath = os.path.abspath(uvfitspath)
+        self.hdulist = fits.open(self.uvfitspath)
+
+        self.snippet = True if "candidate" in self.uvfitspath else False
+
+        self._load_freq_config()
+        self._load_observation_config()
+        self._load_pointing_config()
+        self._load_owner_config()
+
+    # TODO - sbid, scan, tstart, beam, owner
+    def _load_freq_config(self):
+        # this is loaded from the first header
+        hdr = self.hdulist[0].header
+        fch1 = hdr["CRVAL4"]
+        foff = hdr["CDELT4"]
+        ch1 = hdr["CRPIX4"]
+        nchan = hdr["NAXIS4"]
+        ### get actual frequency from above values
+        self.freqs = (np.arange(nchan, dtype=float) - ch1 + 1) * foff + fch1 # in the unit of Hz
+
+    def _load_pointing_config(self):
+        # this is loaded from the last hdu
+        data = self.hdulist[3].data[0]
+        self.field = data["SOURCE"]
+        self.ra = data["RAEPO"]
+        self.dec = data["DECEPO"]
+
+    def _load_observation_config(self):
+        # parse data from uvfitspath
+        # currently, we will try to prase it from HISTORY header
+        hdrcmt = self.hdulist[0].header["HISTORY"].__str__().replace("\n", "")
+        # find it out through history header
+        outdirs = re.findall("--out (.*?) --fcm", hdrcmt)
+        pathpart = self.uvfitspath.split("/")
+        if outdirs: 
+            outdir = outdirs[0]
+            # this is what you will get - /data/craco/craco/SB076041/scans/00/20250819124127
+            outdirpart = outdir.split("/")
+            self.sbid = int(outdirpart[-4][2:])
+            self.scan = outdirpart[-2]
+            self.tstart = outdirpart[-1]
+            self.beam = pathpart[-1][1:3]
+        elif not self.snippet:
+            self.sbid = int(pathpart[-5][2:])
+            self.scan = pathpart[-3]
+            self.tstart = pathpart[-2]
+            self.beam = pathpart[-1][1:3]
+        else:
+            raise ValueError("snippet uvfitsdir not implemented!")
+        
+    def _load_owner_config(self,):
+        schedblock = SchedulingBlock(self.sbid)
+        self.owner = schedblock._service.getOwner(self.sbid)
+
+    def format_json(self,):
+        return dict(
+            sbid = self.sbid,
+            scan = self.scan,
+            tstart = self.tstart,
+            beam = self.beam,
+            owner = self.owner,
+            field = self.field,
+            ra = self.ra,
+            dec = self.dec,
+            fmin = np.min(self.freqs),
+            fmax = np.max(self.freqs),
+            nchan = len(self.freqs),
+        )
+
 
 
 def _main():
