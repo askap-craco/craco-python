@@ -777,13 +777,45 @@ class ObsInfo:
             msg = f"End of scan: {self.sbid}/{self.scanid}/{self.tstart}, runname={self.runname}\n" + msg
             self.post_on_slack(msg)
             
-            self.dump_json()
+            outname = self.dump_json()
+            try:
+                log.info('Posting %s to elasticsearch', outname)
+                self.post_to_elastic(outname)
+            except Exception as e:
+                log.exception(f"Exception posting %s to elasticsearch due to error", outname)
 
     def dump_json(self):
         outname = os.path.join(self.scandir.scan_head_dir, "scan_summary.json")
-        log.info(f"Dumping the info as a json file - {outname}")
+        
         with open(outname, 'w') as fp:
             json.dump(self._dict, fp, sort_keys=True, indent=4, cls=TrivialEncoder)
+
+        return outname
+
+
+    def post_to_elastic(self, json_path):
+        '''
+        Post the given file name to elasticsearc URL
+        Uses the elasticsearch library to post the file to the elasticsearch URL
+        Uses teh CRACO_ELASTIC_URL environment variable as the URL
+        And ~/.config/craco_elastic_ca.crt as the certificate
+        The ID is the SBID/SCANID/TSTART
+        '''
+        from elasticsearch import Elasticsearch
+        url = os.environ['CRAFT_ELASTIC_URL']        
+
+        es = Elasticsearch(
+            url,
+            ca_certs=os.path.expanduser('~/.config/craco_elastic_ca.crt'),
+            verify_certs=True,
+        )
+        docid = self._dict["docid"] 
+        es.index(
+            id=docid,
+            document=json.load(open(json_path)),
+            index="cracoscans"            
+        )
+
 
     def run_candpipe(self):
         '''
@@ -1209,7 +1241,7 @@ class ObsInfo:
                 Alt, Az of beam0
                 Gl, Gb of beam0
                 Coordinates of sun
-                Guest science data requested (True/False)
+                
         '''
         if self.pcb_stats == {} or self.plan_info == {}:
             return {}
