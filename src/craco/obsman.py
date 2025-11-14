@@ -38,6 +38,14 @@ log = logging.getLogger(__name__)
 
 __author__ = "Keith Bannister <keith.bannister@csiro.au>"
 
+def check_craco_enabled_and_zoom_ok():
+    craco_enabled = caget('ak:enableCraco') == 1
+    zoomval = caget('ak:S_zoom:val')
+    standard_zoom = zoomval == 0
+    log.info('CRACO enabled? %s zoom=%s Standard zoom? %s', craco_enabled, zoomval, standard_zoom)
+    enabled_and_zoom_ok = craco_enabled and standard_zoom
+    return enabled_and_zoom_ok
+
 class Obsman:
     def __init__(self, values):
         self.process = None        
@@ -109,18 +117,16 @@ class Obsman:
         else:
             target_ok = True
 
-        craco_enabled = caget('ak:enableCraco') == 1
-        zoomval = caget('ak:S_zoom:val')
-        standard_zoom = zoomval == 0
 
-        log.info(f'Scan_changed newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled?={craco_enabled} zoomval = {zoomval} zoom OK? = {standard_zoom}')
+        enabled_and_zoom_ok = check_craco_enabled_and_zoom_ok()
+        log.info(f'Scan_changed newscanID={new_scanid} currscan={self.curr_scanid} SB{sbid} target={target} OK?={target_ok} CRACO enabled and zoom OK?={enabled_and_zoom_ok}')
         if new_scanid == -2 or new_scanid is None: # it's closing - sometimes glitches
             self.terminate_process()
         elif new_scanid == -1: # it's getting ready, do nothign
             pass
         elif new_scanid == self.curr_scanid: # avoid race condition
             pass
-        elif target_ok and craco_enabled and standard_zoom: # new valid scan number with new scan ID and valid zoom
+        elif target_ok and enabled_and_zoom_ok: # new valid scan number with new scan ID and valid zoom
             assert new_scanid >= 0 and new_scanid != self.curr_scanid
             self.start_process(scan_info)
         else:
@@ -332,8 +338,8 @@ class MetadataObsmanDriver:
                             
         d = metadata_to_dict(pub_data, self.sbid)
         
-        craco_enabled = caget('ak:enableCraco') == 1
-        next_scan_running = mgr.push_data(d,craco_enabled) # include craco_enabled
+        enabled_and_zoom_ok = check_craco_enabled_and_zoom_ok()
+        next_scan_running = mgr.push_data(d, enabled_and_zoom_ok) # include craco_enabled
         self.scan_running = self.obsman.poll_process()
 
         if self.scan_running:
