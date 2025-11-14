@@ -206,14 +206,19 @@ class CardCapNetworkSource:
         # We need to keep looping over all FPGAs otehrwise we just get stuck on one.
         # so all FPGAs start at the original planned start bat.
         # we loop through and only yield when all FPGAs have an FID >= the origianllly specified fid0
+        npkt = 0
         while True:
             try:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
                 fid = fids[0]
+                if npkt == 0:
+                    log.debug('Starting packet iteration. npkt=%d fid0=%d fids=%s', npkt, self.fid0, fids)
+
                 if fid >= self.fid0:
                     yield (packets, fids)
+                    npkt += 1
             except StopIteration:
                 break
 

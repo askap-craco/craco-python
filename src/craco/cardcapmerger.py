@@ -61,7 +61,7 @@ def frame_id_iter(i, fid0, maxnframes=None):
     trace_file =  MpiTracefile.instance()
     nframes = 0
     num_timeouts = 0
-
+    card_active = True
     while True:
         if maxnframes is not None and nframes >= maxnframes:
             log.info('Finished %s frames. Quitting', maxnframes)
@@ -73,11 +73,11 @@ def frame_id_iter(i, fid0, maxnframes=None):
         # in the past, we'll just return None forever
         if curr_frameid < expected_frame_id:
             try:
-                if num_timeouts > 0: # already received timeout. Dont' read it again. 
+                if card_active: # only read if everythign is hunky dory
+                    curr_frameid, currblock = next(i)
+                else:
                     curr_frameid = expected_frame_id
                     currblock = None
-                else:
-                    curr_frameid, currblock = next(i)
             except StopIteration:
                 break
             except TimeoutException:
@@ -86,13 +86,23 @@ def frame_id_iter(i, fid0, maxnframes=None):
                 num_timeouts += 1
                 curr_frameid = expected_frame_id
                 currblock = None
+                card_active = False
 
 
         # skipping frames earlier than fid0.
         # This lets us setup a time in advance so we can get settled before data starts
         # crashing into us 
         if curr_frameid < fid0:
-            continue
+            # But if it's too far in the past it's a dead card. We disable it.
+            if curr_frameid < fid0 - 1000000*60: # roughly 1 minute
+                log.warning('Card is too far in the past. Disabling card. curr_frameid=%d fid0=%d diff=%d = %f seconds', curr_frameid, fid0, fid0 - curr_frameid, (fid0 - curr_frameid)/1e6)
+                card_active = False
+
+            # We used to continue here but that'sa bad idea as the individual FPGAs have to wait.
+            #b = None # make it inactive outer code will handle frameid < fid0
+            # but if you don't then you seen someother way of synchronising the FPGAs - i don't see a way around it.
+            continue # continue to next frameid - this reads in the wrong order. I realy don't like
+    
     
         if curr_frameid == expected_frame_id: # got what we expected. But currblk None if we timed out
             b = currblock
