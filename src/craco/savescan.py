@@ -38,13 +38,17 @@ stopped = False
 do_calibration = None
 obsparams = None
 
+def is_parset_specified(obsparams, key):
+    v = obsparams.get_value(key, '')
+    return v != '' and v != 'None' and v != 'default'
+
 def get_param_with_default(obsparams, key, default_value):
     '''
     Gets key from obsparams with get_value. If value is not specified or equals
     '', 'None' or 'default' returns the default value. Otherwise returns the default value
     '''
     v = obsparams.get_value(key, '')
-    if v == '' or v == 'None' or v == 'default':
+    if not is_parset_specified(obsparams, key) or v == '':
         v = default_value
     
     return v
@@ -86,13 +90,14 @@ def _main():
     parser.add_argument('--show-output', action='store_true', default=False, help='Show output on stdout rather than logging to logfile')
     parser.add_argument('-b','--beam', type=int, default=-1, help='Beam to download. -1 is all and default and enables tscrunch')
     parser.add_argument('--scan-minutes', type=float, help='Number of minutes to record for', default=15)
-    parser.add_argument('--calibration-scan-minutes', default=5.0, type=float, help='Length of scan if we need to do a calibartion')
+    parser.add_argument('--calibration-scan-minutes', default=15.0, type=float, help='Length of scan if we need to do a calibartion')
     parser.add_argument('--pol-sum', help='Sum pol mode', action='store_true', dest='pol_sum', default=True)
     parser.add_argument('--dual-pol', help='Dual pol mode', action='store_false', dest='pol_sum', default=False)
     parser.add_argument('-a','--card', help='Cards to download', default='1-12')
-    parser.add_argument('--block', help='Blocks to download', default='5-7')
-    parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=30)
-    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=False)    
+    parser.add_argument('--block', help='Blocks to download', default='2-7')
+    parser.add_argument('--max-ncards', help='Number of cards to download', type=int, default=72)
+    parser.add_argument('--transpose', help='Do the transpose in real time', action='store_true', default=True)  
+    parser.add_argument('--no-transpose', dest='transpose', action='store_false', help='Dont do transpose')  
     parser.add_argument('--metadata', help='Prep scan with this metadata file')
     parser.add_argument('--flag-ants', help='Antennas to flag', default='31-36', type=strrange)
     parser.add_argument('--search-beams', help='Beams to search')
@@ -167,6 +172,8 @@ def _main():
 
 
     calibration = '' if do_calibration else f'--calibration {calpath}'
+    
+    uvfits_required = is_parset_specified(obsparams, 'craco.uvfits.int_time_exp')
     int_time_exp = int(get_param_with_default(obsparams, 'craco.uvfits.int_time_exp', values.int_time_exp))
     
     if do_calibration:
@@ -174,7 +181,8 @@ def _main():
 
     int_time = 0.864*2**(int_time_exp)
     spi_val, tscrunch_val = calc_inttime_tscrunch(int_time_exp)
-    log.info('Using integration time=%sms spi=%s tscrunch=%s', int_time, spi_val, tscrunch_val)
+    log.info('Using integration time=%sms spi=%s tscrunch=%s uvfits_required=%s', 
+             int_time, spi_val, tscrunch_val, uvfits_required)
    
     spi = f'--samples-per-integration {spi_val}'
     vis_tscrunch = f'--vis-tscrunch {tscrunch_val}'
@@ -208,7 +216,7 @@ def _main():
     else:
         search_beams = ''
 
-    if values.save_uvfits or do_calibration:
+    if values.save_uvfits or do_calibration or uvfits_required:
         save_uvfits = f'--save-uvfits-beams 0-35'
     else:
         save_uvfits = ''
@@ -308,10 +316,12 @@ def exit_function():
             auto_sched.queue_calibration(scandir)
         summarise_cands.run_with_tsp()
         summarise_scan.run_with_tsp()
+        auto_sched.run_post_cand_with_tsp()
         
         archive_location  = get_param_with_default(obsparams, 'craco.archive.location', '')
         log.info('craco.archive.location location is %s', archive_location)
         if archive_location != '':
+            scan_archiver.keep_with_tsp()
             scan_archiver.run_with_tsp(archive_location)
 
 if __name__ == '__main__':

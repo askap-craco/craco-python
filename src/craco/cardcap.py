@@ -331,15 +331,21 @@ class FpgaCapturer:
         rx = self.rx
         msg_size = self.ccap.msg_size
 
-        start_sleep_ns = 0#time.time_ns()
-        #time.sleep(1)
-        stop_sleep_ns = 0# time.time_ns()
+        
+        # debug timeout problems
+        if self.total_completions <= 1:
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Doing initial {self.rx.timeoutMillis}ms wait', stack_info=True)
+
+        start_wait_ns = time.time_ns()
+
         if wait:
             rx.waitRequestsCompletion()
 
-        finish_wait_ns = 0 #time.time_ns()
-        sleep_ns = stop_sleep_ns - start_sleep_ns
-        wait_ns = finish_wait_ns - stop_sleep_ns
+        stop_wait_ns = time.time_ns()
+        wait_ns = stop_wait_ns - start_wait_ns
+        # debug timeout problems
+        if self.total_completions <= 1:
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Completed wait in {wait_ns/1e6}ms', stack_info=True)
 
         rx.pollRequests()
         ncompletions = rx.get_numCompletionsFound()
@@ -356,7 +362,7 @@ class FpgaCapturer:
         #print(f'\rCompletions={ncompletions} {len(completions)}')
         beam = self.ccap.values.beam
         if ncompletions > self.max_ncompletions:
-            log.critical(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} increased completions {self.max_ncompletions}->{ncompletions}')
             self.max_ncompletions = ncompletions
             
         d = None # in case something quits before it's set. We return None so we don't get an unboundLocalError
@@ -391,6 +397,7 @@ class FpgaCapturer:
             fid = d['frame_id'][0, 0] # Frame ID is the frame ID of the first sample of the intgration, according ot John Tuthill
             if self.curr_fid is None:
                 fid_diff = 0
+                log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} First immediate was {immediate} fid0 was {fid}')
             else:
                 fid_diff = fid - self.curr_fid
 
@@ -452,8 +459,17 @@ class FpgaCapturer:
         if nblk is None:
             nblk = self.values.num_msgs
 
+        # set timeout to 20 seconds while it's getting organised
+        # after that don't wait longer than 225 milliseconds
+        # on timeout it will throw an rdma_transport.TimeoutException
+        self.rx.timeoutMillis = 20*1000 
+
         while iblk < nblk:
             for fid, d in self.get_data(): # loop through completions
+                if iblk <= 2:
+                    log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} yielding iblk={iblk} fid={fid} ')
+
+                self.rx.timeoutMillis = 225 # milliseconds
                 yield fid, d
                 iblk += 1
                 if iblk >= self.values.num_msgs:
@@ -461,7 +477,7 @@ class FpgaCapturer:
 
             self.issue_requests()
 
-    def fake_packet_iterator(self, nblk=None):
+    def fake_packet_iterator(self, nblk=None, fake_data=None):
         iblk = 0
         start_bat = 0
         sync_bat = 0
@@ -475,18 +491,19 @@ class FpgaCapturer:
             block_index = 0
             message_index = 0
             d = self.rdma_buffers[block_index][message_index]
-            d['data'] = 0
+            d['data'] = (np.random.randn(*d['data'].shape)*50).astype(np.int16)
             d['bat'][0] = fid
             d['frame_id'][0][0] = fid
             d = self.post_process(d)
+            #log.info(f'Sending fake data iblk={iblk} fid={fid} d={d["data"][:4]}')
             fid += NSAMP_PER_FRAME
             
             yield fid, d
             iblk += 1
 
     def packet_iterator(self, nblk=None):
-        if self.values.fake_cardcap_data:
-            it = self.fake_packet_iterator(nblk=None)
+        if self.values.fake_cardcap_data is not None:
+            it = self.fake_packet_iterator(None, self.values.fake_cardcap_data)
         else:
             it = self.real_packet_iterator(nblk=None)
 
@@ -595,7 +612,8 @@ class CardCapturer:
         # lsbposition=0 is bits 15-0 from 27-bit accumulator ouput.
         # lsbPosition=1 is bits 16-1
         # ..
-        # lsbPosition=11 = bits 27-11 (see discussion from john on mattermost)
+        # lsbPosition=11 
+        # = bits 27-11 (see discussion from john on mattermost)
         assert 0 <= lsbPosition <= 11, 'Unsupported LSB position'
         sumPols = 1 if values.pol_sum else 0
         integSelectMap = {16:0, 32:1, 64:2}
@@ -858,7 +876,7 @@ def dump_rankfile(values):
                     rank += 1
                     
 class MpiCardcapController:
-    def __init__(self, comm, values, block_cards):
+    def __init__(self, comm, values, block_cards, device:str=None):
         rank = comm.Get_rank()
         numprocs = comm.Get_size()
         self.comm = comm
@@ -912,13 +930,16 @@ class MpiCardcapController:
 
             devices = values.devices.split(',')
             #devices =['mlx5_0','mlx5_0']
-            if len(my_fpga) == 1:
-                devidx = my_fpga[0] % len(devices)
-            else:
-                devidx = my_card % len(devices)
+            if device is None:
+                if len(my_fpga) == 1:
+                    devidx = my_fpga[0] % len(devices)
+                else:
+                    devidx = rank % len(devices)
 
-            my_values.device = devices[devidx]
+                device = devices[devidx]
 
+            my_values.device  = device
+            
             if values.outfile is None:
                 my_values.outfile = None
             else:
@@ -1033,7 +1054,7 @@ def add_arguments(parser):
     parser.add_argument('--dump-rankfile', help='Dont run. just dump rankfile to this path')
     parser.add_argument('--hostfile', help='Hostfile to use to dump rankfile')
     parser.add_argument('--max-ncards', help='Set maximum number of cards to download 0=all', type=int, default=None)
-    parser.add_argument('--fake-cardcap-data', help='If running network cardcap, dont actually start, but send fake cardcap data instead', action='store_true', default=False)
+    parser.add_argument('--fake-cardcap-data', help='If running network cardcap, dont actually start, but send fake cardcap data instead', action='store_true', default=None)
 
     pol_group = parser.add_mutually_exclusive_group(required=True)
     pol_group.add_argument('--pol-sum', help='Sum pol mode', action='store_true')

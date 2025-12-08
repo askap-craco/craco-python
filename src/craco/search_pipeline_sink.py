@@ -19,6 +19,9 @@ from astropy import units as u
 import pyxrt
 import scipy
 from craco.candidate_writer import CandidateWriter
+from craco.mpi_appinfo import MpiPipelineInfo
+from craco.mpi_obsinfo import MpiObsInfo
+
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +153,7 @@ class VisInfoAdapter:
 
 
 class SearchPipelineSink:
-    def __init__(self, info, plan):
+    def __init__(self, info:MpiObsInfo, plan):
         '''
         Includes info and pre-made initial plan. 
         '''
@@ -162,10 +165,19 @@ class SearchPipelineSink:
         devid = info.xrt_device_id
         self.pipeline = None
         self._next_plan_data = None
-        if devid is not None:
+        vis_nt = info.vis_nt
+        # do parallel mode if vis_nt >= 32, i.e. time resolution is less than or equals to 3.4ms
+        # at 6.8ms or above we have 1700ms to complete the pipeline, so we can use serial mode.
+        self.parallel_mode = vis_nt >= 32
+
+
+        log.info('SearchPipelineSink devid=%s beamid=%s search_beams=%s vis_nt=%s parallel_mode=%s', 
+            devid, self.info.beamid, self.info.values.search_beams, vis_nt, self.parallel_mode)
+
+        if devid is not None and self.info.beamid in self.info.values.search_beams:
             log.info('Beam %s Loading device %s with %s', info.beamid, devid, info.values.xclbin)
             try:
-                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=False, plan=plan)
+                self.pipeline = PipelineWrapper(self.adapter, info.values, devid, parallel_mode=self.parallel_mode, plan=plan)
                 nf = len(info.vis_channel_frequencies)
                 nt = self.pipeline.plan.nt
                 nbl = self.adapter.nbl
@@ -183,6 +195,9 @@ class SearchPipelineSink:
             except MemoryError: # useually pyxrt.syncbo fails due to dead card
                 log.exception(f'MemoryError to make pipeline for devid={devid}. Ignoring this pipeline')
                 self.pipeline = None
+        else:
+            log.info('SearchPielineSink not searching beamid=%s, device or search beam not specified', self.info.beamid)
+                
 
     def set_next_plan(self, next_plan_data):
         '''
@@ -258,12 +273,18 @@ class SearchPipelineSink:
 
         Also updates plan if necessary
         '''
+        t = Timer()
+        save_pipeline_data = False
+        if save_pipeline_data:
+            pth = os.path.join(self.info.beam_dir, f'pipeline_data_{self.iblk}.npy')
+            np.save(pth, pipeline_data)
+            t.tick('Save pipeline data', args={'iblk':self.iblk, 'path':pth})
+            log.info('Saved pipeline data to %s iblk=%s', pth, self.iblk)
 
         out_cands = None
         if self.pipeline is None:
             return out_cands
         
-        t = Timer()
 
         # Update UVWs if necessary
         # Don't do it on block 0 as we've already made one
@@ -283,12 +304,16 @@ class SearchPipelineSink:
             vis = pipeline_data['vis']
             bl_weights = pipeline_data['bl_weights']
             tf_weights = pipeline_data['tf_weights']
-            log.info('Pipeline data iblk=%d abs(vis).mean=%0.1e bl_weights=%s/%s tf_weights=%s/%s',
-                     self.iblk,
-                     abs(vis).mean(),
-                     bl_weights.sum(), bl_weights.size,
-                     tf_weights.sum(), tf_weights.size)
-            t.tick('Summarise input')
+            summarise_input = False
+
+            # this can take a long time, especially on a slow node - like 1000ms
+            if summarise_input:
+                log.info('Pipeline data iblk=%d abs(vis).mean=%0.1e bl_weights=%s/%s tf_weights=%s/%s',
+                         self.iblk,
+                         abs(vis).mean(),
+                         bl_weights.sum(), bl_weights.size,
+                         tf_weights.sum(), tf_weights.size)
+                t.tick('Summarise input')
 
             # Originally the dtype in the VisblockAccumulatorStruct was bool, but we
             # had to numbafy it. Numba doesn't like bools, so I converted to uint8.

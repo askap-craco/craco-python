@@ -63,7 +63,7 @@ def load_cands(sbid, scanid="*", tstart="*", beam=None, runname="results"):
 
 def parse_candpath(fname):
     sections = fname.strip().split("/")
-    print(sections)
+    #print(sections)
     assert sections[0] == "" and sections[1] == "CRACO" and sections[3] == "craco", f"Doesn't look like a correction path - {fname}"
     sbid = sections[4]
     scanid = sections[6]
@@ -155,7 +155,7 @@ class SBCandsManager:
             except EmptyCandfile as ecf:
                 warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
                 if ignore_empty:
-                    pass
+                    continue
                 else:
                     raise ecf
             self.all_candfiles.append(cf)
@@ -262,7 +262,7 @@ class ScanCandsManager:
             except EmptyCandfile as ecf:
                 warnings.warn(f"Candfile {f} is empty\n{ecf.msg}\nIgnoring...")
                 if ignore_empty:
-                    pass
+                    continue
                 else:
                     raise ecf
 

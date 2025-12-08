@@ -64,6 +64,7 @@ class MpiAppInfo:
     rx_beam_comm = communicator for RX and BEAMPROC ranks. Ranks that aren't that have None
     beam_chain_comm = communicator for BEAMPROC, PLANNER and BEAM_CAND ranks, split by beamid. rank[0] is the
     BEAMPROC, ranks[1] is the PLANNER and rank[2] is the BEAM_CAND
+    beamproc_comm = BEAMTRAN (rank 0) and BEAMPROC (rank1) = used for shared memory comms
     cand_comm = communicator for BEAM_CAND and BEAM_MGR ranks. Rank[0] is the BEAM_MGR, the remainder are the 
     beam processor (rank=beamid+1)
     '''
@@ -122,6 +123,15 @@ class MpiAppInfo:
             elif self.is_cand_processor:
                 assert bcrank == MpiAppInfo.CANDPROC_RANK
 
+        # rank 0 = beamtran
+        # rank 1 = beamproc
+        # used for shared memory comms for high bandwidth goodness
+        if self.beam_chain_comm is not None:
+            beamproc_comm = self.beam_chain_comm.Split(0 if bcrank <= 1 else -1, bcrank)
+            self.beamproc_comm = beamproc_comm if bcrank <= 1 else None
+        else:
+            self.beamproc_comm = None
+
         # candidate communicator.
         # rank=[0] is manager,
         # ranks[1..nbeam] = beam cand processors
@@ -137,7 +147,7 @@ class MpiAppInfo:
         if self.is_cand_manager:
             assert self.app_size == 1, f'Cand manager should have 1 app. Has {self.app_size}'
             cand_rank = self.cand_comm.Get_rank()
-            assert cand_rank == 0, f'Cand manager should have 0 rank. Was {cand_rank}'       
+            assert cand_rank == 0, f'Cand manager should have 0 rank. Was {cand_rank}'
         
     @property
     def app_num(self):
@@ -219,6 +229,8 @@ class MpiAppInfo:
 
 class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slot','core','block','card','fpga', 'net_dev'])):
     APP_ID = MpiAppInfo.RX_APPNUM
+    is_beam_processor = False
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Block {self.block} card {self.card} fpga {self.fpga} on {self.net_dev}'
@@ -233,6 +245,8 @@ class ReceiverRankInfo(namedtuple('ReceiverRankInfo', ['rxid','rank','host','slo
     
 class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAMTRAN_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} transpose receiver '
@@ -247,6 +261,8 @@ class BeamTranRankInfo(namedtuple('BeamTranRankInfo', ['beamid','rank','host','s
     
 class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','slot','core','xrt_device_id'])):
     APP_ID = MpiAppInfo.BEAMPROC_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} processor xrtdevid={self.xrt_device_id}'
@@ -258,6 +274,9 @@ class BeamProcRankInfo(namedtuple('BeamProcRankInfo', ['beamid','rank','host','s
 
 class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.PLANNER_APPNUM
+    is_beam_processor = True
+
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Planner'
@@ -269,6 +288,8 @@ class PlannerRankInfo(namedtuple('PlannerRankInfo', ['beamid','rank','host','slo
 
 class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','slot','core'])):
     APP_ID = MpiAppInfo.BEAM_CAND_APPNUM
+    is_beam_processor = True
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Beam {self.beamid} Cand processor'
@@ -281,6 +302,8 @@ class BeamCandRankInfo(namedtuple('BeamCandRankInfo', ['beamid','rank','host','s
 
 class CandMgrRankInfo(namedtuple('CandMgrRankInfo', ['rank','host','slot','core'])):
     APP_ID = MpiAppInfo.CAND_MGR_APPNUM
+    is_beam_processor = False
+
     @property
     def rank_file_str(self):
         s = f'rank {self.rank}={self.host} slot={self.slot}:{self.core} # Cand manager'
@@ -304,7 +327,7 @@ def populate_ranks(pipe_info, total_cards):
         
     nrx_per_host = ncards_per_host
     nbeams_per_host = nbeams //len(hosts)
-    log.info(f'Spreading {nranks} over {len(hosts)} hosts {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
+    log.info(f'Spreading {nranks} over {len(hosts)} hosts with {ncards_per_host} cards per host totalling {total_cards} {len(values.block)} blocks * {len(values.card)} * {len(values.fpga)} fpgas and {nbeams} beams with {nbeams_per_host} per host')
 
     rank = 0
     rxrank = 0
@@ -321,18 +344,23 @@ def populate_ranks(pipe_info, total_cards):
             if cardno >=total_cards + 1:
                 break
             for fpga in values.fpga[::fpga_per_rx]:
-                hostidx = rxrank // nrx_per_host
-                hostrank = rxrank % nrx_per_host                
+                hostidx = rxrank // nrx_per_host # fill nrx_per_host per host 
+                hostrank = rxrank % nrx_per_host # rank within a host round robin
+                slotidx = hostrank % nslots_per_host # fill slots (CPU sockets) in Round Robin
+                slotrank = hostrank // nslots_per_host # rank within a socket
                 host = hosts[hostidx]
                 ncores_per_proc = 2
-                net_dev_idx = cardno % len(net_devices) # this is the same logic as cardcap.py - ideally we'd pass it down.
+                #net_dev_idx = cardno % len(net_devices) # this is the same logic as cardcap.py - ideally we'd pass it down.
+                #net_dev_idx = rxrank % len(net_devices) # Changed cardcap.py to use this logic now
+                # cardcap.py now uses the netdevice from ReceiverRankInfo
+                #assert net_dev_idx == slotidx, f'Incorrect logic net_dev_idx={net_dev_idx} slotidx={slotidx} rank={rank} rxrank={rxrank} card={card} block={block}'
+                net_dev_idx = slotidx
                 net_dev = net_devices[net_dev_idx]
-                slot = net_dev_idx # dev 0 is on slot 0 and dev1 is on slot 1
-                icore = (hostrank * ncores_per_proc) % nslots_per_host
+                icore = (slotrank * ncores_per_proc) % ncores_per_socket
                 #icore = (slotrank*ncores_per_proc) % ncores_per_socket 
                 #core='0-9'
                 core = f'{icore}-{icore+ncores_per_proc-1}'
-                rank_info = ReceiverRankInfo(rxrank, rank, host, slot, core, block, card, fpga, net_dev)
+                rank_info = ReceiverRankInfo(rxrank, rank, host, slotidx, core, block, card, fpga, net_dev)
                 pipe_info.add_rank(rank_info)
                 rank += 1
                 rxrank += 1
@@ -343,7 +371,8 @@ def populate_ranks(pipe_info, total_cards):
 
     xrt_devices = (0,2) 
     host_cards = parse_host_devices(hosts, values.dead_cards, xrt_devices)
-
+    slot = 1
+    core = 14
     pipe_info.add_rank(CandMgrRankInfo(rank, 'skadi-00', slot, core))
     rank += 1
     
@@ -354,13 +383,10 @@ def populate_ranks(pipe_info, total_cards):
         xrt_devices = host_cards[host]
         this_host_search_beams = host_search_beams.get(host,[])
         host_search_beams[host] = this_host_search_beams
-        if beam in values.search_beams:
-            this_host_search_beams.append(beam)
+        this_host_search_beams.append(beam)
             
-        devid = None
-        if beam in this_host_search_beams:
-            devindex = this_host_search_beams.index(beam)            
-            devid = xrt_devices[devindex] if devindex < len(xrt_devices) else None
+        devindex = this_host_search_beams.index(beam)            
+        devid = xrt_devices[devindex] if devindex < len(xrt_devices) else None
 
         # dev 0,1 on slot 0. dev 2,3 on slot 1. 
         if devid in (0,1):
@@ -368,7 +394,12 @@ def populate_ranks(pipe_info, total_cards):
         elif devid in (2,3):
             slot = 1
         else:
-            slot = 0 # just put it there for now.
+            # we don't want to seacrch this beam, because we are calibrating or
+            # its not on the command line, for example
+            #assert devid in (0,1,2,3), f'Invalid value of devid:{devid} for beam {beam} this_host={this_host_search_beams} {host}[{hostidx}] {xrt_devices}'        
+            # inthis case, we choose slot, not based on which card it's mapped to, but w
+            slot = beam // 2
+            # assume
 
 
         log.debug('beam %d devid=%s devices=%s host=%s this_host_search_beams=%s', beam, devid, xrt_devices, host, this_host_search_beams)
@@ -448,8 +479,9 @@ class MpiPipelineInfo:
         log.info('Requested %d frames = %d integrations. Will do %d search blocks which is only %d beamformer frames', 
                  nframe, total_nint, requested_nsearch, requested_nframe)
         self.requested_nsearch = requested_nsearch
-        self.requested_nframe = requested_nframe               
+        self.requested_nframe = requested_nframe
 
+        self.cand_mngr_rankinfo = self.get_ranks_for_app(MpiAppInfo.CAND_MGR_APPNUM)[0]
 
     def add_rank(self, rankinfo):
         self.all_ranks[rankinfo.rank] = rankinfo
@@ -461,6 +493,9 @@ class MpiPipelineInfo:
     def get_ranks_for_app(self, appid):
         return list(filter(lambda r:r.APP_ID == appid, self.all_ranks.values()))
 
+    def get_rankinfo_for_app_beam(self, appid:int, beamid:int):
+        return next(filter(lambda r:r.APP_ID == appid and r.beamid == beamid, self.all_ranks.values()))
+
     @property
     def beam_ranks(self):
         return self.get_ranks_for_app(MpiAppInfo.BEAMPROC_APPNUM)
@@ -468,6 +503,14 @@ class MpiPipelineInfo:
     @property
     def receiver_ranks(self):
         return self.get_ranks_for_app(MpiAppInfo.RX_APPNUM)
+
+    @property
+    def beamtran_ranks(self):
+        return self.get_ranks_for_app(MpiAppInfo.BEAMTRAN_APPNUM)
+
+    def get_beamtran_info_for_beam(self, beamid:int):
+        return self.get_rankinfo_for_app_beam(MpiAppInfo.BEAMTRAN_APPNUM, beamid)
+    
 
     @property
     def rx_comm(self):
@@ -482,6 +525,15 @@ class MpiPipelineInfo:
     def beamid(self):
         return self.mpi_app.beamid
 
+    @property
+    def beam_dir(self):
+        '''
+        Returns a parth to the beam output directory
+                        Makes it if ncessary
+        '''
+        beamdir = os.path.join(self.values.outdir, f'beam{self.beamid:02d}')
+        os.makedirs(beamdir, exist_ok=True)
+        return beamdir
 
     @property
     def is_beam_processor(self):

@@ -2,7 +2,7 @@
 """
 Template for making scripts to run from the command line
 
-Copyright (C) CSIRO 2022
+Copyright (C) CSIRO 2025
 """
 import pylab
 import matplotlib as mpl

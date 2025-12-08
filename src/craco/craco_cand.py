@@ -37,6 +37,36 @@ def load_filterbank(filpath, tstart, ntimes):
     v = v.reshape(-1, f.nifs, f.nchans)
     return v
 
+def load_filterbank_with_ftaxis(filpath, tstart, ntimes):
+    if tstart < 0: tstart = 0
+    
+    # load files
+    f = sigproc.SigprocFile(filpath)
+    nelements = ntimes*f.nifs*f.nchans
+    f.seek_data(f.bytes_per_element*tstart)
+
+    if (f.nbits == 8): dtype = np.uint8
+    elif (f.nbits == 32): dtype = np.float32
+
+    v = np.fromfile(f.fin, dtype=dtype, count=nelements )
+    v = v.reshape(-1, f.nifs, f.nchans)
+
+    tend = tstart + v.shape[0]
+
+    ### give a list of time
+    taxis = np.linspace(tstart, tend, v.shape[0], endpoint=False)
+    faxis = np.arange(f.nchans) * f.foff + f.fch1
+
+    ### change 0 value to nan
+    v[v == 0.] = np.nan
+
+    return v, taxis, faxis
+
+def normalise_filterbank(v):
+    vfmean = np.nanmean(v, axis=0, keepdims=True)
+    vfstd = np.nanstd(v, axis=0, keepdims=True)
+    return (v - vfmean) / vfstd
+
 # for dedispersion
 def calculate_dm_tdelay(f1, f2, dm):
     """
@@ -187,10 +217,13 @@ class Cand:
         ) ### all basic information are encoded in `self.canduvfits.plan`
         self.uvfits = uvfits; self.metafile = metafile 
         self.calfile = calfile; self.pcbpath = pcbpath
+        self.uvfits_startsample = self.canduvfits.sample_start
 
         ### put all information to the attribute
         self.ra_deg, self.dec_deg = ra_deg, dec_deg
-        self.dm_pccm3 = dm_pccm3; self.total_sample = total_sample
+        self.dm_pccm3 = dm_pccm3
+        ### this is for candidate snippet...
+        self.total_sample = total_sample - self.uvfits_startsample
         self.boxc_width = boxc_width
         self.lpix, self.mpix = lpix, mpix
 
@@ -217,14 +250,15 @@ class Cand:
         self.vtend = int(self.ctend + padding)
         # these are for the visibility time range
 
-    def _get_pcb_mask(self,):
+    def _get_pcb_mask(self, tstart, tend):
         if self.pcbpath is None: 
             self.pcbmask = None
         else:
             try:
                 pcbdata = load_filterbank(
-                    self.pcbpath, self.vtstart, 
-                    self.vtend - self.vtstart + 1
+                    self.pcbpath, 
+                    tstart + self.uvfits_startsample, 
+                    tend - tstart + 1
                 )
                 self.pcbmask = (pcbdata == 0.).T
             except:
@@ -233,8 +267,11 @@ class Cand:
     def extract_data(self, padding):
         ### get candidate/visibility time range
         self._get_cand_vis_range(padding = padding)
-        self._get_pcb_mask() # get mask from phase center filterbank
         self.canduvfits.snippet(self.vtstart, self.vtend)
+        ### get range for real snippet
+        dtstart, dtend = self.canduvfits.datarange
+        self._get_pcb_mask(dtstart, dtend) # get mask from phase center filterbank
+        
 
     ########## data manipulation ##########
     def process_data(
@@ -401,39 +438,62 @@ class Cand:
     def image_start_index(self):
         return self.image_end_index - self.boxc_width
 
-    def plot_diagnostic_images(self, vmin=None, vmax=None):
+    def plot_diagnostic_images(self, vmin=None, vmax=None, plan=None):
         medimg = np.nanmedian(self.imgcube, axis=0)
         stdimg = np.nanstd(self.imgcube, axis=0)
 
         fig = plt.figure(figsize=(12, 4))
 
-        projection=self.canduvfits.dataplan.wcs
+        if plan is None: projection=self.canduvfits.dataplan.wcs
+        else: projection=plan.wcs
+
         #detection image
         ax = fig.add_subplot(1, 3, 1, projection=projection)
 
         detimg = self.imgcube[
             self.image_start_index:self.image_end_index+1
         ]
-        
+
         ax.imshow(
-            np.nanmean(detimg, axis=0), vmin=vmin, vmax=vmax, 
+            np.nanmean(detimg, axis=0), vmin=None, vmax=None, 
             origin="lower", aspect="auto",
         )
-        ax.set_title("detect image")
+        ax.scatter(
+            x=self.ra_deg, y=self.dec_deg, transform=ax.get_transform("fk5"),
+            color="red", s=100, facecolor="none", ls="--"
+        )
+
+        ax.set_title("detection image")
+        ax.coords[0].set_axislabel(" ")
+        ax.coords[1].set_axislabel(" ")
 
         ax = fig.add_subplot(1, 3, 2, projection=projection)
         ax.imshow(
             medimg, vmin=None, vmax=None, 
             origin="lower", aspect="auto",
         )
+        ax.scatter(
+            x=self.ra_deg, y=self.dec_deg, transform=ax.get_transform("fk5"),
+            color="red", s=100, facecolor="none", ls="--"
+        )
+
         ax.set_title("median image")
+        ax.coords[0].set_axislabel(" ")
+        ax.coords[1].set_axislabel(" ")
 
         ax = fig.add_subplot(1, 3, 3, projection=projection)
         ax.imshow(
             np.log10(stdimg), vmin=None, vmax=None, 
             origin="lower", aspect="auto",
         )
+        ax.scatter(
+            x=self.ra_deg, y=self.dec_deg, transform=ax.get_transform("fk5"),
+            color="red", s=100, facecolor="none", ls="--"
+        )
+
         ax.set_title("std image (log10)")
+        ax.coords[0].set_axislabel(" ")
+        ax.coords[1].set_axislabel(" ")
 
         return fig
 
@@ -481,6 +541,10 @@ class CandUvfits:
     @property
     def fmax(self):
         return self.plan.freqs[-1]
+    
+    @property
+    def sample_start(self):
+        return self.uvsource.header.get("SMPSTRT", default=0)
 
     @property
     def nchan(self):

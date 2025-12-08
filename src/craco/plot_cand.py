@@ -96,7 +96,7 @@ def cand2str(c):
     coords = coord.to_string('hmsdms')
     t = Time(c['mjd'], scale='utc', format='mjd')
     
-    s =  f"snr={c['snr']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot}"
+    s =  f"snr={c['snr']:0.1f} width={c['boxc_width']} dm={c['dm']}={c['dm_pccm3']:0.1f}pc/cm3 lm={c['lpix']},{c['mpix']}={coords} iblk={c['iblk']} time={c['time']} obssec={c['obstime_sec']:0.4f} total_samp={c['total_sample']} mjd={t.mjd}={t.utc.isot} beam={c['ibeam']}"
     
     return s
 
@@ -104,7 +104,12 @@ def cand2str(c):
 all_artists = []
 def on_pick(event):
     # shoudl just return one thing
-    candf= next(filter(lambda x: x.artist == event.artist, all_artists))
+    try:
+        candf= next(filter(lambda x: x.artist == event.artist, all_artists))
+    except StopIteration:
+        print(f'Could not find artist {event} {event.artist}, {all_artists}')
+        return
+
     candfile = candf.candfile
 #    print('Artist picked:', event.artist)
 #    print(f'{len(ind)} vertices picked:{ind}')
@@ -124,8 +129,13 @@ def _main():
     parser.add_argument('-c','--maxcount', help='Maximum number of rows to load', type=int)
     parser.add_argument('-p','--pixel', help='Comma serparated pixel to look at')
     parser.add_argument('-d','--dm', help='DM to filter for', type=float)
+    parser.add_argument('--dmgt', help='DM  > to filter for', type=float)
+
+    parser.add_argument('-w','--boxcwidth', help='Boxcar with to filter by', type=int)
     parser.add_argument('--ncandvblk', action='store_true', help='Also plot ncand v block')
     parser.add_argument('-s','--sn-gain', help='Scale marker size S/N by this factor', type=float, default=1.0)
+    parser.add_argument('--newfig', action='store_true', help='Start new figure for each file')
+    parser.add_argument('--raw-units', action='store_true', help='Use raw units')
     parser.add_argument(dest='files', nargs='+')
     parser.set_defaults(verbose=False)
     values = parser.parse_args()
@@ -137,8 +147,22 @@ def _main():
     fig, ax = pylab.subplots(2,2)
     tolerance = 3
 
-    for f in values.files:
-        c = load_cands(f)
+    if values.raw_units:
+        snfields = ('rawsn', 'rawsn')
+        dmfields = ('dm','idm')
+        tfields = ('total_sample', 'total_sample')
+    else:
+        snfields = ('snr', 'S/N')
+        dmfields = ('dm_pccm3', 'DM (pc/cm3)')
+        tfields = ('obstime_sec', 'Obstime (sec)')
+
+    for ifile, f in enumerate(values.files):
+        if ifile >= 1 and values.newfig:
+            fig, ax = pylab.subplots(2,2)
+            all_artists[:] = []
+            
+        fig.suptitle(f)
+        c = load_cands(f, maxcount=values.maxcount)
         print(f'Loaded {len(c)} candidates from {f}')
         
         if values.threshold is not None:
@@ -150,6 +174,13 @@ def _main():
 
         if values.dm is not None:
             c = c[c['dm'] == values.dm]
+
+        if values.dmgt is not None:
+            c = c[c['dm'] == values.dmgt]
+
+        if values.boxcwidth is not None:
+            c = c[c['boxc_width'] == values.boxcwidth]
+            
             
         if len(c) == 0:
             print(f'{f} contained no candidates after applying thresholds')
@@ -160,34 +191,43 @@ def _main():
         candvt = ax[1,0]
         candimg = ax[1,1]
 
-        snhist.hist(c['snr'], histtype='step', bins=50)
-        snhist.set_xlabel('S/N')
+        snhist.hist(c[snfields[0]], histtype='step', bins=50)
+        snhist.set_xlabel(snfields[1])
         snhist.set_ylabel('count')
 
-        dmhist.hist(c['dm_pccm3'], histtype='step', bins=50)
-        dmhist.set_xlabel('DM (pc/cm3)')
+        dmhist.hist(c[dmfields[0]], histtype='step', bins=50)
+        dmhist.set_xlabel(dmfields[1])
         dmhist.set_ylabel('count')
 
         ms = c['snr']**2 * values.sn_gain
+        assert ms.min() > 0
+        assert np.all(np.isfinite(ms))
 
-        points1 = candvt.scatter(c['obstime_sec'], c['dm_pccm3']+1, s=ms, picker=tolerance)
+        points1 = candvt.scatter(c[tfields[0]], c[dmfields[0]]+1, s=ms, picker=tolerance)
         all_artists.append(CandfileArtist(candfile, points1))
         candvt.set_yscale('log')
-        candvt.set_xlabel('Obstime (sec)')
-        candvt.set_ylabel('1+DM (pc/cm3)')
+        candvt.set_xlabel(tfields[1])
+        candvt.set_ylabel(f'1+{dmfields[1]}')
 
-        points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
-        all_artists.append(CandfileArtist(candfile, points2))
-        
-        dec = c['dec_deg']
-        ra = c['ra_deg']
-        if len(c) == 0:
-            print(f, 'is empty')
+        if values.pixel is None:
+            points2 = candimg.scatter(c['ra_deg'],c['dec_deg'], s=ms, picker=tolerance)
+            all_artists.append(CandfileArtist(candfile, points2))            
+            dec = c['dec_deg']
+            ra = c['ra_deg']
+            if len(c) == 0:
+                print(f, 'is empty')
+            else:
+                print(f, 'decrange', dec.max() - dec.min(), 'rarange', ra.max() - ra.min())
+
+            candimg.set_xlabel('RA (deg)')
+            candimg.set_ylabel('Dec (deg)')
         else:
-            print(f, 'decrange', dec.max() - dec.min(), 'rarange', ra.max() - ra.min())
+            line = candimg.plot(c[tfields[0]], c[snfields[0]], picker=tolerance, ls='-', marker='o')
+            all_artists.append(CandfileArtist(candfile, line))
+            candimg.set_xlabel(tfields[0])
+            candimg.set_ylabel(snfields[1])
 
-        candimg.set_xlabel('RA (deg)')
-        candimg.set_ylabel('Dec (deg)')
+
 
         fig.tight_layout()
 

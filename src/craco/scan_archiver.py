@@ -12,10 +12,15 @@ from craco.fixuvfits import fix
 
 logname = "/CRACO/SOFTWARE/craco/craftop/logs/archive_scan.log"
 log = logging.getLogger(__name__)
-stdout_handler = logging.StreamHandler(sys.stdout)
-file_handler = RotatingFileHandler(logname, maxBytes=10000000, backupCount=10000)
-logging.basicConfig(handlers=[file_handler, stdout_handler],
+
+try:
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    file_handler = RotatingFileHandler(logname, maxBytes=10000000, backupCount=10000)
+    logging.basicConfig(handlers=[file_handler, stdout_handler],
                     format='[%(asctime)s] %(levelname)s: %(message)s',
+                    level=logging.DEBUG)
+except: # unit tests won't run with the fixed logname
+    logging.basicConfig(format='[%(asctime)s] %(levelname)s: %(message)s',
                     level=logging.DEBUG)
 
 class TrivialEncoder(json.JSONEncoder):
@@ -102,6 +107,36 @@ def parse_scandir_env(path):
                     return sbid, scanid, tstart
 
     raise RuntimeError(f"Could not parse sbid, scanid and tstart from {path}")
+
+def keep_with_tsp():
+    log.info(f"keep uvfits files for archiving")
+
+    KEEP_TS_SOCKET = "/data/craco/craco/tmpdir/queues/keep"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    environment = {
+        "TS_SOCKET": KEEP_TS_SOCKET,
+        "TMPDIR": TMPDIR,
+    }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    try:
+        scan_dir = os.environ['SCAN_DIR']
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    except Exception as KE:
+        log.critical(f"Could not fetch the scan directory from environment variables!!")
+        log.critical(KE)
+        return
+    else:
+        sbid, scanid, tstart = parse_scandir_env(scan_dir)
+        cmd = f"""keep_archive_scan.sh {sbid} {scanid} {tstart}"""
+        
+        S.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        log.info(f"Queued keep scan job - with command - {cmd}")
 
 
 def run_with_tsp(destination_str, exclude_uvfits:bool = False):
@@ -208,6 +243,12 @@ class ScanArchiver:
                 log.info(f"Jobid {jobid} raised an exception {generic_e}")
                 self.jobs_errored[jobid] = {'datadir':datadir, 'result':result}
         
+        log.info("copying observation metadata file...")
+        options = ["copy", f"{self.scan.scheddir.sched_head_dir}/obs_metadata.txt", self.dest_scan_path]
+        if dry: options += ["--dry-run"]
+        cmd = self.base_cmd + options
+        result = execute(cmd)
+        
         #stats_cmd = self.base_cmd + ["size", f"{self.destination[0]}:{self.dest_scan_path}"]
         stats_cmd = self.base_cmd + ["size", f"{self.dest_scan_path}"]
         stats = execute(stats_cmd)
@@ -281,20 +322,42 @@ class ScanArchiver:
 
 def get_parser():
     a = argparse.ArgumentParser()
-    a.add_argument("-sbid", type=str, help="SBID", required=True)
-    a.add_argument("-scanid", type=str, help="scanid", required=True)
-    a.add_argument("-tstart", type=str, help="tstart", required=True)
-    a.add_argument("-dest", type=str, help="Destination string (hostname:/path/to/dest) - acacia:GSPs/AS400/", required=True)
+    a.add_argument("-sbid", type=str, help="SBID", required=False)
+    a.add_argument("-scanid", type=str, help="scanid", required=False)
+    a.add_argument("-tstart", type=str, help="tstart", required=False)
+    a.add_argument("-dest", type=str, help="Destination string (hostname:/path/to/dest) - acacia:as305/", required=True)
     a.add_argument("-exclude_uvfits", action='store_true', help="Exclude uvfits (def:False)", default=False)
     a.add_argument("-dry", action='store_true', help="Do a dry run only (def:False)", default=False)
-
+    a.add_argument('dirnames', nargs='*', help='Directory names of the scan')
+    
     args = a.parse_args()
     return args
 
 def main():
     args = get_parser()
-    sa = ScanArchiver(args.sbid, args.scanid, args.tstart, args.dest, args.exclude_uvfits)
-    sa.run(dry = args.dry)
+    if args.dirnames is None or len(args.dirnames) == 0:
+        targets = [[args.sbid, args.scanid, args.tstart]]
+    else:
+        targets = []
+        for dirname in args.dirnames:
+            if not os.path.isdir(dirname):
+                log.info('%s is not a directory. skipping', dirname)
+                continue
+            if dirname.endswith('/'):
+                dirname = dirname[:-1]
+            bits = dirname.split('/')
+            print(len(bits), dirname, bits)
+            # dirname should look like this /../../../SB071974/scans/00/20250319001933
+            # possibly with trailing slash
+            sbid, scanid, tstart = bits[-4], bits[-2], bits[-1]
+            assert bits[-3] == 'scans', f'Directory name should be a scan directory. Was: {dirname}'
+            targets.append([sbid, scanid, tstart])
+
+    
+    for sbid, scanid, tstart in targets:
+        dest = args.dest.lower()
+        sa = ScanArchiver(sbid, scanid, tstart, dest, args.exclude_uvfits)
+        sa.run(dry = args.dry)
 
 if __name__ == '__main__':
     main()

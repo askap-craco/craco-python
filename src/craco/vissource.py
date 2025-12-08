@@ -12,11 +12,13 @@ import os
 import sys
 import logging
 import glob
-from craco.cardcap import NCHAN, NFPGA
+from craco.cardcap import NCHAN, NFPGA, NBEAM
 from craco.cardcapfile import NSAMP_PER_FRAME
 from craco import cardcap
 from craco.cardcapmerger import CcapMerger, frame_id_iter
+from craco.mpi_obsinfo import MpiObsInfo
 import astropy.io.fits.header as header
+from craco.mpi_appinfo import MpiPipelineInfo
 from mpi4py import MPI
 
 log = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class CardCapFileSource:
     '''
     Gets data from a single card - i.e. 6 FPGAs
     '''
-    def __init__(self, pipe_info):
+    def __init__(self, pipe_info:MpiPipelineInfo):
         self.pipe_info = pipe_info
         values = pipe_info.values
         cardidx = pipe_info.cardid
@@ -42,19 +44,25 @@ class CardCapFileSource:
         block = values.block[iblk]
         if values.cardcap_dir is not None:
             files = glob.glob(os.path.join(values.cardcap_dir, '*.fits'))
-            log.debug('Found %d cards in %s', len(files), values.cardcap_dir)
+            log.info('Found %d cards in %s', len(files), values.cardcap_dir)
         else:
             files = values.files
             
         fstr = f'b{block:02d}_c{card:02d}'
         myfiles = sorted(filter(lambda f: fstr in f, files))
         log.info(f'Cardidx {cardidx} icard={icard} iblk={iblk} card={card} iblk={iblk} has {len(myfiles)} files ')
-        assert len(myfiles) == NFPGA, f'Incorrect number of cards for cardidx={cardidx} {fstr} {myfiles} {files} '
+        assert len(myfiles) == NFPGA, f'Incorrect number of cards for cardidx={cardidx} {fstr} {myfiles} {files} in {values.cardcap_dir}'
         self.merger = CcapMerger(myfiles)
         self.myfiles = myfiles
         self.values = values
         self.card = card
         self.block = block
+
+        # integration time comes from lots of different places and I probably don't do a great job of passing it around.
+        # so I just want to check that the value in the arguments tallies with what's in the header
+        spi = pipe_info.values.samples_per_integration
+        assert spi * self.merger.nt_per_frame == NSAMP_PER_FRAME, \
+            f'Invalid SPI: {spi} merger NT perframe={self.merger.nt_per_frame} expected product={NSAMP_PER_FRAME}'
 
     @property
     def fpga_headers(self):
@@ -86,16 +94,66 @@ class CardCapFileSource:
         assert self.fid0 is not None, 'Must call start()'
         return self.merger.packet_iter(start_fid=self.fid0, beam=self.values.beam)
     
+class SyntheticVisSource:
+    ''''
+    Loads headers from cardcap files
+    but returns synthetic data
+    '''
+    def __init__(self, pipe_info:MpiPipelineInfo, ncache=13):
+        '''
+        Instead of computing random stuff all the time, we just compute some random stuff once
+        them loop through it.
+        nchan prime is probably a good choice
+        '''
+        self._filesource = CardCapFileSource(pipe_info)
+        self.merger = self._filesource.merger
+        
+        # Seed the RNG with the cardid
+        cardid = pipe_info.cardid
+        rng = np.random.default_rng(seed=cardid)
+        
+        self.packets = [[np.zeros((NBEAM*NCHAN, self.merger.ntpkt_per_frame), dtype=self.merger.dtype) for f in range(NFPGA)] for c in range(ncache)]
+        for cache in self.packets:
+            for pkt in cache:
+                pkt['data'] = rng.standard_normal(pkt['data'].shape) * 1000
+
+        self.__icache = 0
+    
+    @property
+    def fpga_headers(self):
+        return self._filesource.fpga_headers
+    
+    def start(self):
+        return self._filesource.start()
+    
+    def packet_iter(self, nframes):
+        fid = np.uint64(self._filesource.fid0)
+
+        while True:            
+            packets = self.packets[self.__icache]
+            # make a copy of the packets so we can modify with injections
+            packets = [p.copy() for p in packets]
+            
+            for d in packets:
+                #d['data'] = (np.random.randn(*d['data'].shape)*50).astype(np.int16)
+                d['bat'][0] = fid
+                d['frame_id'][0][0] = fid
+
+            yield (packets, [fid]*NFPGA)
+            fid += NSAMP_PER_FRAME
+            self.__icache = (self.__icache + 1) % len(self.packets)
+
+    
 
 class CardCapNetworkSource:
-    def __init__(self, pipe_info):
+    def __init__(self, pipe_info:MpiPipelineInfo):
         block_cards  = []
         procid = 0
         cardno = 0
         values = pipe_info.values
         numprocs = pipe_info.rx_comm.Get_size()
         self.pipe_info = pipe_info
-        self.skip_frames = 10*50 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
+        self.skip_frames = 10*30 # skip this many this many 110ms beamformer frames before returning data. TODO: Get from cmdline.
 
         # assign all FPGAs to each rank
         for blk in values.block:
@@ -108,9 +166,11 @@ class CardCapNetworkSource:
 
         log.debug('numprocs %s block_cards %s', numprocs, block_cards)
 
+        net_device = pipe_info.my_rank_info.net_dev
         self.ctrl = cardcap.MpiCardcapController(pipe_info.rx_comm,
                                                   pipe_info.values,
-                                                  block_cards)
+                                                  block_cards,
+                                                  device=net_device)
         # make dummy merger so othe rpeople can get dtype and
         # other useful parameters
         self.merger = CcapMerger.from_headers(self.fpga_headers)
@@ -146,24 +206,43 @@ class CardCapNetworkSource:
         # We need to keep looping over all FPGAs otehrwise we just get stuck on one.
         # so all FPGAs start at the original planned start bat.
         # we loop through and only yield when all FPGAs have an FID >= the origianllly specified fid0
+        npkt = 0
         while True:
             try:
                 fpga_data = [next(fiter) for fiter in iters]
                 packets = [fd[1] for fd in fpga_data]
                 fids = [fd[0] for fd in fpga_data]
                 fid = fids[0]
+                if npkt == 0:
+                    log.debug('Starting packet iteration. npkt=%d fid0=%d fids=%s', npkt, self.fid0, fids)
+
                 if fid >= self.fid0:
                     yield (packets, fids)
+                    npkt += 1
             except StopIteration:
                 break
 
         self.ctrl.stop()
                 
 
-def open_source(pipe_info):
+def open_source(pipe_info:MpiPipelineInfo):
+    '''
+    IF cardcap_dir is specified, it will open a cardcapfilesource 
+    IF fake_cardcap_data is specified, it will open a syntheticvissource
+    Otherwise, opens the network and goes the whole hog, you madman.
+    
+    - You go whole hog.
+    - OOOOooh, what a burn!
+
+
+    '''
+
     values = pipe_info.values
     if values.cardcap_dir is not None:
-        src = CardCapFileSource(pipe_info)
+        if values.fake_cardcap_data is not None:
+            src = SyntheticVisSource(pipe_info)
+        else:
+            src = CardCapFileSource(pipe_info)
     else:
         src = CardCapNetworkSource(pipe_info)
 
@@ -176,7 +255,7 @@ class VisBlock:
     All baselines
     Block of NT integrations
     '''
-    def __init__(self, data, iblk, info, cas=None, ics=None):
+    def __init__(self, data, iblk, info:MpiObsInfo, cas=None, ics=None):
         self._d = data
         self.iblk = iblk
         self.info = info

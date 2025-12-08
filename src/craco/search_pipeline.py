@@ -26,7 +26,7 @@ from craco import calibration, uvfits_meta
 from craco.timer import Timer
 from craco.vis_subtractor import VisSubtractor
 from craco.vis_flagger import VisFlagger
-from craco.preprocess import FastPreprocess
+from craco.preprocess import FastPreprocess, TAB_handler
 from craco.candidate_writer import CandidateWriter
 from craco import write_psf as PSF
 
@@ -125,6 +125,19 @@ def make_fft_config(nplanes:int,
             by_s1
 
     return word
+
+def count_candidates(c):
+    '''
+    Count the number of candidates in a block of candiates by finding the first candidate with snr==0
+    returns the index of that candidate. If there are no candidates in the block then returns len(c)
+    '''
+    try:
+        ncand, lastcand = next((i,c) for i,c in enumerate(c) if c['snr']  == 0)
+    except StopIteration:
+        ncand = len(c) 
+
+    return ncand
+
 
 def calc_fft_scale(fft_shift1, fft_shift2):
     '''
@@ -305,7 +318,7 @@ class Pipeline:
 
 
                 
-        # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
+        
         log.info('Allocating FDMT Input')
 
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
@@ -547,7 +560,7 @@ class Pipeline:
         self.last_bc_noise_level = bc_noiselevel # save for future reference
         assert threshold_boxcarval > 0, f'Invalid threshold boxcar value {threshold_boxcarval}'
 
-        log.info(f'nConfiguration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x} threshold={threshold} imgnoise={img_noiselevel} bcnoise={bc_noiselevel} bcthresh={bc_threshold}={threshold_boxcarval}\n')
+        log.info(f'Configuration just before pipeline running \nndm={ndm} nchunk_time={nchunk_time} tblk={tblk} nuv={nuv} nparallel_uv={nparallel_uv} nurest={nurest} load_luts={load_luts} nplane={nplane} shift1={fft_shift1} shift2={fft_shift2} fft_cfg={fft_cfg:x} threshold={threshold} imgnoise={img_noiselevel} bcnoise={bc_noiselevel} bcthresh={bc_threshold}={threshold_boxcarval}\n')
 
         assert ndm < 1024,' It hangs for ndm=1024 - not sure why.'
 
@@ -637,7 +650,7 @@ class Pipeline:
         # thisis probably a bit extreme, because it sets the whole candidate array to 0, but we
         # We could just set the first entry to zero - I'll work that out later
         self.candidates.clear()
-        assert len(self.get_candidates()) == 0
+        #assert len(self.get_candidates()) == 0
         
 
     def get_candidates(self):
@@ -650,13 +663,14 @@ class Pipeline:
         self.candidates.copy_from_device()
         # argmax stops at the first occurence of 'True'
         c = self.candidates.nparr
-        log.info('Last candidate is %s', c[-1])
         if c[-1]['snr'] != 0:
             warnings.warn('Candidate buffer overflowed')
             candout = c
         else:
-            ncand = np.argmax(self.candidates.nparr['snr'] == 0)
+            ncand = count_candidates(c)
             candout = self.candidates.nparr[:ncand]
+
+        log.info('Got %d candidates. Last candidate is %s', len(candout), c[-1])
 
         # TODO: think about performance here
         return candout
@@ -790,10 +804,10 @@ class Pipeline:
         :iblk: = input block number. Increments by 1 for every call.
         :returns: cand_iblk, candidates
         '''
-        raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
+        #raise NotImplemented('Theres is probably a bug in this where it outputs empty candidates with S/N=0')
 
         fdmt_tblk = iblk % NBLK
-        img_tblk = (iblk -1) % NBLK
+        img_tblk = (iblk - 1) % NBLK
         cand_iblk = iblk - 2 # candidate block coming from pipeline
 
 
@@ -813,13 +827,15 @@ class Pipeline:
 
         # if we've waited successfuly then we can get candidates
         if cand_iblk >= 0:
-            candidates = self.get_candidates()
+            candidates = self.get_candidates().copy() # It's about to get cleared - so we should copy it befor eit does
         else:
             candidates = np.zeros(0, dtype=candidate_dtype)
 
         # only start running once we've run an FDMT
         if iblk >= 1:
             self.image_starts = self.run_image(img_tblk, values)
+
+        log.info('parallel excecution on iblk %d fdmt_tblk=%d img_tblk=%d cand_iblk=%d, ncand=%d', iblk, fdmt_tblk, img_tblk, cand_iblk, len(candidates))
 
         return cand_iblk, candidates
     
@@ -1156,6 +1172,8 @@ class PipelineWrapper:
         }
 
         os.makedirs(values.outdir, exist_ok=True)
+        self.beamdir = os.path.join(values.outdir, f'beam{beamid:02d}')
+        os.makedirs(self.beamdir, exist_ok=True)
 
         if values.phase_center_filterbank is None:
             self.pc_filterbank = None
@@ -1181,6 +1199,8 @@ class PipelineWrapper:
                             values.dump_boxcar_hist_buf is not None or \
                             values.dump_input is not None or \
                             values.print_dm0_stats
+
+        self.doing_dumps = alloc_device_only
     
         p = Pipeline(device, xbin, plan, alloc_device_only)
 
@@ -1206,6 +1226,10 @@ class PipelineWrapper:
                                                 self.fixed_freq_weights, 
                                                 beamid = beamid,
                                                 sky_sub = True, global_norm = True)
+        
+        tabdir = os.path.join(values.outdir, f'beam{beamid:02d}','tabs')
+        target_corods = []
+        #self.tab_handler = TAB_handler(target_coords, plan, tabdir)
 
         self.pipeline = p
         p.clear_buffers(values)
@@ -1265,7 +1289,7 @@ class PipelineWrapper:
             input_flat_cal = self.fast_preprocessor.output_buf
 
         if do_dump(values.dump_input, iblk):
-            input_flat_cal.dump(f'input_iblk{iblk}.npy')# Saves as a pickle load with np.load(allow_pickle=True)
+            input_flat_cal.dump(os.path.join(self.beamdir, f'input_iblk{iblk}.npy'))# Saves as a pickle load with np.load(allow_pickle=True)
             t.tick('dump input')
         
         if values.injection_file:
@@ -1276,6 +1300,7 @@ class PipelineWrapper:
             d = input_flat_cal.real.mean(axis=0).T.astype(np.float32)
             log.info('Phase center stats %s', printstats(d))
             d.tofile(pc_filterbank.fin)
+            pc_filterbank.fin.flush()
             t.tick('PC filterbank')
 
         p.prepare_inbuf(input_flat_cal, values)
@@ -1290,8 +1315,13 @@ class PipelineWrapper:
         log.info('Got %d candidates in block %d cand_iblk=%d', len(candidates), iblk, cand_iblk)
         self.total_candidates += len(candidates)
         out_cands = None
+
+        if self.parallel_mode and self.doing_dumps:
+            log.info('Sleeping for 2 seconds as were dumping data but running in parallel mode so we should wait')
+            time.sleep(2)
+
         if len(candidates) > 0:
-            out_cands = self.candout.interpret_cands(candidates, iblk, plan, p.last_bc_noise_level, candout_buffer)
+            out_cands = self.candout.interpret_cands(candidates, cand_iblk, plan, p.last_bc_noise_level, candout_buffer)
             t.tick('Interpret candidates')
             self.candout.write_cands(out_cands)            
             t.tick('Write candidates')
@@ -1311,24 +1341,25 @@ class PipelineWrapper:
 
         # must be after running pipeline otehrwise you copy old data from card into host memory before you dump!
         if do_dump(values.dump_uvdata, iblk): 
-            p.inbuf.saveto(f'uv_data_iblk{iblk}.npy')
+            p.inbuf.saveto(os.path.join(self.beamdir, f'uv_data_iblk{iblk}.npy'))
             t.tick('dump uv')
 
         if do_dump(values.dump_candidates, iblk):
             np.save(f'candidates_iblk{iblk}.npy', candidates) # only save candidates to file - not the whole buffer
+            p.candidates.saveto(os.path.join(self.beamdir, f'candidate_buf_iblk{iblk}.npy')) # also save whole buffer because  ... debugging
             t.tick('dump candidates')
         if do_dump(values.dump_mainbufs, iblk):
             for ib, mainbuf in enumerate(p.all_mainbufs):
-                mainbuf.saveto(f'mainbuf_iblk{iblk}_ib{ib}.npy')
+                mainbuf.saveto(os.path.join(self.beamdir, f'mainbuf_iblk{iblk}_ib{ib}.npy'))
 
             t.tick('dump mainbuf')
 
         if do_dump(values.dump_fdmt_hist_buf, iblk):
-            p.fdmt_hist_buf.saveto(f'fdmt_hist_buf_iblk{iblk}.npy')
+            p.fdmt_hist_buf.saveto(os.path.join(self.beamdir, f'fdmt_hist_buf_iblk{iblk}.npy'))
             t.tick('dump fdmt hist')
 
         if do_dump(values.dump_boxcar_hist_buf, iblk):
-            p.boxcar_history.saveto(f'boxcar_hist_iblk{iblk}.npy')
+            p.boxcar_history.saveto(os.path.join(self.beamdir, f'boxcar_hist_iblk{iblk}.npy'))
             t.tick('dump boxcar')
 
         logging.info('Write for iblk %d timer: %s', iblk, t)
@@ -1388,8 +1419,9 @@ def _main():
     log.info('Creating UVW data for isamp=%d will update every %d samples', isamp_update, update_uv_blocks*nt)
     plan_info = f.vis_metadata(isamp_update)
     start_info = f.vis_metadata(0)
+    parallel_mode = True
         
-    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info, parallel_mode=False)
+    pipeline_wrapper = PipelineWrapper(plan_info, values, values.device, startinfo=start_info, parallel_mode=parallel_mode)
     plan = pipeline_wrapper.plan
     vis_source = VisSource(plan, f, values)
     pipeline_wrapper.vis_source = vis_source
