@@ -177,18 +177,22 @@ def wait_for_starts(starts, call_start, timeout_ms: int=1000):
         
 
 class KernelStarts:
-    def __init__(self):
+    def __init__(self, timeout:int=0):
         self.starts = []
         self.call_start = time.perf_counter()
+        assert timeout >= 0, f'Timeout must be >= 0. Got {timeout}'
+        self.timeout = timeout
 
     def append(self, s):
         self.starts.append(s)
 
-    def wait(self, timeout:int=1000):
+    def wait(self, timeout:int=None):
         '''
         Wait for all the starts
         :timeout: time to wait in milliseconds
         '''
+        if timeout is None:
+            timeout = self.timeout
         return wait_for_starts(self.starts, self.call_start, timeout)
 
     def __len__(self):
