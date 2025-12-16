@@ -200,7 +200,7 @@ def _main():
         dmhist.set_ylabel('count')
 
         ms = c['snr']**2 * values.sn_gain
-        assert ms.min() > 0
+        assert ms.min() >= 0
         assert np.all(np.isfinite(ms))
 
         points1 = candvt.scatter(c[tfields[0]], c[dmfields[0]]+1, s=ms, picker=tolerance)
