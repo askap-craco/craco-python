@@ -35,6 +35,7 @@ from Visibility_injector.inject_in_fake_data import FakeVisibility
 from collections import OrderedDict
 #from trace_event_handler import TraceEventHandler
 from astropy import units
+from IPython import embed
 
 import logging
 import warnings
@@ -318,7 +319,7 @@ class Pipeline:
 
 
                 
-        
+        # FDMT: (pin, pout, histin, histout, pconfig, out_tbkl)
         log.info('Allocating FDMT Input')
 
         # Need ??? BM, have 5*256 MB in link file, but it is not device only, can only alloc 256 MB?
@@ -363,18 +364,22 @@ class Pipeline:
         self.all_mainbufs = [Buffer(sub_mainbuf_shape, np.int16, device, self.grid_reader.krnl.group_id(0), self.device_only_buffer_flag).clear() for b in range(num_mainbufs)]
             
 
-        log.info('Allocating boxcar_history')    
+        log.info('Allocating boxcar_history to group ID 7')    
 
         npix = self.plan.npix
         # Require 1024 MB, we have 4 HBMs in link file, which gives us 1024 MB
         NBOX = 7 # Xinping only saves 7 boxcars for NBOX = 8. TODO: change to 8
-        self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(3), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
+        
+        self.boxcar_history = Buffer((NDM_MAX, NBOX, npix, npix), np.int16, device, self.boxcarcu.group_id(7), self.device_only_buffer_flag).clear() # Grr, gruop_id problem self.boxcarcu.group_id(3))
         log.info(f"Boxcar history {self.boxcar_history.shape} {self.boxcar_history.size} {self.boxcar_history.itemsize}")
         log.info('Allocating candidates')
 
         # small buffer
         # The buffer size here should match the one declared in C code
-        self.candidates = Buffer(NDM_MAX*self.plan.nbox*16, candidate_dtype, device, self.boxcarcu.group_id(5)).clear() # Grrr self.boxcarcu.group_id(3))
+        MAX_NCAND = NDM_MAX*self.plan.nbox*16
+        self.candidates = Buffer(MAX_NCAND, candidate_dtype, device, self.boxcarcu.group_id(8)).clear() # Grrr self.boxcarcu.group_id(3))
+        self._candidates_copy = np.zeros(MAX_NCAND, dtype=candidate_dtype) # for making a copy of
+
 
         self.starts = None
         self.cal_solution = calibration.CalibrationSolution(self.plan)
@@ -514,9 +519,12 @@ class Pipeline:
         assert 0 <= tblk < NBLK
         nuv         = self.plan.fdmt_plan.nuvtotal
         nurest      = nuv//8
+
+        # debug
+        #nurest = 16
         log.info('Running fdmt on tblk=%d nurest=%d', tblk, nurest)
         run = self.fdmtcu(self.inbuf, self.all_mainbufs[0], self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk)
-        starts = KernelStarts()
+        starts = KernelStarts(timeout=3000)
         starts.append(run)
         return starts
 
@@ -554,7 +562,9 @@ class Pipeline:
         assert threshold >= 0, f'Invalid threshold:{threshold}'
 
         img_noiselevel = self.plan.values.target_input_rms*noise_scale
-        bc_noiselevel = img_noiselevel / 4 # for some reason BOXCAR values are 4x smaller than image values - check with Xinping
+        #bc_noiselevel = img_noiselevel / 4 # for some reason BOXCAR values are 4x smaller than image values - check with Xinping
+        # in boxcar v2 - I think this is now == img_noiselevel
+        bc_noiselevel = img_noiselevel
         bc_threshold = threshold*bc_noiselevel
         threshold_boxcarval = np.uint16(bc_threshold)
         self.last_bc_noise_level = bc_noiselevel # save for future reference
@@ -568,8 +578,12 @@ class Pipeline:
         self.clear_candidates()
         log.info('Candidates cleared')
         # IT IS VERY IMPORTANT TO START BOXCAR FIRST! IF YOU DON'T THE PIPELINE CAN HANG!
-        starts = KernelStarts()
-        starts.append(self.boxcarcu(ndm, nchunk_time, threshold_boxcarval, self.boxcar_history, self.boxcar_history, self.candidates))
+        starts = KernelStarts(timeout=3000)
+        #embed()
+        # Weirdly we now have to include 0 for the stream input arguments in boxcar. Didn't used to need ot tdo this.
+        # somethig ot with with XRT or 2024.2?
+        starts.append(self.boxcarcu(ndm, nchunk_time, threshold_boxcarval, 0,0,0,0,self.boxcar_history, self.candidates))
+        time.sleep(1) # allow time for boxcar to start - not ideal but useful for debugging
         
         for cu in self.ffts:
             starts.append(cu(fft_cfg, fft_cfg))
@@ -598,7 +612,7 @@ class Pipeline:
             # temporary: finish FDMT before starting image pipeline on same tblk
             #starts.append(self.fdmtcu(self.inbuf, self.mainbuf, self.fdmt_hist_buf, self.fdmt_hist_buf, self.fdmt_config_buf, nurest, tblk))
             # you have to run teh FDMT on a tblk and run the image pipelien on tblk - 1 if you're doing to run them at the same time.
-            self.run_fdmt(tblk).wait()
+            self.run_fdmt(tblk).wait(2000)
 
         image_starts = None
         if values.run_image:
@@ -663,14 +677,20 @@ class Pipeline:
         self.candidates.copy_from_device()
         # argmax stops at the first occurence of 'True'
         c = self.candidates.nparr
+        log.info('First raw candidate is %s', c[0])
+        log.info('Last raw candidate is %s', c[-1])
         if c[-1]['snr'] != 0:
             warnings.warn('Candidate buffer overflowed')
-            candout = c
+            self._candidates_copy[:] = c[:]
         else:
             ncand = count_candidates(c)
-            candout = self.candidates.nparr[:ncand]
+            self._candidates_copy[:ncand] = c[:ncand]
 
-        log.info('Got %d candidates. Last candidate is %s', len(candout), c[-1])
+        candout = self._candidates_copy[:ncand]
+        first_candidate = candout[0] if len(candout) > 0 else None
+        last_candidate = candout[-1] if len(candout) > 0 else None
+
+        log.info('Got %d raw candidates. First candidate is %s, Last candidate is %s', len(candout), first_candidate, last_candidate)
 
         # TODO: think about performance here
         return candout
@@ -827,7 +847,7 @@ class Pipeline:
 
         # if we've waited successfuly then we can get candidates
         if cand_iblk >= 0:
-            candidates = self.get_candidates().copy() # It's about to get cleared - so we should copy it befor eit does
+            candidates = self.get_candidates().copy()
         else:
             candidates = np.zeros(0, dtype=candidate_dtype)
 
@@ -869,12 +889,13 @@ class Pipeline:
         t.tick('Copy to device')
 
         # run fdmt
-        self.fdmt_starts = self.run_fdmt(fdmt_tblk)
-        t.tick('FDMT run')
-        self.fdmt_starts.wait()
-        fdmt_wait_time = t.tick('FDMT wait')
-        if fdmt_wait_time.perf < 0.002:
-            raise RuntimeError(f'FDMT completed immediately. It should take > 400 ms. There is probably a request stuck in the queue. Maybe reset the card. See CRACO-327. Took: {fdmt_wait_time}')
+        if values.run_fdmt:
+            self.fdmt_starts = self.run_fdmt(fdmt_tblk)
+            t.tick('FDMT run')
+            self.fdmt_starts.wait()
+            fdmt_wait_time = t.tick('FDMT wait')
+            if fdmt_wait_time.perf < 0.002:
+                raise RuntimeError(f'FDMT completed immediately. It should take > 400 ms. There is probably a request stuck in the queue. Maybe reset the card. See CRACO-327. Took: {fdmt_wait_time}')
 
         # wait for image pipeline
         if self.image_starts is not None:
@@ -1238,7 +1259,7 @@ class PipelineWrapper:
         cand_file_bits = values.cand_file.split('.')
         cand_file_bits.insert(-1, f'b{beamid:02d}')
         candfile = os.path.join(values.outdir, '.'.join(cand_file_bits))
-        candout = CandidateWriter(candfile, plan.freqs, plan.dmax, plan.nbox, self.first_tstart, ibeam=beamid)
+        candout = CandidateWriter(candfile, plan.freqs, plan.dmax, plan.nbox+1, self.first_tstart, ibeam=beamid)
         self.total_candidates = 0
         self.candout = candout        
         self.iblk = 0

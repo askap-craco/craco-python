@@ -5,6 +5,7 @@ import gzip
 from astropy.time import Time
 from astropy import units as u
 from craft import fdmt
+from IPython import embed
 
 # oooh, gosh - this is noughty
 DM_CONSTANT = 4.15
@@ -204,7 +205,7 @@ class CandidateWriter:
             self.fout.write("# " + hdr_str + "\n")
             self.fout.flush()
                 
-    def interpret_cands(self, rawcands, iblk, plan, raw_noise_level, candbuf=None):
+    def interpret_cands(self, rawcands, iblk, plan, raw_noise_level, candbuf=None, snr_threshold=0):
         ncands = len(rawcands)
         first_tstart = self.first_tstart
         
@@ -214,8 +215,7 @@ class CandidateWriter:
         
         #Get the corrected snrs and remove all below 6 sigma
         true_snr = rawcands['snr'] * 1./raw_noise_level * self.snr_multiplier[rawcands['dm'], rawcands['boxc_width']]
-        rawcands = rawcands[(true_snr >= 6)]
-
+        rawcands = rawcands[(true_snr >= snr_threshold)]
         #new ncands
         orig_ncands = ncands
         ncands = len(rawcands)
@@ -232,7 +232,7 @@ class CandidateWriter:
             return candidates
         
         #candidates['hw_ncands'] = orig_ncands
-        candidates['snr'] = true_snr[true_snr >= 6]
+        candidates['snr'] = true_snr[true_snr >= snr_threshold]
         location = rawcands['loc_2dfft']
         candidates['lpix'], candidates['mpix'] = location2pix(location, plan.npix)
         candidates['rawsn'] = rawcands['snr']
