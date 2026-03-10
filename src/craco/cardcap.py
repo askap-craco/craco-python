@@ -334,7 +334,7 @@ class FpgaCapturer:
         
         # debug timeout problems
         if self.total_completions <= 1:
-            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Doing initial {self.rx.timeoutMillis}ms wait')
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Doing initial {self.rx.timeoutMillis}ms wait', stack_info=True)
 
         start_wait_ns = time.time_ns()
 
@@ -345,7 +345,7 @@ class FpgaCapturer:
         wait_ns = stop_wait_ns - start_wait_ns
         # debug timeout problems
         if self.total_completions <= 1:
-            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Completed wait in {wait_ns/1e6}ms')
+            log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} Total completions {self.total_completions}. Completed wait in {wait_ns/1e6}ms', stack_info=True)
 
         rx.pollRequests()
         ncompletions = rx.get_numCompletionsFound()
@@ -397,6 +397,7 @@ class FpgaCapturer:
             fid = d['frame_id'][0, 0] # Frame ID is the frame ID of the first sample of the intgration, according ot John Tuthill
             if self.curr_fid is None:
                 fid_diff = 0
+                log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} First immediate was {immediate} fid0 was {fid}')
             else:
                 fid_diff = fid - self.curr_fid
 
@@ -465,6 +466,9 @@ class FpgaCapturer:
 
         while iblk < nblk:
             for fid, d in self.get_data(): # loop through completions
+                if iblk <= 2:
+                    log.info(f'{hostname} {self.values.block}/{self.values.card}/{self.fpga} yielding iblk={iblk} fid={fid} ')
+
                 self.rx.timeoutMillis = 225 # milliseconds
                 yield fid, d
                 iblk += 1

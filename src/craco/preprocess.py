@@ -206,7 +206,7 @@ def get_subblock_rms(input_data, rmses, bl_weights, tf_weights, isubblock, fines
 def get_phase_varying_dynamic_rfi_masks(input_data, rmses, finest_nt, bl_weights, tf_weights, freq_radius, freq_threshold):
     '''
     input_data - np.ndarray - complex64
-                Numpy array containing the visibility data
+                Numpy array containing the visibility data. if it's a masked array, then the data array will be used
     rmses -     np.ndarray - float64
                 Numpy array which will store the rms values
     finest_nt - int
@@ -226,6 +226,9 @@ def get_phase_varying_dynamic_rfi_masks(input_data, rmses, finest_nt, bl_weights
     assert rmses.size == nf, "rmses array has to have shape (nf,)"
     #rmses = np.zeros(nf, dtype='float64')
     nsubblock = int(nt / finest_nt)
+    if type(input_data) == np.ma.core.MaskedArray:
+        input_data = input_data.data
+
     for isubblock in prange(nsubblock):
         rmses[:] = 0
         get_subblock_rms(input_data, rmses, bl_weights, tf_weights, isubblock, finest_nt, nbl, nf, nt)
@@ -1253,6 +1256,8 @@ class FastPreprocess:
             assert input_tf_weights.shape == self.blk_shape[1:]
     
         self.update_preflagging_statistics(input_tf_weights, bl_weights)
+
+
 
         get_phase_varying_dynamic_rfi_masks(input_block,
                                             rmses = self.rmses,
