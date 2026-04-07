@@ -9,6 +9,7 @@ several things should be covered is
 
 import os
 import re
+import subprocess
 
 from astropy.io import fits
 from astropy.time import Time
@@ -19,9 +20,14 @@ import numpy as np
 from aces.askapdata.schedblock import SB, SchedulingBlock
 
 from craco.fixuvfits import fix
-from craco.datadirs import SchedDir, ScanDir
+from craco.datadirs import SchedDir, ScanDir, format_sbid
+from craco.tools import cracocal2casatab
 
 import logging
+logging.basicConfig(
+    level = logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+)
 logger = logging.getLogger(__name__)
 
 def metadata_dict2xml(metadata, indent=2):
@@ -29,13 +35,18 @@ def metadata_dict2xml(metadata, indent=2):
     return "<metadata>\n" + "\n".join(items) + "\n</metadata>"
 
 def execute_fixuvfits(uvfitspath):
-    try: fix(uvfitspath)
+    try: 
+        logger.info(f"fixing {uvfitspath}...")
+        fix(uvfitspath)
+        return 0
     except Exception as error:
         logger.info(f"cannot fix {uvfitspath} due to - {error}")
+        return -1
 
 class UvfitsCasdaMetadata:
     def __init__(self, uvfitspath):
         self.uvfitspath = os.path.abspath(uvfitspath)
+        self._fix_uvfits() # fix uvfits file...
         self.uvsource = uvfits.open(uvfitspath)
         self.hdulist = fits.open(uvfitspath)
 
@@ -47,6 +58,19 @@ class UvfitsCasdaMetadata:
 
         ### load calibration files
         self._load_calfile()
+
+    def _fix_uvfits(self,):
+        canwrite = os.access(self.uvfitspath, os.W_OK)
+        logger.info(f"checking uvfits permission with OS.ACCESS - {canwrite}")
+        if not canwrite:
+            cmd = f"chmod +w {self.uvfitspath}"
+            logger.info(f"executing {cmd} to add write permission...")
+            os.system(cmd)
+        fixstatus = execute_fixuvfits(self.uvfitspath)
+        if not canwrite:
+            cmd = f"chmod -w {self.uvfitspath}"
+            logger.info(f"removing write permission...")
+            os.system(cmd)
 
     def _format_isotime(self, time, fmt="%Y-%m-%dT%H:%M:%S"):
         assert isinstance(time, Time), f"wrong time type - {type(time)}"
@@ -116,6 +140,10 @@ class UvfitsCasdaMetadata:
     @property
     def casdafname(self,):
         return f"cracoData.{self.field}.SB{self.sbid}.beam{self.beam}.{self.cracoscan}.uvfits"
+
+    @property
+    def casdacasatabfname(self,):
+        return f"cracoCal.{self.field}.SB{self.sbid}.beam{self.beam}.B0"
     
     @property
     def archivefolder(self,):
@@ -154,12 +182,12 @@ class UvfitsCasdaMetadata:
     def dump_casda_metadata(self, folder):
         casdameta = self.casda_metadata()
         casdametaxml = metadata_dict2xml(casdameta)
-        xmlfname = self.casdafname.replace(".uvfits", ".xml")
+        xmlfname = self.casdafname.replace(".uvfits", ".craco_metadata.xml")
         logger.info(f"dumping metadata info to {xmlfname}")
         with open(f"{folder}/{xmlfname}", "w") as fp:
             fp.write(casdametaxml)
 
-    def prepare_casda_upload(self):
+    def prepare_casda_upload(self, casacaltab=True):
         os.makedirs(self.archivefolder, exist_ok=True)
         ### first of all, uvfits itself
         scanfolder = f"{self.archivefolder}/{self.cracoscan}"
@@ -172,10 +200,25 @@ class UvfitsCasdaMetadata:
         calfolder = f"{self.archivefolder}/cal"
         logger.info(f"copying calibration files...")
         os.makedirs(calfolder, exist_ok=True)
-        os.system(f"cp {self.calnpy} {calfolder}")
-        os.system(f"cp {self.freqnpy} {calfolder}")
+        if not casacaltab:
+            os.system(f"cp {self.calnpy} {calfolder}")
+            os.system(f"cp {self.freqnpy} {calfolder}")
+        else:
+            ### here we convert casa numpy file to casatable
+            cracocal2casatab.run_convert(
+                tabpath = f"{calfolder}/{self.casdacasatabfname}",
+                calpath = self.calnpy,
+                freqpath = self.freqnpy,
+                overwrite = False
+            )
 
 class ScanCasdaMetadata:
+
+    CASDA_ARCHIVE_TS_SOCKET = "/data/craco/craco/tmpdir/queues/casdaupload"
+    TMPDIR = "/data/craco/craco/tmpdir"
+    # CASDA_ARCHIVE_TS_SOCKET = "/data/craco/craco/wan342/tmpdir/queues/casdaupload"
+    # TMPDIR = "/data/craco/craco/wan342/tmpdir"
+
     def __init__(self, sbid, scan, tstart):
         """
         here we use craco argument definition;
@@ -185,23 +228,53 @@ class ScanCasdaMetadata:
         logger.info(f"running casda preparation for {sbid} {scan}/{tstart}")
         self.scheddir = SchedDir(sbid=sbid)
         self.scandir = ScanDir(sbid=sbid, scan=f"{scan}/{tstart}")
+        self.sbid = int(format_sbid(sbid, padding=False, prefix=False))
+        self.cracoscan = tstart # this is cracoscan - timestamp
+        self.archivefolder = f"/data/craco/craco/archive/SB{self.sbid}"
 
     def run_scan_casda_prepare(self):
         for uvfitspath in self.scandir.uvfits_paths:
             logging.info(f"looking into {uvfitspath}")
-            ucm = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
-            ucm.prepare_casda_upload()
+            try:
+                ucm = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
+                ucm.prepare_casda_upload()
+            except Exception as error:
+                logger.error(f"cannot prepare for casda upload for {uvfitspath}... Error: {error}...")
 
-    
+    # def start_casda_rsync(self, target="setonix:/scratch/ja3/zwan4817/askapbuffer"):
+    def start_casda_rsync(self, target="ozstartrans:/fred/oz002/zwang/forVM/askapbuffer"):
+        """
+        function to start rsync job to askapbuffer
+        """
+        cmd = f"rsync -av -P -L --include='***/{self.cracoscan}/***' --include='***/cal/***' --include='*/' --exclude='*' {self.archivefolder} {target}"
+        ### run the command with tsp
+        environment = {
+            "TS_SOCKET": self.CASDA_ARCHIVE_TS_SOCKET,
+            "TMPDIR": self.TMPDIR,
+        }
+        ecopy = os.environ.copy()
+        ecopy.update(environment)
+        subprocess.run(
+            [f"tsp {cmd}"], shell=True, capture_output=True,
+            text=True, env=ecopy,
+        )
+        logger.info(f"Queued casda uploading job - with command - {cmd}")
+
 
 
 if __name__ == "__main__":
     # uvfitspath = "/CRACO/DATA_01/craco/SB076946/scans/00/20250916164012/b18.uvfits"
     # UCM = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
     # UCM.prepare_casda_upload()
-    sbid = "SB076946"
+    import glob
+    sbid = "SB077974"
     scan = "00"
-    tstart = "20250916164012"
+    # tstart = "20250916164012"
+    _scanpaths = glob.glob(f"/data/craco/craco/{sbid}/scans/{scan}/20*")
+    tstarts = [i.split("/")[-1] for i in _scanpaths]
 
-    scm = ScanCasdaMetadata(sbid=sbid, scan=scan, tstart=tstart)
-    scm.run_scan_casda_prepare()
+    for tstart in tstarts:
+        scm = ScanCasdaMetadata(sbid=sbid, scan=scan, tstart=tstart)
+        scm.run_scan_casda_prepare()
+        # scm.start_casda_rsync()
+        # break

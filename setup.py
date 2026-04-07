@@ -60,6 +60,11 @@ if __name__ == '__main__':
         packages=find_packages('src'),
         zip_safe=False,
         scripts=glob.glob('scripts/*'),
+        include_package_data=True,
+        data_files = [
+            ("tools/data/casa_bp_ms_data", glob.glob("src/craco/tools/data/casa_bp_ms_data/*.pkl")),
+            ("candpipe", ["src/craco/candpipe/config.yaml"]),
+        ],
         entry_points = {
             'console_scripts': ['corrsim=craco.corrsim:_main',
                                 'yaml2etcd=craco.yaml2etcd:_main',
