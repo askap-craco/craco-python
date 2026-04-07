@@ -1034,6 +1034,9 @@ class CandMgrProcessor(Processor):
         iblk = 0
         self.cand_writer = CandidateWriter('all_beam_cands.txt', first_tstart=self.obs_info.tstart)
         self.cand_sender = SnoopySender()
+
+        # send candidates to multicast address 10.1.1.1:4900 for MWA candidate thingy.
+        self.cand_sender_broadcast = SnoopySender(host='224.1.1.1', port=4900)
         cands = MpiCandidateBuffer.for_beam_manager(app.cand_comm)
         # libpq.so.5 is only installed on root node. This way it only runs on the root node.
         # SHoud make slackpostmanager not reference psycopg2
@@ -1068,6 +1071,7 @@ class CandMgrProcessor(Processor):
             log.critical('TRIGGER Sending candidate %s', bestcand_dict)
             # Send candidate to CRAFT to dump voltages
             self.cand_sender.send(bestcand)
+            self.cand_sender_broadcast.send(bestcand)
 
             # log in the trace
             trace_file += tracing.InstantEvent('CandidateTrigger', args=bestcand_dict, ts=None, s='g')
