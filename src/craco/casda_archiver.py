@@ -10,6 +10,9 @@ several things should be covered is
 import os
 import re
 import subprocess
+import sqlite3
+from enum import IntEnum
+from typing import Optional
 
 from astropy.io import fits
 from astropy.time import Time
@@ -260,6 +263,255 @@ class ScanCasdaMetadata:
         )
         logger.info(f"Queued casda uploading job - with command - {cmd}")
 
+### database related...
+class ArchiveStatus(IntEnum):
+    DEFAULT = 0
+    QUEUED = 1
+    EXECUTING = 2
+    FINISHED = 3
+    ERRORED = -1
+
+class ArchiveManager:
+    """Manages data archiving records for Acacia and Setonix archiving processes."""
+
+    def __init__(self, db_path: str = "archive_status.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        """Initialize the database and create the table if it doesn't exist."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS archive_records (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sbid            INTEGER NOT NULL,
+                    scan            TEXT NOT NULL,
+                    acacia_status   INTEGER NOT NULL DEFAULT 0,
+                    setonix_status  INTEGER NOT NULL DEFAULT 0,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(sbid, scan)
+                )
+            """)
+            conn.commit()
+
+    # ------------------------------------------------------------------ #
+    #  Write operations                                                    #
+    # ------------------------------------------------------------------ #
+
+    def insert_record(
+        self,
+        sbid: int,
+        scan: str,
+        acacia_status: ArchiveStatus = ArchiveStatus.DEFAULT,
+        setonix_status: ArchiveStatus = ArchiveStatus.DEFAULT,
+    ) -> int:
+        """
+        Insert a new archive record.
+
+        Returns the row id of the newly inserted record.
+        Raises ValueError if the (sbid, scan) pair already exists.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO archive_records (sbid, scan, acacia_status, setonix_status)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (sbid, scan, int(acacia_status), int(setonix_status)),
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
+
+    def update_status(
+        self,
+        sbid: int,
+        scan: str,
+        acacia_status: Optional[ArchiveStatus] = None,
+        setonix_status: Optional[ArchiveStatus] = None,
+    ) -> bool:
+        """
+        Update acacia_status and/or setonix_status for a given (sbid, scan) pair.
+
+        Pass only the field(s) you want to change; omitted fields are left untouched.
+        Returns True if a row was updated, False if no matching record was found.
+        Raises ValueError if neither status field is provided.
+        """
+        if acacia_status is None and setonix_status is None:
+            raise ValueError("At least one of acacia_status or setonix_status must be provided.")
+
+        fields, values = [], []
+        if acacia_status is not None:
+            fields.append("acacia_status = ?")
+            values.append(int(acacia_status))
+        if setonix_status is not None:
+            fields.append("setonix_status = ?")
+            values.append(int(setonix_status))
+
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.extend([sbid, scan])
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                f"UPDATE archive_records SET {', '.join(fields)} WHERE sbid = ? AND scan = ?",
+                values,
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------ #
+    #  Read operations                                                     #
+    # ------------------------------------------------------------------ #
+
+    def get_record(self, sbid: int, scan: str) -> Optional[dict]:
+        """Fetch a single record by (sbid, scan). Returns None if not found."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM archive_records WHERE sbid = ? AND scan = ?",
+                (sbid, scan),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_all_records(self) -> list[dict]:
+        """Return all records in the database."""
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM archive_records ORDER BY id").fetchall()
+            return [dict(r) for r in rows]
+
+    def get_records_by_status(
+        self,
+        acacia_status: Optional[ArchiveStatus] = None,
+        setonix_status: Optional[ArchiveStatus] = None,
+    ) -> list[dict]:
+        """Filter records by one or both status fields."""
+        conditions, values = [], []
+        if acacia_status is not None:
+            conditions.append("acacia_status = ?")
+            values.append(int(acacia_status))
+        if setonix_status is not None:
+            conditions.append("setonix_status = ?")
+            values.append(int(setonix_status))
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM archive_records {where} ORDER BY id", values
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def __repr__(self) -> str:
+        count = len(self.get_all_records())
+        return f"<ArchiveManager db='{self.db_path}' records={count}>"
+
+class SBIDManager:
+    """Manages SBID information records."""
+
+    def __init__(self, db_path: str = "archive.db"):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        """Initialize the sbid_records table if it doesn't exist."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sbid_records (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sbid        INTEGER NOT NULL UNIQUE,
+                    acacia_archive_loc       TEXT NOT NULL,
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+
+    # ------------------------------------------------------------------ #
+    #  Write operations                                                    #
+    # ------------------------------------------------------------------ #
+
+    def insert_record(self, sbid: int, acacia_archive_loc: str) -> int:
+        """
+        Insert a new SBID record.
+
+        Returns the row id of the newly inserted record.
+        Raises ValueError if the sbid already exists.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "INSERT INTO sbid_records (sbid, acacia_archive_loc) VALUES (?, ?)",
+                    (sbid, acacia_archive_loc),
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            logger.info(f"Record with SBID={sbid} already exists. will not update the record")
+
+    def update_record(self, sbid: int, acacia_archive_loc: str) -> bool:
+        """
+        Update the acacia_archive_loc for a given sbid.
+
+        Returns True if a row was updated, False if no matching record was found.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE sbid_records
+                SET acacia_archive_loc = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE sbid = ?
+                """,
+                (acacia_archive_loc, sbid),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    # ------------------------------------------------------------------ #
+    #  Read operations (stub — fill in as needed)                         #
+    # ------------------------------------------------------------------ #
+
+    def get_record(self, sbid: int) -> Optional[dict]:
+        """Fetch a single record by sbid. Returns None if not found."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM sbid_records WHERE sbid = ?",
+                (sbid,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_all_records(self) -> list[dict]:
+        """Return all records in the database."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sbid_records ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_records_by_acacia_archive_loc(self, acacia_archive_loc: str) -> list[dict]:
+        """Return all records with a given acacia_archive_loc."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM sbid_records WHERE acacia_archive_loc = ? ORDER BY id",
+                (acacia_archive_loc,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def __repr__(self) -> str:
+        count = len(self.get_all_records())
+        return f"<SBIDManager db='{self.db_path}' records={count}>"
+
+    
 
 
 if __name__ == "__main__":
