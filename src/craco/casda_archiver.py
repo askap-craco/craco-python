@@ -511,22 +511,49 @@ class SBIDManager:
         count = len(self.get_all_records())
         return f"<SBIDManager db='{self.db_path}' records={count}>"
 
-    
+def main():
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    parser = ArgumentParser(description='Archive uvfits file to a given place', formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--sbid", type=int, help="SBID of the data to be archived")
+    parser.add_argument("--scan", default=None, type=str, help="scan id of the data to be")
+    parser.add_argument("--tstart", default=None,type=str, help="scan start time of the data to be archived")
+    parser.add_argument("--prepare", action="store_true", help="whether to run prepare, i.e., convert and link data to archive folder")
+    parser.add_argument("--rsync", action="store_true", help="whether to start rsync job to upload data to given place")
+    parser.add_argument("--target", type=str, default="setonix:/scratch/ja3/zwan4817/askapbuffer", help="the target for rsync upload")
+    args = parser.parse_args()
+
+    if args.scan is None or args.tstart is None:
+        logger.info(f"no scan/tstart provided, will run for all scans...")
+        scheddir = SchedDir(sbid=args.sbid)
+        scans = scheddir.scans
+    else:
+        scans = [f"{args.scan}/{args.tstart}"]
+
+    for scan in scans:
+        scm = ScanCasdaMetadata(sbid=args.sbid, scan=scan.split("/")[0], tstart=scan.split("/")[1])
+        if args.prepare:
+            scm.run_scan_casda_prepare()
+        if args.rsync:
+            scm.start_casda_rsync(target=args.target)
+
 
 
 if __name__ == "__main__":
+    main()
+
+    ##### following for testing...
     # uvfitspath = "/CRACO/DATA_01/craco/SB076946/scans/00/20250916164012/b18.uvfits"
     # UCM = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
     # UCM.prepare_casda_upload()
-    import glob
-    sbid = "SB077974"
-    scan = "00"
-    # tstart = "20250916164012"
-    _scanpaths = glob.glob(f"/data/craco/craco/{sbid}/scans/{scan}/20*")
-    tstarts = [i.split("/")[-1] for i in _scanpaths]
+    # import glob
+    # sbid = "SB077974"
+    # scan = "00"
+    # # tstart = "20250916164012"
+    # _scanpaths = glob.glob(f"/data/craco/craco/{sbid}/scans/{scan}/20*")
+    # tstarts = [i.split("/")[-1] for i in _scanpaths]
 
-    for tstart in tstarts:
-        scm = ScanCasdaMetadata(sbid=sbid, scan=scan, tstart=tstart)
-        scm.run_scan_casda_prepare()
-        # scm.start_casda_rsync()
-        # break
+    # for tstart in tstarts:
+    #     scm = ScanCasdaMetadata(sbid=sbid, scan=scan, tstart=tstart)
+    #     scm.run_scan_casda_prepare()
+    #     # scm.start_casda_rsync()
+    #     # break
