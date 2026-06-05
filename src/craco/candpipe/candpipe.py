@@ -216,6 +216,7 @@ class Pipeline:
         log.info('Writing candpipe output candiates to %s', outname)
         #self.uniq_cands_fout = CandidateWriter(outname)
         self.uniq_cands_fout = DataframeStreamer(outname)
+        self.uniq_cands_fpath = outname
         if args.save_intermediate:
             self.intermediate_fouts = []
             self.intermediate_npy_dtypes = []
@@ -480,6 +481,7 @@ class Pipeline:
         if hasattr(self, 'uniq_cands_fout'):            
             if iblk0 >= 0 and len(cand_out) > 0:
                 try :
+                    log.info("Writing %d candidates to %s", len(cand_out), self.uniq_cands_fpath)
                     #self.uniq_cands_fout.write_cands(self.convert_df_to_np(cand_out))
                     self.uniq_cands_fout.write(cand_out)
                     #t.tick('Write cands uniq')
