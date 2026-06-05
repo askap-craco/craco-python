@@ -173,7 +173,9 @@ class RealTimeCandAlarm:
     def __init__(self, snippetfolder, channel="C06C6D3V03S"):
         self.canddir = CandDir(**self._extract_info_from_path(snippetfolder))
         self.candrow = self._load_candidate(self.canddir.cand_info).iloc[0]
-        self.candall = self._load_candidate(self.canddir.rundir.beam_unique_cand(self.canddir.beam))
+        unique_fpath = self.canddir.rundir.beam_unique_cand(self.canddir.beam)
+        self.candall = self._load_candidate(unique_fpath)
+        log.info(f"loaded {len(self.candall)} candidates from {unique_fpath}")
         self.snippetfolder = snippetfolder
         ### work directory ###
         self.workdir = f"{snippetfolder}/post"
