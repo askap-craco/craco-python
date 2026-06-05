@@ -422,6 +422,8 @@ class Pipeline:
             for item in dfin.dtypes.items():
                 if item[1] == np.dtype('O'):
                     item = (item[0], 'U128')
+                if not isinstance(item[1], np.dtype):
+                    item = (item[0], np.dtype(str))
                 dtype_list.append(item)
 
             self.intermediate_npy_dtypes[istep] = np.dtype(dtype_list)
