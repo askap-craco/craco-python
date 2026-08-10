@@ -205,6 +205,8 @@ class ScanDir:
             raise ValueError(f"no scan {scan} found under {sbid}")
 
         self._get_beam_node_dict()
+        if len(self.beam_node_dict) != 36:
+            log.info("not all beams found... %s", self.beam_node_dict)
 
     @property
     def scan_data_dirs(self):
@@ -228,10 +230,48 @@ class ScanDir:
             self.datadirs.path_to_runname(runpath) for runpath in runpaths
         ])
 
+    # get beam node mapping from files...
+    def _get_beams_from_file(self):
+        """
+        get beams from a scan data dir
+        """
+        nodedict = {}
+        for nodedatadir in self.scan_data_dirs:
+            nodedict.update(self._get_beams_from_file_for_node(nodedatadir))
+        return nodedict
+    
+    def _get_beams_from_file_for_node(self, nodedatadir):
+        """
+        get beams from a node data dir
+        """
+        beamfiles = glob.glob(f"{nodedatadir}/*b??*")
+        # need to run regular expression
+        nodedict = {}
+        for beamfile in beamfiles:
+            beam_node_mapping = self._get_beam_node_mapping_from_file(beamfile)
+            if beam_node_mapping is None: continue
+            beam, node = beam_node_mapping
+            nodedict[beam] = node
+        if len(nodedict) != 2:
+            log.warning("expected 2 beams for node %s, got %s", nodedatadir, len(nodedict))
+        return nodedict
+
+    def _get_beam_node_mapping_from_file(self, fpath):
+        ### first get node number...
+        node = re.findall(r"DATA_(\d{2})", fpath)
+        if len(node) == 0: return None
+        ### get beam number
+        fbasename = os.path.basename(fpath)
+        beam = re.findall(r"b(\d{2})", fbasename)
+        if len(beam) == 0: return None
+        return int(beam[0]), node[0]
+
     def _get_beam_node_dict(self):
         """ beam (int) - node (str) mapping """
         if not check_path(self.scan_rank_file):
-            raise NotImplementedError("get beam node mapping without rank file has not been implemented")
+            self.beam_node_dict = self._get_beams_from_file()
+            return
+            # raise NotImplementedError("get beam node mapping without rank file has not been implemented")
         # load it from rank file
         with open(self.scan_rank_file) as fp:
             rank_file_text = fp.read()
@@ -249,9 +289,6 @@ class ScanDir:
             node_beam_map = [(node, beam) for node, beam, _ in _node_beam_map]
         
         self.beam_node_dict = {int(beam): node for node, beam in node_beam_map}
-
-        if len(self.beam_node_dict) != 36:
-            log.info("not all beams recorded in rankfile... %s", self.beam_node_dict)
 
     def beam_scandir_path(self, beam):
         scan_dir = self.datadirs.scan_dir(
