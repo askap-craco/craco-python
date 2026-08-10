@@ -15,7 +15,7 @@ import subprocess
 import sqlite3
 import xml.etree.ElementTree as ET
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, Union
 
 from astropy.io import fits
 from astropy.time import Time
@@ -271,6 +271,24 @@ class ScanCasdaMetadata:
 # CLINK Event System Integration & Metadata Helpers
 # ==============================================================================
 
+def parse_sbid(sbid: Union[int, str]) -> int:
+    """
+    Extract clean integer SBID regardless of whether input is int, string, or contains 'SB'/'SB0' prefix.
+
+    Examples:
+      parse_sbid(82418)       -> 82418
+      parse_sbid("82418")     -> 82418
+      parse_sbid("SB82418")   -> 82418
+      parse_sbid("SB082418")  -> 82418
+    """
+    if isinstance(sbid, int):
+        return sbid
+    s = str(sbid).strip()
+    if s.upper().startswith("SB"):
+        s = s[2:]
+    return int(s)
+
+
 def parse_metadata_xml(xml_path: str) -> dict:
     """Parse a CRACO XML metadata file into a dict."""
     tree = ET.parse(xml_path)
@@ -286,7 +304,7 @@ def parse_metadata_xml(xml_path: str) -> dict:
                 else:
                     val = int(val)
             except ValueError:
-                pass
+                logger.debug(f"Failed to cast metadata '{tag}' value '{val}' to numeric. Leaving as string.")
         meta[tag] = val
     return meta
 
@@ -300,14 +318,25 @@ def get_calibration_files(archive_folder: str) -> dict:
     return {"cal_folder": cal_dir, "files": files}
 
 
-def build_ready_for_copy_payload(sbid: int, archive_folder: Optional[str] = None) -> dict:
-    """Construct CLINK ready_for_copy event payload for an SBID."""
+def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional[str] = None) -> dict:
+    """Construct CLINK ready_for_copy event payload matching cpmanager schema."""
+    sbid_int = parse_sbid(sbid)
+    sbid_str = str(sbid_int)
+
     if archive_folder is None:
-        archive_folder = f"/data/craco/craco/archive/SB{sbid}"
+        cand_standard = f"/data/craco/craco/archive/SB{sbid_int}"
+        cand_padded = f"/data/craco/craco/archive/SB{sbid_int:06d}"
+        if os.path.exists(cand_standard):
+            archive_folder = cand_standard
+        elif os.path.exists(cand_padded):
+            archive_folder = cand_padded
+        else:
+            archive_folder = cand_standard
 
     scans_data = []
     project = None
     fieldname = None
+    sample_obs_params = {}
 
     if os.path.exists(archive_folder):
         for entry in sorted(os.listdir(archive_folder)):
@@ -319,9 +348,11 @@ def build_ready_for_copy_payload(sbid: int, archive_folder: Optional[str] = None
                     try:
                         meta = parse_metadata_xml(xml_file)
                         if project is None and "project" in meta:
-                            project = meta["project"]
+                            project = str(meta["project"])
                         if fieldname is None and "fieldname" in meta:
-                            fieldname = meta["fieldname"]
+                            fieldname = str(meta["fieldname"])
+                        if not sample_obs_params:
+                            sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
 
                         scan_files.append({
                             "filename": meta.get("filename", ""),
@@ -348,19 +379,25 @@ def build_ready_for_copy_payload(sbid: int, archive_folder: Optional[str] = None
 
     cal_info = get_calibration_files(archive_folder)
 
+    obs_parameters = {
+        "common.cp.processing_priority": "STANDARD",
+        "sbid": sbid_str,
+        "project": project or "UNKNOWN",
+        "fieldname": fieldname or "UNKNOWN"
+    }
+    for k, v in sample_obs_params.items():
+        obs_parameters[k] = str(v)
+
     payload = {
         "schedulingBlock": {
-            "id": sbid,
+            "id": sbid_str,
+            "alias": fieldname or "",
             "owner": project or "UNKNOWN",
-            "obsParameters": {
-                "common.cp.processing_priority": "STANDARD",
-                "sbid": sbid,
-                "project": project or "UNKNOWN",
-                "fieldname": fieldname or "UNKNOWN"
-            }
+            "state": "OBSERVED",
+            "obsParameters": obs_parameters
         },
         "craco": {
-            "sbid": sbid,
+            "sbid": sbid_str,
             "project": project or "UNKNOWN",
             "fieldname": fieldname or "UNKNOWN",
             "archive_folder": archive_folder,
@@ -409,35 +446,54 @@ class ClinkPublisher:
 
     def emit_ready_for_copy(
         self,
-        sbid: int,
+        sbid: Union[int, str],
         event_type: str = "au.csiro.atnf.askap.craco.ready_for_copy",
-        archive_folder: Optional[str] = None
+        archive_folder: Optional[str] = None,
+        subject: Optional[str] = None,
+        test: bool = False,
     ) -> bool:
-        """Emit ready_for_copy CLINK event for an SBID."""
-        if not self.participant:
+        """Emit ready_for_copy CLINK event for an SBID or specific archive folder."""
+        if not self.participant and not test:
             logger.error("CLINK participant not initialized. Cannot emit ready_for_copy event.")
             return False
 
-        payload = build_ready_for_copy_payload(sbid, archive_folder=archive_folder)
-        subject_urn = f"urn:askap:scheduling-block:::scheduling-block/{sbid}"
+        sbid_int = parse_sbid(sbid)
 
-        logger.info(f"Emitting CLINK ready_for_copy event for SBID {sbid} (Type: {event_type})...")
+        payload = build_ready_for_copy_payload(sbid_int, archive_folder=archive_folder)
+
+        if subject is None:
+            folder_path = payload.get("craco", {}).get("archive_folder", archive_folder)
+            subject_urn = f"urn:askap:craco:::archive-folder/{folder_path}"
+        else:
+            subject_urn = subject
+
+        if test:
+            logger.info(f"TEST MODE: Would emit CLINK ready_for_copy event for SBID {sbid_int} (Type: {event_type})")
+            print("--- CLINK EVENT PAYLOAD ---")
+            print(f"Subject URN: {subject_urn}")
+            print(f"Event Type : {event_type}")
+            print("Payload    :")
+            print(json.dumps(payload, indent=2))
+            print("---------------------------")
+            return True
+
+        logger.info(f"Emitting CLINK ready_for_copy event for SBID {sbid_int} (Type: {event_type})...")
         try:
             self.participant.emit_event(
                 subject=subject_urn,
                 type=event_type,
                 data=payload
             )
-            logger.info(f"Successfully emitted CLINK event {event_type} for SBID {sbid}")
+            logger.info(f"Successfully emitted CLINK event {event_type} for SBID {sbid_int}")
 
             try:
                 am = ArchiveManager()
-                am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
+                am.update_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
             except Exception as e:
                 logger.debug(f"Database status update skipped: {e}")
             return True
         except Exception as error:
-            logger.error(f"Failed to emit CLINK event for SBID {sbid}: {error}")
+            logger.error(f"Failed to emit CLINK event for SBID {sbid_int}: {error}")
             return False
 
 
@@ -458,19 +514,36 @@ class ClinkListener:
             self.participant = None
 
     def _extract_sbid(self, event) -> Optional[int]:
-        """Extract SBID integer from event."""
-        if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
-            try:
-                return int(event.subject_urn.resource.id)
-            except (ValueError, TypeError):
-                pass
+        """Extract SBID integer from event subject URN or event payload."""
+        # 1. Check data payload fields
         if hasattr(event, "data") and isinstance(event.data, dict):
-            sb_id = event.data.get("sbid") or event.data.get("schedulingBlock", {}).get("id")
+            sb_id = (
+                event.data.get("sbid")
+                or event.data.get("schedulingBlock", {}).get("id")
+                or event.data.get("craco", {}).get("sbid")
+            )
             if sb_id:
                 try:
                     return int(sb_id)
                 except (ValueError, TypeError):
-                    pass
+                    logger.debug(f"Failed to parse integer from payload sbid field '{sb_id}', falling back to URN check.")
+
+        # 2. Check subject URN resource ID
+        if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
+            res_id = str(event.subject_urn.resource.id)
+            try:
+                return int(res_id)
+            except ValueError:
+                match = re.search(r"(\d+)", res_id)
+                if match:
+                    return int(match.group(1))
+
+        # 3. Fallback: search raw subject string for SBID digits
+        if hasattr(event, "subject") and event.subject:
+            match = re.search(r"(\d+)", str(event.subject))
+            if match:
+                return int(match.group(1))
+
         return None
 
     def _register_handlers(self):
@@ -828,7 +901,7 @@ def main():
         description=description_text,
         formatter_class=RawDescriptionHelpFormatter
     )
-    parser.add_argument("--sbid", type=int, help="SBID of the data to be archived")
+    parser.add_argument("--sbid", type=parse_sbid, help="SBID of the data to be archived (e.g., 82418 or SB82418)")
     parser.add_argument("--scan", default=None, type=str, help="scan id of the data to be")
     parser.add_argument("--tstart", default=None,type=str, help="scan start time of the data to be archived")
     parser.add_argument("--prepare", action="store_true", help="whether to run prepare, i.e., convert and link data to archive folder")
@@ -839,6 +912,8 @@ def main():
     parser.add_argument("--listen", action="store_true", help="whether to run CLINK listener daemon to record Pawsey archiving/purge events")
     parser.add_argument("--clink-config", type=str, default=None, help="path to CLINK transport config file (JSON or KEY=VAL)")
     parser.add_argument("--event-type", type=str, default="au.csiro.atnf.askap.craco.ready_for_copy", help="CLINK event type string for ready_for_copy emission")
+    parser.add_argument("--subject", type=str, default=None, help="Optional custom Subject URN string for ready_for_copy emission")
+    parser.add_argument("--test", action="store_true", help="Test mode: print payload to stdout instead of sending to the broker")
     args = parser.parse_args()
 
     # NEW: clink integration    
@@ -866,10 +941,14 @@ def main():
         if args.rsync:
             scm.start_casda_rsync(target=args.target)
 
-    # NEW: clink integration
-    if args.emit_clink:
+    if args.emit_clink or args.test:
         publisher = ClinkPublisher(config_path=args.clink_config)
-        publisher.emit_ready_for_copy(sbid=args.sbid, event_type=args.event_type)
+        publisher.emit_ready_for_copy(
+            sbid=args.sbid, 
+            event_type=args.event_type, 
+            subject=args.subject,
+            test=args.test
+        )
 
 
 if __name__ == "__main__":
