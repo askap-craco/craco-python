@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from craco.casda_archiver import (
     ArchiveStatus,
+    parse_sbid,
     parse_metadata_xml,
     get_calibration_files,
     build_ready_for_copy_payload,
@@ -30,6 +31,13 @@ from craco.casda_archiver import (
 )
 
 class TestCasdaArchiverClink(unittest.TestCase):
+    def test_parse_sbid(self):
+        self.assertEqual(parse_sbid(82418), 82418)
+        self.assertEqual(parse_sbid("82418"), 82418)
+        self.assertEqual(parse_sbid("SB82418"), 82418)
+        self.assertEqual(parse_sbid("SB082418"), 82418)
+        self.assertEqual(parse_sbid("sb82418"), 82418)
+
     def test_archive_status_enum(self):
         self.assertEqual(ArchiveStatus.DEFAULT, 0)
         self.assertEqual(ArchiveStatus.READY_FOR_COPY_SENT, 10)
@@ -102,8 +110,10 @@ class TestCasdaArchiverClink(unittest.TestCase):
 
             payload = build_ready_for_copy_payload(sbid, archive_folder=archive_dir)
             
-            self.assertEqual(payload["schedulingBlock"]["id"], sbid)
+            self.assertEqual(payload["schedulingBlock"]["id"], str(sbid))
             self.assertEqual(payload["schedulingBlock"]["owner"], "AS116")
+            self.assertEqual(payload["schedulingBlock"]["alias"], "TestField")
+            self.assertEqual(payload["schedulingBlock"]["state"], "OBSERVED")
             self.assertEqual(payload["craco"]["archive_folder"], archive_dir)
             self.assertEqual(len(payload["craco"]["scans"]), 1)
             self.assertEqual(payload["craco"]["scans"][0]["scanid"], "20260220224148")
@@ -122,6 +132,22 @@ class TestCasdaArchiverClink(unittest.TestCase):
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+
+    def test_emit_ready_for_copy_test_mode(self):
+        from craco.casda_archiver import ClinkPublisher
+        import io
+        from contextlib import redirect_stdout
+        
+        pub = ClinkPublisher()
+        f = io.StringIO()
+        with redirect_stdout(f):
+            result = pub.emit_ready_for_copy(sbid=82418, test=True)
+            
+        self.assertTrue(result)
+        out = f.getvalue()
+        self.assertIn("--- CLINK EVENT PAYLOAD ---", out)
+        self.assertIn("Subject URN: urn:askap:craco:::archive-folder//data/craco/craco/archive/SB82418", out)
+        self.assertIn('"id": "82418"', out)
 
 if __name__ == "__main__":
     unittest.main()
