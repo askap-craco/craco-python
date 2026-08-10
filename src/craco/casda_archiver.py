@@ -352,7 +352,7 @@ class ArchiveManager:
         except psycopg2.errors.UniqueViolation:
             raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
 
-    def update_status(
+    def update_archive_status(
         self,
         sbid: int,
         scan: str,
@@ -395,6 +395,40 @@ class ArchiveManager:
                 values,
             )
             conn.commit()
+        return cur.rowcount > 0
+
+    def update_archive_status_sbid(
+        self, sbid: int,
+        skadi_status: Optional[SkadiStatus] = None,
+        acacia_status: Optional[ArchiveStatus] = None,
+        setonix_status: Optional[ArchiveStatus] = None,
+    ):
+        if acacia_status is None and setonix_status is None and skadi_status is None:
+            raise ValueError("At least one of acacia_status, setonix_status, or skadi_status must be provided.")
+
+        fields, values = [], []
+        if acacia_status is not None:
+            fields.append("acacia_status = %s")
+            values.append(int(acacia_status))
+        if setonix_status is not None:
+            fields.append("setonix_status = %s")
+            values.append(int(setonix_status))
+        if skadi_status is not None:
+            logger.warning(f"you are trying to update the skadi status for one sbid... please use with caution...")
+            fields.append("skadi_status = %s")
+            values.append(int(skadi_status))
+
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(sbid)
+
+        with get_psql_connect(section="dbwriter") as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE archives SET {', '.join(fields)} WHERE sbid = %s",
+                values,
+            )
+            conn.commit()
+        logger.info(f"{cur.rowcount} row(s) updated...")
         return cur.rowcount > 0
 
     # ------------------------------------------------------------------ #
@@ -455,7 +489,7 @@ class ArchiveManager:
             rows = cur.fetchall()
             return [dict(r) for r in rows]
 
-    def update_sbid_status(self, sbid):
+    def update_observation_status_sbid(self, sbid):
         auto_sched.push_sbid_observation(sbid=sbid)
 
     # check skadi_status
@@ -466,9 +500,9 @@ class ArchiveManager:
             logger.info(f"cannot get uvfits count for sbid={sbid}, scan={scan}...")
             uvfitscount = 0
         if uvfitscount == 36:
-            self.update_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.READY, uvfits_count=uvfitscount)
+            self.update_archive_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.READY, uvfits_count=uvfitscount)
         else:
-            self.update_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.ERRORED, uvfits_count=uvfitscount)
+            self.update_archive_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.ERRORED, uvfits_count=uvfitscount)
         return
 
     ### functions to run automatically every few minutes ###
@@ -503,7 +537,7 @@ class ArchiveManager:
         logger.info(f"updating {len(updatesbids)} sbids...")
         for sbid in updatesbids:
             logger.info(f"updating sbid={sbid}...")
-            self.update_sbid_status(sbid=sbid)
+            self.update_observation_status_sbid(sbid=sbid)
 
     def regular_get_sbid_to_run(self, setonix=True, acacia=False):
         """
