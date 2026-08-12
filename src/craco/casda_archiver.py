@@ -322,7 +322,7 @@ def get_calibration_files(archive_folder: str) -> dict:
     return {"cal_folder": cal_dir, "files": files}
 
 
-def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional[str] = None) -> dict:
+def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional[str] = None, include_file_size: bool = False) -> dict:
     """Construct CLINK ready_for_copy event payload matching cpmanager schema."""
     sbid_int = parse_sbid(sbid)
     sbid_str = str(sbid_int)
@@ -358,7 +358,7 @@ def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional
                         if not sample_obs_params:
                             sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
 
-                        scan_files.append({
+                        file_info = {
                             "filename": meta.get("filename", ""),
                             "metadata_file": os.path.basename(xml_file),
                             "beam": meta.get("beam"),
@@ -372,7 +372,14 @@ def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional
                             "chanwidth": meta.get("chanwidth"),
                             "timeSteps": meta.get("timeSteps"),
                             "inttime": meta.get("inttime")
-                        })
+                        }
+                        if include_file_size:
+                            data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
+                            if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
+                                file_info["size_bytes"] = os.path.getsize(data_file_path)
+                            if os.path.exists(xml_file) and os.path.isfile(xml_file):
+                                file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
+                        scan_files.append(file_info)
                     except Exception as e:
                         logger.warning(f"Error parsing metadata XML {xml_file}: {e}")
 
@@ -455,6 +462,7 @@ class ClinkPublisher:
         archive_folder: Optional[str] = None,
         subject: Optional[str] = None,
         test: bool = False,
+        include_file_size: bool = False,
     ) -> bool:
         """Emit ready_for_copy CLINK event for an SBID or specific archive folder."""
         if not self.participant and not test:
@@ -463,7 +471,11 @@ class ClinkPublisher:
 
         sbid_int = parse_sbid(sbid)
 
-        payload = build_ready_for_copy_payload(sbid_int, archive_folder=archive_folder)
+        payload = build_ready_for_copy_payload(
+            sbid_int, 
+            archive_folder=archive_folder,
+            include_file_size=include_file_size
+        )
 
         if subject is None:
             folder_path = payload.get("craco", {}).get("archive_folder", archive_folder)
@@ -1107,6 +1119,7 @@ def main():
     parser.add_argument("--event-type", type=str, default="au.csiro.atnf.askap.craco.ready_for_copy", help="CLINK event type string for ready_for_copy emission")
     parser.add_argument("--subject", type=str, default=None, help="Optional custom Subject URN string for ready_for_copy emission")
     parser.add_argument("--test", action="store_true", help="Test mode: print payload to stdout instead of sending to the broker")
+    parser.add_argument("--include-size", action="store_true", help="Include file sizes in the CLINK event payload")
     args = parser.parse_args()
 
     # NEW: clink integration    
@@ -1140,7 +1153,8 @@ def main():
             sbid=args.sbid, 
             event_type=args.event_type, 
             subject=args.subject,
-            test=args.test
+            test=args.test,
+            include_file_size=args.include_size
         )
 
 
