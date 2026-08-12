@@ -28,6 +28,10 @@ from aces.askapdata.schedblock import SB, SchedulingBlock
 from craco.fixuvfits import fix
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.tools import cracocal2casatab
+try:
+    from craco.craco_run import auto_sched
+except ImportError:
+    auto_sched = None
 
 import logging
 logging.basicConfig(
@@ -615,6 +619,53 @@ class ClinkListener:
 # ==============================================================================
 
 # NEW: clink integration
+#### now we need to move everything to normal postgresql database
+from configparser import ConfigParser
+
+def load_config(config=None, section="dbwriter"):
+    parser = ConfigParser()
+
+    ### check if config file exists - otherwise use the filepath in environment variable
+    if config is None:
+        config = os.environ.get("CRACO_DATABASE_CONFIG_FILE")
+        if config is None: config = "database.ini"
+    parser.read(config)
+
+    if not parser.has_section(section):
+        raise ValueError(f"Section {section} not found in {config}")
+    params = parser.items(section)
+    return {k:v for k, v in params}
+
+### this function to get connection details...
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    _psycopg2_UniqueViolation = psycopg2.errors.UniqueViolation
+except ImportError:
+    psycopg2 = None
+    RealDictCursor = None
+    _psycopg2_UniqueViolation = Exception
+
+def get_psql_connect(section="dbreader"):
+    if psycopg2 is None:
+        raise ImportError("psycopg2 is required for PostgreSQL connection.")
+    config = load_config(section=section)
+    return psycopg2.connect(**config)
+
+### this is function to load tables from database
+try:
+    from sqlalchemy import create_engine
+except ImportError:
+    create_engine = None
+
+def get_psql_engine(section="dbreader"):
+    if create_engine is None:
+        raise ImportError("sqlalchemy is required for get_psql_engine.")
+    c = load_config(section=section)
+    engine_str = "postgresql+psycopg2://"
+    engine_str += f"""{c["user"]}:{c["password"]}@{c["host"]}:{c["port"]}/{c["database"]}"""
+    return create_engine(engine_str)
+
 class ArchiveStatus(IntEnum):
     """Archiving lifecycle status codes."""
     DEFAULT = 0
@@ -629,7 +680,10 @@ class ArchiveStatus(IntEnum):
     PURGED = 30               # Purge completed
     ERRORED = -1
 
-
+class SkadiStatus(IntEnum):
+    DEFAULT = 0
+    READY = 1
+    ERRORED = -1
 
 class ArchiveManager:
     """Manages data archiving records for Acacia and Setonix archiving processes."""
@@ -669,6 +723,8 @@ class ArchiveManager:
         self,
         sbid: int,
         scan: str,
+        uvfits_count: int = 0,
+        skadi_status: SkadiStatus = SkadiStatus.DEFAULT,
         acacia_status: ArchiveStatus = ArchiveStatus.DEFAULT,
         setonix_status: ArchiveStatus = ArchiveStatus.DEFAULT,
     ) -> int:
@@ -679,23 +735,26 @@ class ArchiveManager:
         Raises ValueError if the (sbid, scan) pair already exists.
         """
         try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
+            with get_psql_connect(section="dbwriter") as conn:
+                cur = conn.cursor()
+                cur.execute(
                     """
-                    INSERT INTO archive_records (sbid, scan, acacia_status, setonix_status)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO archives (sbid, scan, uvfits_count, skadi_status, acacia_status, setonix_status)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (sbid, scan, int(acacia_status), int(setonix_status)),
+                    (sbid, scan, uvfits_count, int(skadi_status), int(acacia_status), int(setonix_status)),
                 )
                 conn.commit()
-                return cursor.lastrowid
-        except sqlite3.IntegrityError:
+                return cur.lastrowid
+        except _psycopg2_UniqueViolation:
             raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
 
-    def update_status(
+    def update_archive_status(
         self,
         sbid: int,
         scan: str,
+        uvfits_count: Optional[int] = None,
+        skadi_status: Optional[SkadiStatus] = None,
         acacia_status: Optional[ArchiveStatus] = None,
         setonix_status: Optional[ArchiveStatus] = None,
     ) -> bool:
@@ -706,27 +765,68 @@ class ArchiveManager:
         Returns True if a row was updated, False if no matching record was found.
         Raises ValueError if neither status field is provided.
         """
-        if acacia_status is None and setonix_status is None:
-            raise ValueError("At least one of acacia_status or setonix_status must be provided.")
+        if acacia_status is None and setonix_status is None and skadi_status is None and uvfits_count is None:
+            raise ValueError("At least one of acacia_status, setonix_status, skadi_status or uvfits_count must be provided.")
 
         fields, values = [], []
         if acacia_status is not None:
-            fields.append("acacia_status = ?")
+            fields.append("acacia_status = %s")
             values.append(int(acacia_status))
         if setonix_status is not None:
-            fields.append("setonix_status = ?")
+            fields.append("setonix_status = %s")
             values.append(int(setonix_status))
+        if skadi_status is not None:
+            fields.append("skadi_status = %s")
+            values.append(int(skadi_status))
+        if uvfits_count is not None:
+            fields.append("uvfits_count = %s")
+            values.append(uvfits_count)
 
         fields.append("updated_at = CURRENT_TIMESTAMP")
         values.extend([sbid, scan])
 
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                f"UPDATE archive_records SET {', '.join(fields)} WHERE sbid = ? AND scan = ?",
+        with get_psql_connect(section="dbwriter") as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE archives SET {', '.join(fields)} WHERE sbid = %s AND scan = %s",
                 values,
             )
             conn.commit()
-            return cursor.rowcount > 0
+        return cur.rowcount > 0
+
+    def update_archive_status_sbid(
+        self, sbid: int,
+        skadi_status: Optional[SkadiStatus] = None,
+        acacia_status: Optional[ArchiveStatus] = None,
+        setonix_status: Optional[ArchiveStatus] = None,
+    ):
+        if acacia_status is None and setonix_status is None and skadi_status is None:
+            raise ValueError("At least one of acacia_status, setonix_status, or skadi_status must be provided.")
+
+        fields, values = [], []
+        if acacia_status is not None:
+            fields.append("acacia_status = %s")
+            values.append(int(acacia_status))
+        if setonix_status is not None:
+            fields.append("setonix_status = %s")
+            values.append(int(setonix_status))
+        if skadi_status is not None:
+            logger.warning(f"you are trying to update the skadi status for one sbid... please use with caution...")
+            fields.append("skadi_status = %s")
+            values.append(int(skadi_status))
+
+        fields.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(sbid)
+
+        with get_psql_connect(section="dbwriter") as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE archives SET {', '.join(fields)} WHERE sbid = %s",
+                values,
+            )
+            conn.commit()
+        logger.info(f"{cur.rowcount} row(s) updated...")
+        return cur.rowcount > 0
 
     # ------------------------------------------------------------------ #
     #  Read operations                                                     #
@@ -734,39 +834,132 @@ class ArchiveManager:
 
     def get_record(self, sbid: int, scan: str) -> Optional[dict]:
         """Fetch a single record by (sbid, scan). Returns None if not found."""
-        with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM archive_records WHERE sbid = ? AND scan = ?",
+        with get_psql_connect(section="dbreader") as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                "SELECT * FROM archives WHERE sbid = %s AND scan = %s",
                 (sbid, scan),
-            ).fetchone()
-            return dict(row) if row else None
+            )
+            row = cur.fetchone()
+        return dict(row) if row else None
 
     def get_all_records(self) -> list[dict]:
         """Return all records in the database."""
         with self._get_connection() as conn:
-            rows = conn.execute("SELECT * FROM archive_records ORDER BY id").fetchall()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT * FROM archives ORDER BY id")
+            rows = cur.fetchall()
+            return [dict(r) for r in rows]
+
+    def get_records_by_query(self, query: str) -> list[dict]:
+        """Return all records in the database."""
+        with get_psql_connect(section="dbreader") as conn:
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(query)
+            rows = cur.fetchall()
             return [dict(r) for r in rows]
 
     def get_records_by_status(
         self,
+        skadi_status: Optional[SkadiStatus] = None,
         acacia_status: Optional[ArchiveStatus] = None,
         setonix_status: Optional[ArchiveStatus] = None,
     ) -> list[dict]:
         """Filter records by one or both status fields."""
         conditions, values = [], []
+        if skadi_status is not None:
+            conditions.append("skadi_status = %s")
+            values.append(int(skadi_status))
         if acacia_status is not None:
-            conditions.append("acacia_status = ?")
+            conditions.append("acacia_status = %s")
             values.append(int(acacia_status))
         if setonix_status is not None:
-            conditions.append("setonix_status = ?")
+            conditions.append("setonix_status = %s")
             values.append(int(setonix_status))
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._get_connection() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM archive_records {where} ORDER BY id", values
-            ).fetchall()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute(
+                f"SELECT * FROM archives {where} ORDER BY id", values
+            )
+            rows = cur.fetchall()
             return [dict(r) for r in rows]
+
+    def update_observation_status_sbid(self, sbid):
+        if auto_sched is None:
+            raise ImportError("auto_sched module could not be loaded due to missing dependencies.")
+        auto_sched.push_sbid_observation(sbid=sbid)
+
+    # check skadi_status
+    def _check_skadi_status(self, sbid, scan):
+        scandir = ScanDir(sbid=sbid, scan=scan)
+        try: uvfitscount = scandir.uvfits_count
+        except:
+            logger.info(f"cannot get uvfits count for sbid={sbid}, scan={scan}...")
+            uvfitscount = 0
+        if uvfitscount == 36:
+            self.update_archive_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.READY, uvfits_count=uvfitscount)
+        else:
+            self.update_archive_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.ERRORED, uvfits_count=uvfitscount)
+        return
+
+    ### functions to run automatically every few minutes ###
+    ########################################################
+    def regular_db_update(self, setonix=True, acacia=False):
+        """
+        this function is used to update the database regularly including
+        (1) check skadi_status for not ready sbid/scan
+        (2) check sbid status for observation with no archiving happending
+        """
+        ### update skadi_status....
+        logger.info(f"checking skadi_status for all records with skadi_status=0...")
+        records = self.get_records_by_query("SELECT * FROM archives WHERE skadi_status = 0")
+        # ^note - put <= 0 if you want to include errored scan as well...
+        for record in records:
+            sbid = record["sbid"]
+            scan = record["scan"]
+            logger.info(f"checking skadi_status for sbid={sbid}, scan={scan}...")
+            self._check_skadi_status(sbid=sbid, scan=scan)
+
+        ### update observation tables...
+        logger.info(f"checking sbid status for all records with acacia_status=0 or setonix_status=0...")
+        logger.info(f"setonix - {setonix}; acacia - {acacia}")
+        query = "SELECT * FROM archives WHERE "
+        querycond = []
+        if setonix: querycond.append("setonix_status = 0")
+        if acacia: querycond.append("acacia_status = 0")
+        query += " OR ".join(querycond)
+        records = self.get_records_by_query(query)
+        logger.info(f"{len(records)} records found...")
+        updatesbids = set([record["sbid"] for record in records])
+        logger.info(f"updating {len(updatesbids)} sbids...")
+        for sbid in updatesbids:
+            logger.info(f"updating sbid={sbid}...")
+            self.update_observation_status_sbid(sbid=sbid)
+
+    def regular_get_sbid_to_run(self, setonix=True, acacia=False):
+        """
+        get list of sbid to run archive jobs...
+        """
+        logger.info(f"checking sbid status for all records with acacia_status=0 or setonix_status=0...")
+        logger.info(f"setonix - {setonix}; acacia - {acacia}")
+        #### time to build the query...
+        query = "SELECT a.sbid, a.scan FROM archives a JOIN observation o ON a.sbid = o.sbid WHERE "
+        querycond = []
+        if setonix: querycond.append("a.setonix_status = 0")
+        if acacia: querycond.append("a.acacia_status = 0")
+        query += "({}) ".format(" OR ".join(querycond))
+        query += "AND a.skadi_status = 1 "
+        # add queries for observation
+        query += "AND o.status > 3"
+        records = self.get_records_by_query(query)
+        logger.info(f"{len(records)} records found...")
+        ### need to divide them into two categories... all sbids with sbids with some scans errored
+        updatesbids = set([record["sbid"] for record in records])
+        logger.info(f"found {len(updatesbids)} sbids to run archive jobs...")
+        return list(updatesbids)
+
 
     def __repr__(self) -> str:
         count = len(self.get_all_records())

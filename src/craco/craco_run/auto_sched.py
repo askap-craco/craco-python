@@ -22,8 +22,6 @@ import time
 import glob
 import re
 import os
-import pdb
-
 
 from slack_sdk import WebClient
 
@@ -168,9 +166,10 @@ class CracoSchedBlock:
         return self.askap_schedblock.template
     
     @property
-    def onwer(self, ):
-        return self.askap_schedblock._service.getOwner(self.sbid)
-      
+    def owner(self, ):
+        try: return self.askap_schedblock._service.getOwner(self.sbid)
+        except: return ""
+
     @property
     def spw(self, ):
         try:
@@ -226,7 +225,12 @@ class CracoSchedBlock:
     def fcm_version(self, ):
         try: return eval(self.obsvar["fcm.version"])
         except: return -1
-    
+
+    @property
+    def craco_archive_location(self,):
+        try: return self.obsparams["craco.archive.location"]
+        except: return ""
+
     def format_sbid_dict(self, ):
         ### format sbid dictionary
         d = dict(sbid=self.sbid)
@@ -248,6 +252,9 @@ class CracoSchedBlock:
         
         d["weight_sbid"] = self.weight_sched
         d["fcm_version"] = self.fcm_version
+
+        d["owner"] = self.owner
+        d["craco_archive_location"] = self.craco_archive_location
             
         return d
 
@@ -750,12 +757,14 @@ def _update_craco_sched_status(craco_sched_info, conn=None, cur=None):
         insert_sql = f"""INSERT INTO observation (
     sbid, alias, corr_mode, start_freq, end_freq, 
     central_freq, footprint, template, start_time, 
-    duration, flagant, status, weight_sbid, fcm_version
+    duration, flagant, status, weight_sbid, fcm_version,
+    craco_archive_location, owner
 )
 VALUES (
     {d["sbid"]}, '{d["alias"]}', '{d["corr_mode"]}', {d["start_freq"]}, {d["end_freq"]},
     {d["central_freq"]}, '{d["footprint"]}', '{d["template"]}', {d["start_time"]},
-    {d["duration"]}, '{d["flagant"]}', {d["status"]}, {d["weight_sbid"]}, {d["fcm_version"]}
+    {d["duration"]}, '{d["flagant"]}', {d["status"]}, {d["weight_sbid"]}, {d["fcm_version"]},
+    '{d["craco_archive_location"]}', '{d["owner"]}'
 );
 """
         cur.execute(insert_sql)
@@ -768,7 +777,7 @@ SET alias='{d["alias"]}', corr_mode='{d["corr_mode"]}', start_freq={d["start_fre
 end_freq={d["end_freq"]}, central_freq={d["central_freq"]}, footprint='{d["footprint"]}', 
 template='{d["template"]}', start_time={d["start_time"]}, duration={d["duration"]}, 
 flagant='{d["flagant"]}', status={d["status"]}, weight_sbid={d["weight_sbid"]}, 
-fcm_version={d["fcm_version"]}
+fcm_version={d["fcm_version"]}, craco_archive_location='{d["craco_archive_location"]}', owner='{d["owner"]}'
 WHERE sbid={sbid}
 """
         cur.execute(update_sql)
@@ -787,6 +796,7 @@ def push_sbid_observation(sbid, conn=None, cur=None):
             central_freq=-1, footprint="Unknown", template="Unknown",
             start_time=-1, duration=-1, flagant="none",
             status=-1, weight_sbid=-1, fcm_version=-1,
+            craco_archive_location="", owner=""
         )
 
     try:
@@ -801,7 +811,7 @@ def dump_casda_metainfo(sbid, fname="obs_metadata.txt"):
         os.makedirs(cracosched.scheddir.sched_head_dir, exist_ok=True)
         metapath = f"{cracosched.scheddir.sched_head_dir}/{fname}"
 
-        metainfo = f"{sbid}\n{cracosched.onwer}"
+        metainfo = f"{sbid}\n{cracosched.owner}"
         log.info(f"dump meta information to head node - {metapath}...")
 
         with open(metapath, "w") as fp:
