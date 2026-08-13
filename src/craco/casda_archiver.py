@@ -9,10 +9,13 @@ several things should be covered is
 
 import os
 import re
+import glob
+import json
 import subprocess
 import sqlite3
+import xml.etree.ElementTree as ET
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, Union
 
 from astropy.io import fits
 from astropy.time import Time
@@ -25,7 +28,10 @@ from aces.askapdata.schedblock import SB, SchedulingBlock
 from craco.fixuvfits import fix
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.tools import cracocal2casatab
-from craco.craco_run import auto_sched
+try:
+    from craco.craco_run import auto_sched
+except ImportError:
+    auto_sched = None
 
 import logging
 logging.basicConfig(
@@ -264,7 +270,367 @@ class ScanCasdaMetadata:
         )
         logger.info(f"Queued casda uploading job - with command - {cmd}")
 
-### database related...
+# NEW: clink integration
+# ==============================================================================
+# CLINK Event System Integration & Metadata Helpers
+# ==============================================================================
+
+def parse_sbid(sbid: Union[int, str]) -> int:
+    """
+    Extract clean integer SBID regardless of whether input is int, string, or contains 'SB'/'SB0' prefix.
+
+    Examples:
+      parse_sbid(82418)       -> 82418
+      parse_sbid("82418")     -> 82418
+      parse_sbid("SB82418")   -> 82418
+      parse_sbid("SB082418")  -> 82418
+    """
+    if isinstance(sbid, int):
+        return sbid
+    s = str(sbid).strip()
+    if s.upper().startswith("SB"):
+        s = s[2:]
+    return int(s)
+
+
+def parse_metadata_xml(xml_path: str) -> dict:
+    """Parse a CRACO XML metadata file into a dict."""
+    tree = ET.parse(xml_path)
+    root = tree.getroot()
+    meta = {}
+    for child in root:
+        tag = child.tag
+        val = child.text
+        if val is not None:
+            try:
+                if "." in val:
+                    val = float(val)
+                else:
+                    val = int(val)
+            except ValueError:
+                logger.debug(f"Failed to cast metadata '{tag}' value '{val}' to numeric. Leaving as string.")
+        meta[tag] = val
+    return meta
+
+
+def get_calibration_files(archive_folder: str) -> dict:
+    """List calibration tables/files under archive_folder/cal."""
+    cal_dir = os.path.join(archive_folder, "cal")
+    if not os.path.exists(cal_dir):
+        return {"cal_folder": cal_dir, "files": []}
+    files = [f for f in sorted(os.listdir(cal_dir)) if not f.startswith(".")]
+    return {"cal_folder": cal_dir, "files": files}
+
+
+def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional[str] = None, include_file_size: bool = False) -> dict:
+    """Construct CLINK ready_for_copy event payload matching cpmanager schema."""
+    sbid_int = parse_sbid(sbid)
+    sbid_str = str(sbid_int)
+
+    if archive_folder is None:
+        cand_standard = f"/data/craco/craco/archive/SB{sbid_int}"
+        cand_padded = f"/data/craco/craco/archive/SB{sbid_int:06d}"
+        if os.path.exists(cand_standard):
+            archive_folder = cand_standard
+        elif os.path.exists(cand_padded):
+            archive_folder = cand_padded
+        else:
+            archive_folder = cand_standard
+
+    scans_data = []
+    project = None
+    fieldname = None
+    sample_obs_params = {}
+
+    if os.path.exists(archive_folder):
+        for entry in sorted(os.listdir(archive_folder)):
+            scan_dir = os.path.join(archive_folder, entry)
+            if os.path.isdir(scan_dir) and entry != "cal":
+                scan_files = []
+                xml_files = sorted(glob.glob(os.path.join(scan_dir, "*.craco_metadata.xml")))
+                for xml_file in xml_files:
+                    try:
+                        meta = parse_metadata_xml(xml_file)
+                        if project is None and "project" in meta:
+                            project = str(meta["project"])
+                        if fieldname is None and "fieldname" in meta:
+                            fieldname = str(meta["fieldname"])
+                        if not sample_obs_params:
+                            sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
+
+                        file_info = {
+                            "filename": meta.get("filename", ""),
+                            "metadata_file": os.path.basename(xml_file),
+                            "beam": meta.get("beam"),
+                            "scanstart": meta.get("scanstart"),
+                            "scanend": meta.get("scanend"),
+                            "ra": meta.get("ra"),
+                            "dec": meta.get("dec"),
+                            "polarisations": meta.get("polarisations"),
+                            "numchan": meta.get("numchan"),
+                            "centrefreq": meta.get("centrefreq"),
+                            "chanwidth": meta.get("chanwidth"),
+                            "timeSteps": meta.get("timeSteps"),
+                            "inttime": meta.get("inttime")
+                        }
+                        if include_file_size:
+                            data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
+                            if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
+                                file_info["size_bytes"] = os.path.getsize(data_file_path)
+                            if os.path.exists(xml_file) and os.path.isfile(xml_file):
+                                file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
+                        scan_files.append(file_info)
+                    except Exception as e:
+                        logger.warning(f"Error parsing metadata XML {xml_file}: {e}")
+
+                scans_data.append({
+                    "scanid": entry,
+                    "files": scan_files
+                })
+
+    cal_info = get_calibration_files(archive_folder)
+
+    obs_parameters = {
+        "common.cp.processing_priority": "STANDARD",
+        "sbid": sbid_str,
+        "project": project or "UNKNOWN",
+        "fieldname": fieldname or "UNKNOWN"
+    }
+    for k, v in sample_obs_params.items():
+        obs_parameters[k] = str(v)
+
+    payload = {
+        "schedulingBlock": {
+            "id": sbid_str,
+            "alias": fieldname or "",
+            "owner": project or "UNKNOWN",
+            "state": "OBSERVED",
+            "obsParameters": obs_parameters
+        },
+        "craco": {
+            "sbid": sbid_str,
+            "project": project or "UNKNOWN",
+            "fieldname": fieldname or "UNKNOWN",
+            "archive_folder": archive_folder,
+            "calibration": cal_info,
+            "scans": scans_data
+        }
+    }
+    return payload
+
+
+def setup_clink_environment(config_path: Optional[str] = None):
+    """Load CLINK transport settings into os.environ."""
+    if config_path and os.path.exists(config_path):
+        logger.info(f"Loading CLINK config from {config_path}")
+        try:
+            with open(config_path, "r") as f:
+                if config_path.endswith(".json"):
+                    cfg = json.load(f)
+                else:
+                    cfg = {}
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            cfg[k.strip()] = v.strip().strip('"').strip("'")
+            for k, v in cfg.items():
+                os.environ[k] = str(v)
+        except Exception as e:
+            logger.error(f"Failed to load CLINK config file {config_path}: {e}")
+
+
+# NEW: clink integration
+class ClinkPublisher:
+    """Publishes CLINK events from SKADI."""
+
+    def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
+        setup_clink_environment(config_path)
+        try:
+            from clink import api as clink
+            self.clink = clink
+            self.participant = clink.Participant(participant_name)
+        except ImportError:
+            logger.error("CLINK package is not installed in the active environment.")
+            self.clink = None
+            self.participant = None
+
+    def emit_ready_for_copy(
+        self,
+        sbid: Union[int, str],
+        event_type: str = "au.csiro.atnf.askap.craco.ready_for_copy",
+        archive_folder: Optional[str] = None,
+        subject: Optional[str] = None,
+        test: bool = False,
+        include_file_size: bool = False,
+    ) -> bool:
+        """Emit ready_for_copy CLINK event for an SBID or specific archive folder."""
+        if not self.participant and not test:
+            logger.error("CLINK participant not initialized. Cannot emit ready_for_copy event.")
+            return False
+
+        sbid_int = parse_sbid(sbid)
+
+        payload = build_ready_for_copy_payload(
+            sbid_int, 
+            archive_folder=archive_folder,
+            include_file_size=include_file_size
+        )
+
+        if subject is None:
+            folder_path = payload.get("craco", {}).get("archive_folder", archive_folder)
+            subject_urn = f"urn:askap:craco:::archive-folder/{folder_path}"
+        else:
+            subject_urn = subject
+
+        if test:
+            logger.info(f"TEST MODE: Would emit CLINK ready_for_copy event for SBID {sbid_int} (Type: {event_type})")
+            print("--- CLINK EVENT PAYLOAD ---")
+            print(f"Subject URN: {subject_urn}")
+            print(f"Event Type : {event_type}")
+            print("Payload    :")
+            print(json.dumps(payload, indent=2))
+            print("---------------------------")
+            return True
+
+        logger.info(f"Emitting CLINK ready_for_copy event for SBID {sbid_int} (Type: {event_type})...")
+        try:
+            self.participant.emit_event(
+                subject=subject_urn,
+                type=event_type,
+                data=payload
+            )
+            logger.info(f"Successfully emitted CLINK event {event_type} for SBID {sbid_int}")
+
+            try:
+                am = ArchiveManager()
+                am.update_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
+            except Exception as e:
+                logger.debug(f"Database status update skipped: {e}")
+            return True
+        except Exception as error:
+            logger.error(f"Failed to emit CLINK event for SBID {sbid_int}: {error}")
+            return False
+
+
+# NEW: clink integration
+class ClinkListener:
+    """Listener daemon consuming datamanager CLINK events."""
+
+    def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
+        setup_clink_environment(config_path)
+        try:
+            from clink import api as clink
+            self.clink = clink
+            self.participant = clink.Participant(participant_name)
+            self._register_handlers()
+        except ImportError:
+            logger.error("CLINK package is not installed in the active environment.")
+            self.clink = None
+            self.participant = None
+
+    def _extract_sbid(self, event) -> Optional[int]:
+        """Extract SBID integer from event subject URN or event payload."""
+        # 1. Check data payload fields
+        if hasattr(event, "data") and isinstance(event.data, dict):
+            sb_id = (
+                event.data.get("sbid")
+                or event.data.get("schedulingBlock", {}).get("id")
+                or event.data.get("craco", {}).get("sbid")
+            )
+            if sb_id:
+                try:
+                    return int(sb_id)
+                except (ValueError, TypeError):
+                    logger.debug(f"Failed to parse integer from payload sbid field '{sb_id}', falling back to URN check.")
+
+        # 2. Check subject URN resource ID
+        if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
+            res_id = str(event.subject_urn.resource.id)
+            try:
+                return int(res_id)
+            except ValueError:
+                match = re.search(r"(\d+)", res_id)
+                if match:
+                    return int(match.group(1))
+
+        # 3. Fallback: search raw subject string for SBID digits
+        if hasattr(event, "subject") and event.subject:
+            match = re.search(r"(\d+)", str(event.subject))
+            if match:
+                return int(match.group(1))
+
+        return None
+
+    def _register_handlers(self):
+        """Register event handlers for copy and purge events."""
+        am = ArchiveManager()
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.added_to_queue", name="craco.on_copy_queued", suppress_exceptions=True)
+        def on_copy_queued(event, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid}")
+            if sbid:
+                try:
+                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.started", name="craco.on_copy_started", suppress_exceptions=True)
+        def on_copy_started(event, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: copy.started for SBID {sbid}")
+            if sbid:
+                try:
+                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.completed", name="craco.on_copy_completed", suppress_exceptions=True)
+        def on_copy_completed(event, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: copy.completed for SBID {sbid}")
+            if sbid:
+                try:
+                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.cpmanager.ready_for_purge", name="craco.on_ready_for_purge", suppress_exceptions=True)
+        def on_ready_for_purge(event, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid}")
+            if sbid:
+                try:
+                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.completed", name="craco.on_purge_completed", suppress_exceptions=True)
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
+        def on_purge_completed(event, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: purge completed for SBID {sbid}")
+            if sbid:
+                try:
+                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+    def start_listening(self):
+        """Start blocking consumer loop."""
+        if not self.participant:
+            logger.error("CLINK participant not initialized. Cannot start listening.")
+            return
+        logger.info("Starting CLINK listener daemon for CRACO...")
+        self.participant.consume()
+
+
+# ==============================================================================
+# Archiving Database & Status Tracking
+# ==============================================================================
+
+# NEW: clink integration
 #### now we need to move everything to normal postgresql database
 from configparser import ConfigParser
 
@@ -283,26 +649,47 @@ def load_config(config=None, section="dbwriter"):
     return {k:v for k, v in params}
 
 ### this function to get connection details...
-import psycopg2
-from psycopg2.extras import RealDictCursor
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    _psycopg2_UniqueViolation = psycopg2.errors.UniqueViolation
+except ImportError:
+    psycopg2 = None
+    RealDictCursor = None
+    _psycopg2_UniqueViolation = Exception
 
 def get_psql_connect(section="dbreader"):
+    if psycopg2 is None:
+        raise ImportError("psycopg2 is required for PostgreSQL connection.")
     config = load_config(section=section)
     return psycopg2.connect(**config)
 
 ### this is function to load tables from database
-from sqlalchemy import create_engine 
+try:
+    from sqlalchemy import create_engine
+except ImportError:
+    create_engine = None
+
 def get_psql_engine(section="dbreader"):
+    if create_engine is None:
+        raise ImportError("sqlalchemy is required for get_psql_engine.")
     c = load_config(section=section)
     engine_str = "postgresql+psycopg2://"
     engine_str += f"""{c["user"]}:{c["password"]}@{c["host"]}:{c["port"]}/{c["database"]}"""
     return create_engine(engine_str)
 
 class ArchiveStatus(IntEnum):
+    """Archiving lifecycle status codes."""
     DEFAULT = 0
     QUEUED = 1
     EXECUTING = 2
     FINISHED = 3
+    READY_FOR_COPY_SENT = 10  # ready_for_copy emitted from Skadi
+    COPY_QUEUED = 11          # Datamanager queued copy job
+    COPY_EXECUTING = 12       # Copy job running
+    COPY_FINISHED = 13        # Copy job completed
+    READY_FOR_PURGE = 20      # SBID flagged ready for purge
+    PURGED = 30               # Purge completed
     ERRORED = -1
 
 class SkadiStatus(IntEnum):
@@ -313,10 +700,32 @@ class SkadiStatus(IntEnum):
 class ArchiveManager:
     """Manages data archiving records for Acacia and Setonix archiving processes."""
 
-    def __init__(self):
-        pass
+    def __init__(self, db_path: str = "archive_status.db"):
+        self.db_path = db_path
+        self._init_db()
 
-    ### note - no init db needed, you use to use admin account to do so
+    def _get_connection(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        """Initialize the database and create the table if it doesn't exist."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS archive_records (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sbid            INTEGER NOT NULL,
+                    scan            TEXT NOT NULL,
+                    acacia_status   INTEGER NOT NULL DEFAULT 0,
+                    setonix_status  INTEGER NOT NULL DEFAULT 0,
+                    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(sbid, scan)
+                )
+            """)
+            conn.commit()
 
     # ------------------------------------------------------------------ #
     #  Write operations                                                    #
@@ -349,7 +758,7 @@ class ArchiveManager:
                 )
                 conn.commit()
                 return cur.lastrowid
-        except psycopg2.errors.UniqueViolation:
+        except _psycopg2_UniqueViolation:
             raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
 
     def update_archive_status(
@@ -438,7 +847,7 @@ class ArchiveManager:
     def get_record(self, sbid: int, scan: str) -> Optional[dict]:
         """Fetch a single record by (sbid, scan). Returns None if not found."""
         with get_psql_connect(section="dbreader") as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute(
                 "SELECT * FROM archives WHERE sbid = %s AND scan = %s",
                 (sbid, scan),
@@ -449,7 +858,7 @@ class ArchiveManager:
     def get_all_records(self) -> list[dict]:
         """Return all records in the database."""
         with self._get_connection() as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute("SELECT * FROM archives ORDER BY id")
             rows = cur.fetchall()
             return [dict(r) for r in rows]
@@ -457,7 +866,7 @@ class ArchiveManager:
     def get_records_by_query(self, query: str) -> list[dict]:
         """Return all records in the database."""
         with get_psql_connect(section="dbreader") as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute(query)
             rows = cur.fetchall()
             return [dict(r) for r in rows]
@@ -482,7 +891,7 @@ class ArchiveManager:
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         with self._get_connection() as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute(
                 f"SELECT * FROM archives {where} ORDER BY id", values
             )
@@ -490,6 +899,8 @@ class ArchiveManager:
             return [dict(r) for r in rows]
 
     def update_observation_status_sbid(self, sbid):
+        if auto_sched is None:
+            raise ImportError("auto_sched module could not be loaded due to missing dependencies.")
         auto_sched.push_sbid_observation(sbid=sbid)
 
     # check skadi_status
@@ -667,15 +1078,60 @@ class SBIDManager:
         return f"<SBIDManager db='{self.db_path}' records={count}>"
 
 def main():
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-    parser = ArgumentParser(description='Archive uvfits file to a given place', formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--sbid", type=int, help="SBID of the data to be archived")
+    """
+    Stage uvfits data, calibration tables, and metadata for archiving and handle CLINK event publishing/listening.
+
+    Examples:
+      # 1. Prepare archive folder and emit CLINK ready_for_copy event for SBID 82418:
+      python -m craco.casda_archiver --sbid 82418 --prepare --emit-clink
+
+      # 2. Run listener daemon to record copy/purge lifecycle events:
+      python -m craco.casda_archiver --listen
+
+      # 3. Specify custom CLINK transport config file:
+      python -m craco.casda_archiver --sbid 82418 --emit-clink --clink-config /path/to/clink_env.conf
+    """
+    from argparse import ArgumentParser, RawDescriptionHelpFormatter
+    description_text = (
+        "Stage uvfits data, calibration tables, and metadata for archiving and handle CLINK event publishing/listening.\n\n"
+        "Examples:\n"
+        "  # Prepare archive folder and emit ready_for_copy event for SBID 82418:\n"
+        "  python -m craco.casda_archiver --sbid 82418 --prepare --emit-clink\n\n"
+        "  # Run listener daemon to record copy/purge lifecycle events:\n"
+        "  python -m craco.casda_archiver --listen\n\n"
+        "  # Emit event using custom transport config file:\n"
+        "  python -m craco.casda_archiver --sbid 82418 --emit-clink --clink-config /path/to/clink_env.conf\n"
+    )
+    parser = ArgumentParser(
+        description=description_text,
+        formatter_class=RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--sbid", type=parse_sbid, help="SBID of the data to be archived (e.g., 82418 or SB82418)")
     parser.add_argument("--scan", default=None, type=str, help="scan id of the data to be")
     parser.add_argument("--tstart", default=None,type=str, help="scan start time of the data to be archived")
     parser.add_argument("--prepare", action="store_true", help="whether to run prepare, i.e., convert and link data to archive folder")
     parser.add_argument("--rsync", action="store_true", help="whether to start rsync job to upload data to given place")
     parser.add_argument("--target", type=str, default="setonix:/scratch/ja3/zwan4817/askapbuffer", help="the target for rsync upload")
+    # NEW: clink integration
+    parser.add_argument("--emit-clink", action="store_true", help="whether to emit a CLINK ready_for_copy event for the SBID")
+    parser.add_argument("--listen", action="store_true", help="whether to run CLINK listener daemon to record Pawsey archiving/purge events")
+    parser.add_argument("--clink-config", type=str, default=None, help="path to CLINK transport config file (JSON or KEY=VAL)")
+    parser.add_argument("--event-type", type=str, default="au.csiro.atnf.askap.craco.ready_for_copy", help="CLINK event type string for ready_for_copy emission")
+    parser.add_argument("--subject", type=str, default=None, help="Optional custom Subject URN string for ready_for_copy emission")
+    parser.add_argument("--test", action="store_true", help="Test mode: print payload to stdout instead of sending to the broker")
+    parser.add_argument("--include-size", action="store_true", help="Include file sizes in the CLINK event payload")
     args = parser.parse_args()
+
+    # NEW: clink integration    
+    if args.listen:
+        logger.info("Starting CLINK listener mode...")
+        listener = ClinkListener(config_path=args.clink_config)
+        listener.start_listening()
+        return
+
+    if args.sbid is None and not args.listen:
+        logger.error("Please specify --sbid or --listen")
+        return
 
     if args.scan is None or args.tstart is None:
         logger.info(f"no scan/tstart provided, will run for all scans...")
@@ -691,12 +1147,31 @@ def main():
         if args.rsync:
             scm.start_casda_rsync(target=args.target)
 
+    if args.emit_clink or args.test:
+        publisher = ClinkPublisher(config_path=args.clink_config)
+        publisher.emit_ready_for_copy(
+            sbid=args.sbid, 
+            event_type=args.event_type, 
+            subject=args.subject,
+            test=args.test,
+            include_file_size=args.include_size
+        )
 
 
 if __name__ == "__main__":
     main()
 
-    ##### following for testing...
+    ##### NEW: clink integration testing & example usage...
+    # Example 1: Emit ready_for_copy event for SB82418
+    # sbid = 82418
+    # pub = ClinkPublisher()
+    # pub.emit_ready_for_copy(sbid=sbid)
+
+    # Example 2: Start long-running listener daemon
+    # listener = ClinkListener()
+    # listener.start_listening()
+
+    ##### legacy testing...
     # uvfitspath = "/CRACO/DATA_01/craco/SB076946/scans/00/20250916164012/b18.uvfits"
     # UCM = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
     # UCM.prepare_casda_upload()
