@@ -347,39 +347,36 @@ def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional
                 scan_files = []
                 xml_files = sorted(glob.glob(os.path.join(scan_dir, "*.craco_metadata.xml")))
                 for xml_file in xml_files:
-                    try:
-                        meta = parse_metadata_xml(xml_file)
-                        if project is None and "project" in meta:
-                            project = str(meta["project"])
-                        if fieldname is None and "fieldname" in meta:
-                            fieldname = str(meta["fieldname"])
-                        if not sample_obs_params:
-                            sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
+                    meta = parse_metadata_xml(xml_file)
+                    if project is None and "project" in meta:
+                        project = str(meta["project"])
+                    if fieldname is None and "fieldname" in meta:
+                        fieldname = str(meta["fieldname"])
+                    if not sample_obs_params:
+                        sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
 
-                        file_info = {
-                            "filename": meta.get("filename", ""),
-                            "metadata_file": os.path.basename(xml_file),
-                            "beam": meta.get("beam"),
-                            "scanstart": meta.get("scanstart"),
-                            "scanend": meta.get("scanend"),
-                            "ra": meta.get("ra"),
-                            "dec": meta.get("dec"),
-                            "polarisations": meta.get("polarisations"),
-                            "numchan": meta.get("numchan"),
-                            "centrefreq": meta.get("centrefreq"),
-                            "chanwidth": meta.get("chanwidth"),
-                            "timeSteps": meta.get("timeSteps"),
-                            "inttime": meta.get("inttime")
-                        }
-                        if include_file_size:
-                            data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
-                            if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
-                                file_info["size_bytes"] = os.path.getsize(data_file_path)
-                            if os.path.exists(xml_file) and os.path.isfile(xml_file):
-                                file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
-                        scan_files.append(file_info)
-                    except Exception as e:
-                        logger.warning(f"Error parsing metadata XML {xml_file}: {e}")
+                    file_info = {
+                        "filename": meta.get("filename", ""),
+                        "metadata_file": os.path.basename(xml_file),
+                        "beam": meta.get("beam"),
+                        "scanstart": meta.get("scanstart"),
+                        "scanend": meta.get("scanend"),
+                        "ra": meta.get("ra"),
+                        "dec": meta.get("dec"),
+                        "polarisations": meta.get("polarisations"),
+                        "numchan": meta.get("numchan"),
+                        "centrefreq": meta.get("centrefreq"),
+                        "chanwidth": meta.get("chanwidth"),
+                        "timeSteps": meta.get("timeSteps"),
+                        "inttime": meta.get("inttime")
+                    }
+                    if include_file_size:
+                        data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
+                        if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
+                            file_info["size_bytes"] = os.path.getsize(data_file_path)
+                        if os.path.exists(xml_file) and os.path.isfile(xml_file):
+                            file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
+                    scan_files.append(file_info)
 
                 scans_data.append({
                     "scanid": entry,
@@ -421,21 +418,18 @@ def setup_clink_environment(config_path: Optional[str] = None):
     """Load CLINK transport settings into os.environ."""
     if config_path and os.path.exists(config_path):
         logger.info(f"Loading CLINK config from {config_path}")
-        try:
-            with open(config_path, "r") as f:
-                if config_path.endswith(".json"):
-                    cfg = json.load(f)
-                else:
-                    cfg = {}
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#") and "=" in line:
-                            k, v = line.split("=", 1)
-                            cfg[k.strip()] = v.strip().strip('"').strip("'")
-            for k, v in cfg.items():
-                os.environ[k] = str(v)
-        except Exception as e:
-            logger.error(f"Failed to load CLINK config file {config_path}: {e}")
+        with open(config_path, "r") as f:
+            if config_path.endswith(".json"):
+                cfg = json.load(f)
+            else:
+                cfg = {}
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        cfg[k.strip()] = v.strip().strip('"').strip("'")
+        for k, v in cfg.items():
+            os.environ[k] = str(v)
 
 
 # NEW: clink integration
@@ -444,14 +438,9 @@ class ClinkPublisher:
 
     def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
         setup_clink_environment(config_path)
-        try:
-            from clink import api as clink
-            self.clink = clink
-            self.participant = clink.Participant(participant_name)
-        except ImportError:
-            logger.error("CLINK package is not installed in the active environment.")
-            self.clink = None
-            self.participant = None
+        from clink import api as clink
+        self.clink = clink
+        self.participant = clink.Participant(participant_name)
 
     def emit_ready_for_copy(
         self,
@@ -502,7 +491,7 @@ class ClinkPublisher:
 
             try:
                 am = ArchiveManager()
-                am.update_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
+                am.update_archive_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
             except Exception as e:
                 logger.debug(f"Database status update skipped: {e}")
             return True
@@ -570,7 +559,7 @@ class ClinkListener:
             logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid}")
             if sbid:
                 try:
-                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
@@ -580,7 +569,7 @@ class ClinkListener:
             logger.info(f"Received CLINK event: copy.started for SBID {sbid}")
             if sbid:
                 try:
-                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
@@ -590,7 +579,7 @@ class ClinkListener:
             logger.info(f"Received CLINK event: copy.completed for SBID {sbid}")
             if sbid:
                 try:
-                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
@@ -600,7 +589,7 @@ class ClinkListener:
             logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid}")
             if sbid:
                 try:
-                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
@@ -611,7 +600,7 @@ class ClinkListener:
             logger.info(f"Received CLINK event: purge completed for SBID {sbid}")
             if sbid:
                 try:
-                    am.update_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
