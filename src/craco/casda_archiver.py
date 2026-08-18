@@ -758,6 +758,16 @@ class ArchiveManager:
         if acacia_status is None and setonix_status is None and skadi_status is None and uvfits_count is None:
             raise ValueError("At least one of acacia_status, setonix_status, skadi_status or uvfits_count must be provided.")
 
+        if scan == "SB_ALL":
+            logger.info(f"updating all scans for SBID {sbid}...")
+            update_status = self.update_archive_status_sbid(
+                sbid=sbid,
+                skadi_status=skadi_status,
+                acacia_status=acacia_status,
+                setonix_status=setonix_status,
+            )
+            return update_status
+
         fields, values = [], []
         if acacia_status is not None:
             fields.append("acacia_status = %s")
