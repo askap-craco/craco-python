@@ -28,10 +28,8 @@ from aces.askapdata.schedblock import SB, SchedulingBlock
 from craco.fixuvfits import fix
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.tools import cracocal2casatab
-try:
-    from craco.craco_run import auto_sched
-except ImportError:
-    auto_sched = None
+
+from craco.craco_run import auto_sched
 
 import logging
 logging.basicConfig(
@@ -649,14 +647,8 @@ def load_config(config=None, section="dbwriter"):
     return {k:v for k, v in params}
 
 ### this function to get connection details...
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    _psycopg2_UniqueViolation = psycopg2.errors.UniqueViolation
-except ImportError:
-    psycopg2 = None
-    RealDictCursor = None
-    _psycopg2_UniqueViolation = Exception
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 def get_psql_connect(section="dbreader"):
     if psycopg2 is None:
@@ -665,10 +657,7 @@ def get_psql_connect(section="dbreader"):
     return psycopg2.connect(**config)
 
 ### this is function to load tables from database
-try:
-    from sqlalchemy import create_engine
-except ImportError:
-    create_engine = None
+from sqlalchemy import create_engine
 
 def get_psql_engine(section="dbreader"):
     if create_engine is None:
@@ -758,7 +747,7 @@ class ArchiveManager:
                 )
                 conn.commit()
                 return cur.lastrowid
-        except _psycopg2_UniqueViolation:
+        except psycopg2.errors.UniqueViolation:
             raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
 
     def update_archive_status(
