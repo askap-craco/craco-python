@@ -29,7 +29,10 @@ from aces.askapdata.schedblock import SB, SchedulingBlock
 from craco.fixuvfits import fix
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.tools import cracocal2casatab
-from craco.craco_run import auto_sched
+try:
+    from craco.craco_run import auto_sched
+except ImportError:
+    auto_sched = None
 
 from clink import api as clink
 from configparser import ConfigParser
@@ -39,7 +42,11 @@ from psycopg2.extras import RealDictCursor
 _psycopg2_UniqueViolation = psycopg2.errors.UniqueViolation
 
 ### this is function to load tables from database
-from sqlalchemy import create_engine
+try:
+    from sqlalchemy import create_engine
+except ImportError:
+    create_engine = None
+
 
 import logging
 logging.basicConfig(
@@ -54,9 +61,13 @@ def metadata_dict2xml(metadata, indent=2):
     return "<metadata>\n" + "\n".join(items) + "\n</metadata>"
 
 def execute_fixuvfits(uvfitspath):
-    logger.info(f"fixing {uvfitspath}...")
-    fix(uvfitspath)
-    return 0
+    try: 
+        logger.info(f"fixing {uvfitspath}...")
+        fix(uvfitspath)
+        return 0
+    except Exception as error:
+        logger.info(f"cannot fix {uvfitspath} due to - {error}")
+        return -1
 
 class UvfitsCasdaMetadata:
     def __init__(self, uvfitspath):
@@ -354,36 +365,41 @@ def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional
                 scan_files = []
                 xml_files = sorted(glob.glob(os.path.join(scan_dir, "*.craco_metadata.xml")))
                 for xml_file in xml_files:
-                    meta = parse_metadata_xml(xml_file)
-                    if project is None and "project" in meta:
-                        project = str(meta["project"])
-                    if fieldname is None and "fieldname" in meta:
-                        fieldname = str(meta["fieldname"])
-                    if not sample_obs_params:
-                        sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
+                    try:
+                        meta = parse_metadata_xml(xml_file)
+                        if project is None and "project" in meta:
+                            project = str(meta["project"])
+                        if fieldname is None and "fieldname" in meta:
+                            fieldname = str(meta["fieldname"])
+                        if not sample_obs_params:
+                            sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
 
-                    file_info = {
-                        "filename": meta.get("filename", ""),
-                        "metadata_file": os.path.basename(xml_file),
-                        "beam": meta.get("beam"),
-                        "scanstart": meta.get("scanstart"),
-                        "scanend": meta.get("scanend"),
-                        "ra": meta.get("ra"),
-                        "dec": meta.get("dec"),
-                        "polarisations": meta.get("polarisations"),
-                        "numchan": meta.get("numchan"),
-                        "centrefreq": meta.get("centrefreq"),
-                        "chanwidth": meta.get("chanwidth"),
-                        "timeSteps": meta.get("timeSteps"),
-                        "inttime": meta.get("inttime")
-                    }
-                    if include_file_size:
-                        data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
-                        if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
-                            file_info["size_bytes"] = os.path.getsize(data_file_path)
-                        if os.path.exists(xml_file) and os.path.isfile(xml_file):
-                            file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
-                    scan_files.append(file_info)
+                        file_info = {
+                            "filename": meta.get("filename", ""),
+                            "metadata_file": os.path.basename(xml_file),
+                            "beam": meta.get("beam"),
+                            "scanstart": meta.get("scanstart"),
+                            "scanend": meta.get("scanend"),
+                            "ra": meta.get("ra"),
+                            "dec": meta.get("dec"),
+                            "polarisations": meta.get("polarisations"),
+                            "numchan": meta.get("numchan"),
+                            "centrefreq": meta.get("centrefreq"),
+                            "chanwidth": meta.get("chanwidth"),
+                            "timeSteps": meta.get("timeSteps"),
+                            "inttime": meta.get("inttime")
+                        }
+                        if include_file_size:
+                            data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
+                            if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
+                                file_info["size_bytes"] = os.path.getsize(data_file_path)
+                            if os.path.exists(xml_file) and os.path.isfile(xml_file):
+                                file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
+
+                        scan_files.append(file_info)
+
+                    except Exception as e:
+                        logger.warning(f"Error parsing metadata XML {xml_file}: {e}")
 
                 scans_data.append({
                     "scanid": entry,
@@ -525,8 +541,9 @@ class ClinkListener:
             if sb_id:
                 try:
                     return int(sb_id)
-                except (ValueError, TypeError):
-                    logger.debug(f"Failed to parse integer from payload sbid field '{sb_id}', falling back to URN check.")
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Failed to parse integer from payload sbid field '{sb_id}'.")
+                    raise ValueError(f"Failed to parse integer from payload sbid field '{sb_id}'. {e}")
 
         # 2. Check subject URN resource ID
         if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
@@ -537,6 +554,9 @@ class ClinkListener:
                 match = re.search(r"(\d+)", res_id)
                 if match:
                     return int(match.group(1))
+                else:
+                    logger.error(f"Failed to parse integer from URN resource ID '{res_id}'.")
+                    raise ValueError(f"Failed to parse integer from URN resource ID '{res_id}'.")
 
         # 3. Fallback: search raw subject string for SBID digits
         if hasattr(event, "subject") and event.subject:
@@ -860,7 +880,10 @@ class ArchiveManager:
     # check skadi_status
     def _check_skadi_status(self, sbid, scan):
         scandir = ScanDir(sbid=sbid, scan=scan)
-        uvfitscount = scandir.uvfits_count
+        try: uvfitscount = scandir.uvfits_count
+        except:
+            logger.info(f"cannot get uvfits count for sbid={sbid}, scan={scan}...")
+            uvfitscount = 0
         if uvfitscount == 36:
             self.update_archive_status(sbid=sbid, scan=scan, skadi_status=SkadiStatus.READY, uvfits_count=uvfitscount)
         else:
@@ -973,9 +996,9 @@ class SBIDManager:
                 )
                 conn.commit()
                 return cursor.lastrowid
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as e:
             logger.info(f"Record with SBID={sbid} already exists. will not update the record")
-
+            #raise sqlite3.IntegrityError(f"Record with SBID={sbid} already exists. {e}")
     def update_record(self, sbid: int, acacia_archive_loc: str) -> bool:
         """
         Update the acacia_archive_loc for a given sbid.
