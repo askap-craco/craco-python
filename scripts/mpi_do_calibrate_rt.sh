@@ -22,7 +22,9 @@ fi
 
 source /home/craftop/.conda/.remove_conda.sh
 source /home/craftop/.conda/.activate_conda.sh
-conda activate calib
+conda activate craco
+
+export LD_LIBRARY_PATH=/CRACO/SOFTWARE/craco/craftop/lib/calib:$LD_LIBRARY_PATH
 
 # export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/CRACO/SOFTWARE/craco/wan342/Software/conda3/envs/craco38/lib
 # export PATH=$PATH:/CRACO/SOFTWARE/craco/wan342/bin

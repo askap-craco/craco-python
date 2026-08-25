@@ -29,10 +29,8 @@ from aces.askapdata.schedblock import SB, SchedulingBlock
 from craco.fixuvfits import fix
 from craco.datadirs import SchedDir, ScanDir, format_sbid
 from craco.tools import cracocal2casatab
-try:
-    from craco.craco_run import auto_sched
-except ImportError:
-    auto_sched = None
+
+from craco.craco_run import auto_sched
 
 from clink import api as clink
 from configparser import ConfigParser
@@ -365,41 +363,36 @@ def build_ready_for_copy_payload(sbid: Union[int, str], archive_folder: Optional
                 scan_files = []
                 xml_files = sorted(glob.glob(os.path.join(scan_dir, "*.craco_metadata.xml")))
                 for xml_file in xml_files:
-                    try:
-                        meta = parse_metadata_xml(xml_file)
-                        if project is None and "project" in meta:
-                            project = str(meta["project"])
-                        if fieldname is None and "fieldname" in meta:
-                            fieldname = str(meta["fieldname"])
-                        if not sample_obs_params:
-                            sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
+                    meta = parse_metadata_xml(xml_file)
+                    if project is None and "project" in meta:
+                        project = str(meta["project"])
+                    if fieldname is None and "fieldname" in meta:
+                        fieldname = str(meta["fieldname"])
+                    if not sample_obs_params:
+                        sample_obs_params = {k: str(v) for k, v in meta.items() if v is not None}
 
-                        file_info = {
-                            "filename": meta.get("filename", ""),
-                            "metadata_file": os.path.basename(xml_file),
-                            "beam": meta.get("beam"),
-                            "scanstart": meta.get("scanstart"),
-                            "scanend": meta.get("scanend"),
-                            "ra": meta.get("ra"),
-                            "dec": meta.get("dec"),
-                            "polarisations": meta.get("polarisations"),
-                            "numchan": meta.get("numchan"),
-                            "centrefreq": meta.get("centrefreq"),
-                            "chanwidth": meta.get("chanwidth"),
-                            "timeSteps": meta.get("timeSteps"),
-                            "inttime": meta.get("inttime")
-                        }
-                        if include_file_size:
-                            data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
-                            if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
-                                file_info["size_bytes"] = os.path.getsize(data_file_path)
-                            if os.path.exists(xml_file) and os.path.isfile(xml_file):
-                                file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
-
-                        scan_files.append(file_info)
-
-                    except Exception as e:
-                        logger.warning(f"Error parsing metadata XML {xml_file}: {e}")
+                    file_info = {
+                        "filename": meta.get("filename", ""),
+                        "metadata_file": os.path.basename(xml_file),
+                        "beam": meta.get("beam"),
+                        "scanstart": meta.get("scanstart"),
+                        "scanend": meta.get("scanend"),
+                        "ra": meta.get("ra"),
+                        "dec": meta.get("dec"),
+                        "polarisations": meta.get("polarisations"),
+                        "numchan": meta.get("numchan"),
+                        "centrefreq": meta.get("centrefreq"),
+                        "chanwidth": meta.get("chanwidth"),
+                        "timeSteps": meta.get("timeSteps"),
+                        "inttime": meta.get("inttime")
+                    }
+                    if include_file_size:
+                        data_file_path = os.path.join(scan_dir, meta.get("filename", ""))
+                        if os.path.exists(data_file_path) and os.path.isfile(data_file_path):
+                            file_info["size_bytes"] = os.path.getsize(data_file_path)
+                        if os.path.exists(xml_file) and os.path.isfile(xml_file):
+                            file_info["metadata_size_bytes"] = os.path.getsize(xml_file)
+                    scan_files.append(file_info)
 
                 scans_data.append({
                     "scanid": entry,
@@ -461,12 +454,9 @@ class ClinkPublisher:
 
     def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
         setup_clink_environment(config_path)
+        from clink import api as clink
         self.clink = clink
         self.participant = clink.Participant(participant_name)
-        # except ImportError:
-        #     logger.error("CLINK package is not installed in the active environment.")
-        #     self.clink = None
-        #     self.participant = None
 
     def emit_ready_for_copy(
         self,
@@ -507,16 +497,23 @@ class ClinkPublisher:
             return True
 
         logger.info(f"Emitting CLINK ready_for_copy event for SBID {sbid_int} (Type: {event_type})...")
-        self.participant.emit_event(
-            subject=subject_urn,
-            type=event_type,
-            data=payload
-        )
-        logger.info(f"Successfully emitted CLINK event {event_type} for SBID {sbid_int}")
+        try:
+            self.participant.emit_event(
+                subject=subject_urn,
+                type=event_type,
+                data=payload
+            )
+            logger.info(f"Successfully emitted CLINK event {event_type} for SBID {sbid_int}")
 
-        am = ArchiveManager()
-        am.update_archive_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
-        return True
+            try:
+                am = ArchiveManager()
+                am.update_archive_status(sbid=sbid_int, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_COPY_SENT)
+            except Exception as e:
+                logger.debug(f"Database status update skipped: {e}")
+            return True
+        except Exception as error:
+            logger.error(f"Failed to emit CLINK event for SBID {sbid_int}: {error}")
+            return False
 
 
 # NEW: clink integration
@@ -575,28 +572,40 @@ class ClinkListener:
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid}")
             if sbid:
-                am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.started", name="craco.on_copy_started", suppress_exceptions=True)
         def on_copy_started(event, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.started for SBID {sbid}")
             if sbid:
-                am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.completed", name="craco.on_copy_completed", suppress_exceptions=True)
         def on_copy_completed(event, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.completed for SBID {sbid}")
             if sbid:
-                am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.cpmanager.ready_for_purge", name="craco.on_ready_for_purge", suppress_exceptions=True)
         def on_ready_for_purge(event, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid}")
             if sbid:
-                am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.completed", name="craco.on_purge_completed", suppress_exceptions=True)
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
@@ -604,7 +613,10 @@ class ClinkListener:
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: purge completed for SBID {sbid}")
             if sbid:
-                am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
 
     def start_listening(self):
         """Start blocking consumer loop."""
@@ -637,7 +649,6 @@ def load_config(config=None, section="dbwriter"):
     return {k:v for k, v in params}
 
 ### this function to get connection details...
-
 def get_psql_connect(section="dbreader"):
     if psycopg2 is None:
         raise ImportError("psycopg2 is required for PostgreSQL connection.")
@@ -732,7 +743,7 @@ class ArchiveManager:
                 )
                 conn.commit()
                 return cur.lastrowid
-        except _psycopg2_UniqueViolation:
+        except psycopg2.errors.UniqueViolation:
             raise ValueError(f"Record with SBID={sbid} and scan='{scan}' already exists.")
 
     def update_archive_status(
@@ -753,6 +764,16 @@ class ArchiveManager:
         """
         if acacia_status is None and setonix_status is None and skadi_status is None and uvfits_count is None:
             raise ValueError("At least one of acacia_status, setonix_status, skadi_status or uvfits_count must be provided.")
+
+        if scan == "SB_ALL":
+            logger.info(f"updating all scans for SBID {sbid}...")
+            update_status = self.update_archive_status_sbid(
+                sbid=sbid,
+                skadi_status=skadi_status,
+                acacia_status=acacia_status,
+                setonix_status=setonix_status,
+            )
+            return update_status
 
         fields, values = [], []
         if acacia_status is not None:
