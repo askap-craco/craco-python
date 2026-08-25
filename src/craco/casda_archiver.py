@@ -568,51 +568,78 @@ class ClinkListener:
         am = ArchiveManager()
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.added_to_queue", name="craco.on_copy_queued", suppress_exceptions=True)
-        def on_copy_queued(event, **kwargs):
+        def on_copy_queued(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.started", name="craco.on_copy_started", suppress_exceptions=True)
-        def on_copy_started(event, **kwargs):
+        def on_copy_started(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.started for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.started for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.completed", name="craco.on_copy_completed", suppress_exceptions=True)
-        def on_copy_completed(event, **kwargs):
+        def on_copy_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.completed for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.completed for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.cpmanager.ready_for_purge", name="craco.on_ready_for_purge", suppress_exceptions=True)
-        def on_ready_for_purge(event, **kwargs):
+        def on_ready_for_purge(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid}")
+            logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.completed", name="craco.on_purge_completed", suppress_exceptions=True)
-        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
-        def on_purge_completed(event, **kwargs):
+        def on_purge_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: purge completed for SBID {sbid}")
+            logger.info(f"Received CLINK event: purge completed for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
+        def on_purge_deleted(event, dry_run: bool = False, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: purge deleted for SBID {sbid} (dry_run={dry_run})")
+            if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
                 except Exception as e:
