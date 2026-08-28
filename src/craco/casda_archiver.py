@@ -958,12 +958,14 @@ class ArchiveManager:
 
         ### update observation tables...
         logger.info(f"checking sbid status for all records with acacia_status=0 or setonix_status=0...")
+        logger.info(f"but only check if the internal observation status is <= 3...")
         logger.info(f"setonix - {setonix}; acacia - {acacia}")
-        query = "SELECT * FROM archives WHERE "
+        query = "SELECT * FROM archives a JOIN observation o ON a.sbid = o.sbid WHERE "
         querycond = []
-        if setonix: querycond.append("setonix_status = 0")
-        if acacia: querycond.append("acacia_status = 0")
-        query += " OR ".join(querycond)
+        if setonix: querycond.append("a.setonix_status = 0")
+        if acacia: querycond.append("a.acacia_status = 0")
+        query += "({}) ".format(" OR ".join(querycond))
+        query += "AND o.status <= 3"
         records = self.get_records_by_query(query)
         logger.info(f"{len(records)} records found...")
         updatesbids = set([record["sbid"] for record in records])
