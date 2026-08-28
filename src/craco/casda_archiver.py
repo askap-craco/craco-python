@@ -522,6 +522,7 @@ class ClinkListener:
 
     def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
         setup_clink_environment(config_path)
+        from clink import api as clink #reload after setting up clink env
         self.clink = clink
         self.participant = clink.Participant(participant_name)
         self._register_handlers()
