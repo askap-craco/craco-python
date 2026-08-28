@@ -712,19 +712,12 @@ class SkadiStatus(IntEnum):
 class ArchiveManager:
     """Manages data archiving records for Acacia and Setonix archiving processes."""
 
-    def __init__(self, db_path: str = "archive_status.db"):
-        self.db_path = db_path
-        self._init_db()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.row_factory = sqlite3.Row
-        return conn
+    def __init__(self,):
+        pass
 
     def _init_db(self):
         """Initialize the database and create the table if it doesn't exist."""
-        with self._get_connection() as conn:
+        with get_psql_connect(section="dbwriter") as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS archive_records (
                     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -879,7 +872,7 @@ class ArchiveManager:
 
     def get_all_records(self) -> list[dict]:
         """Return all records in the database."""
-        with self._get_connection() as conn:
+        with get_psql_connect(section="dbreader") as conn:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute("SELECT * FROM archives ORDER BY id")
             rows = cur.fetchall()
@@ -912,7 +905,7 @@ class ArchiveManager:
             values.append(int(setonix_status))
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        with self._get_connection() as conn:
+        with get_psql_connect(section="dbreader") as conn:
             cur = conn.cursor(cursor_factory=RealDictCursor)
             cur.execute(
                 f"SELECT * FROM archives {where} ORDER BY id", values
@@ -921,8 +914,6 @@ class ArchiveManager:
             return [dict(r) for r in rows]
 
     def update_observation_status_sbid(self, sbid):
-        if auto_sched is None:
-            raise ImportError("auto_sched module could not be loaded due to missing dependencies.")
         auto_sched.push_sbid_observation(sbid=sbid)
 
     # check skadi_status
@@ -950,6 +941,7 @@ class ArchiveManager:
         logger.info(f"checking skadi_status for all records with skadi_status=0...")
         records = self.get_records_by_query("SELECT * FROM archives WHERE skadi_status = 0")
         # ^note - put <= 0 if you want to include errored scan as well...
+        logger.info(f"{len(records)} records found to update skadi status...")
         for record in records:
             sbid = record["sbid"]
             scan = record["scan"]
@@ -1000,106 +992,6 @@ class ArchiveManager:
     def __repr__(self) -> str:
         count = len(self.get_all_records())
         return f"<ArchiveManager db='{self.db_path}' records={count}>"
-
-class SBIDManager:
-    """Manages SBID information records."""
-
-    def __init__(self, db_path: str = "archive.db"):
-        self.db_path = db_path
-        self._init_db()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self):
-        """Initialize the sbid_records table if it doesn't exist."""
-        with self._get_connection() as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sbid_records (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sbid        INTEGER NOT NULL UNIQUE,
-                    acacia_archive_loc       TEXT NOT NULL,
-                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
-
-    # ------------------------------------------------------------------ #
-    #  Write operations                                                    #
-    # ------------------------------------------------------------------ #
-
-    def insert_record(self, sbid: int, acacia_archive_loc: str) -> int:
-        """
-        Insert a new SBID record.
-
-        Returns the row id of the newly inserted record.
-        Raises ValueError if the sbid already exists.
-        """
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.execute(
-                    "INSERT INTO sbid_records (sbid, acacia_archive_loc) VALUES (?, ?)",
-                    (sbid, acacia_archive_loc),
-                )
-                conn.commit()
-                return cursor.lastrowid
-        except sqlite3.IntegrityError as e:
-            logger.info(f"Record with SBID={sbid} already exists. will not update the record")
-            #raise sqlite3.IntegrityError(f"Record with SBID={sbid} already exists. {e}")
-    def update_record(self, sbid: int, acacia_archive_loc: str) -> bool:
-        """
-        Update the acacia_archive_loc for a given sbid.
-
-        Returns True if a row was updated, False if no matching record was found.
-        """
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE sbid_records
-                SET acacia_archive_loc = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE sbid = ?
-                """,
-                (acacia_archive_loc, sbid),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-
-    # ------------------------------------------------------------------ #
-    #  Read operations (stub — fill in as needed)                         #
-    # ------------------------------------------------------------------ #
-
-    def get_record(self, sbid: int) -> Optional[dict]:
-        """Fetch a single record by sbid. Returns None if not found."""
-        with self._get_connection() as conn:
-            row = conn.execute(
-                "SELECT * FROM sbid_records WHERE sbid = ?",
-                (sbid,),
-            ).fetchone()
-            return dict(row) if row else None
-
-    def get_all_records(self) -> list[dict]:
-        """Return all records in the database."""
-        with self._get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM sbid_records ORDER BY id"
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def get_records_by_acacia_archive_loc(self, acacia_archive_loc: str) -> list[dict]:
-        """Return all records with a given acacia_archive_loc."""
-        with self._get_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM sbid_records WHERE acacia_archive_loc = ? ORDER BY id",
-                (acacia_archive_loc,),
-            ).fetchall()
-            return [dict(r) for r in rows]
-
-    def __repr__(self) -> str:
-        count = len(self.get_all_records())
-        return f"<SBIDManager db='{self.db_path}' records={count}>"
 
 def main():
     """
