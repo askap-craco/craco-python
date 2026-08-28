@@ -32,7 +32,6 @@ from craco.tools import cracocal2casatab
 
 from craco.craco_run import auto_sched
 
-from clink import api as clink
 from configparser import ConfigParser
 
 import psycopg2
