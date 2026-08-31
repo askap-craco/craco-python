@@ -12,6 +12,7 @@ import re
 import glob
 import json
 import subprocess
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import sqlite3
 import xml.etree.ElementTree as ET
 from enum import IntEnum
@@ -31,12 +32,26 @@ from craco.tools import cracocal2casatab
 
 from craco.craco_run import auto_sched
 
+from configparser import ConfigParser
+
+import psycopg2
+from psycopg2.extras import RealDictCursor
+_psycopg2_UniqueViolation = psycopg2.errors.UniqueViolation
+
+### this is function to load tables from database
+try:
+    from sqlalchemy import create_engine
+except ImportError:
+    create_engine = None
+
+
 import logging
 logging.basicConfig(
     level = logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger(__name__)
+
 
 def metadata_dict2xml(metadata, indent=2):
     items = [" " * indent + f"<{k}>{v}</{k}>" for k, v in metadata.items()]
@@ -506,15 +521,10 @@ class ClinkListener:
 
     def __init__(self, participant_name: str = "au.csiro.atnf.askap.craco", config_path: Optional[str] = None):
         setup_clink_environment(config_path)
-        try:
-            from clink import api as clink
-            self.clink = clink
-            self.participant = clink.Participant(participant_name)
-            self._register_handlers()
-        except ImportError:
-            logger.error("CLINK package is not installed in the active environment.")
-            self.clink = None
-            self.participant = None
+        from clink import api as clink #reload after setting up clink env
+        self.clink = clink
+        self.participant = clink.Participant(participant_name)
+        self._register_handlers()
 
     def _extract_sbid(self, event) -> Optional[int]:
         """Extract SBID integer from event subject URN or event payload."""
@@ -528,8 +538,9 @@ class ClinkListener:
             if sb_id:
                 try:
                     return int(sb_id)
-                except (ValueError, TypeError):
-                    logger.debug(f"Failed to parse integer from payload sbid field '{sb_id}', falling back to URN check.")
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Failed to parse integer from payload sbid field '{sb_id}'.")
+                    raise ValueError(f"Failed to parse integer from payload sbid field '{sb_id}'. {e}")
 
         # 2. Check subject URN resource ID
         if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
@@ -540,6 +551,9 @@ class ClinkListener:
                 match = re.search(r"(\d+)", res_id)
                 if match:
                     return int(match.group(1))
+                else:
+                    logger.error(f"Failed to parse integer from URN resource ID '{res_id}'.")
+                    raise ValueError(f"Failed to parse integer from URN resource ID '{res_id}'.")
 
         # 3. Fallback: search raw subject string for SBID digits
         if hasattr(event, "subject") and event.subject:
@@ -554,51 +568,78 @@ class ClinkListener:
         am = ArchiveManager()
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.added_to_queue", name="craco.on_copy_queued", suppress_exceptions=True)
-        def on_copy_queued(event, **kwargs):
+        def on_copy_queued(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.started", name="craco.on_copy_started", suppress_exceptions=True)
-        def on_copy_started(event, **kwargs):
+        def on_copy_started(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.started for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.started for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.completed", name="craco.on_copy_completed", suppress_exceptions=True)
-        def on_copy_completed(event, **kwargs):
+        def on_copy_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: copy.completed for SBID {sbid}")
+            logger.info(f"Received CLINK event: copy.completed for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.cpmanager.ready_for_purge", name="craco.on_ready_for_purge", suppress_exceptions=True)
-        def on_ready_for_purge(event, **kwargs):
+        def on_ready_for_purge(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid}")
+            logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
                 except Exception as e:
                     logger.debug(f"DB update note: {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.completed", name="craco.on_purge_completed", suppress_exceptions=True)
-        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
-        def on_purge_completed(event, **kwargs):
+        def on_purge_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
-            logger.info(f"Received CLINK event: purge completed for SBID {sbid}")
+            logger.info(f"Received CLINK event: purge completed for SBID {sbid} (dry_run={dry_run})")
             if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
+                try:
+                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                except Exception as e:
+                    logger.debug(f"DB update note: {e}")
+
+        @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
+        def on_purge_deleted(event, dry_run: bool = False, **kwargs):
+            sbid = self._extract_sbid(event)
+            logger.info(f"Received CLINK event: purge deleted for SBID {sbid} (dry_run={dry_run})")
+            if sbid:
+                if dry_run:
+                    logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
+                    return
                 try:
                     am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
                 except Exception as e:
@@ -619,7 +660,6 @@ class ClinkListener:
 
 # NEW: clink integration
 #### now we need to move everything to normal postgresql database
-from configparser import ConfigParser
 
 def load_config(config=None, section="dbwriter"):
     parser = ConfigParser()
@@ -636,17 +676,11 @@ def load_config(config=None, section="dbwriter"):
     return {k:v for k, v in params}
 
 ### this function to get connection details...
-import psycopg2
-from psycopg2.extras import RealDictCursor
-
 def get_psql_connect(section="dbreader"):
     if psycopg2 is None:
         raise ImportError("psycopg2 is required for PostgreSQL connection.")
     config = load_config(section=section)
     return psycopg2.connect(**config)
-
-### this is function to load tables from database
-from sqlalchemy import create_engine
 
 def get_psql_engine(section="dbreader"):
     if create_engine is None:
@@ -973,7 +1007,6 @@ def main():
       # 3. Specify custom CLINK transport config file:
       python -m craco.casda_archiver --sbid 82418 --emit-clink --clink-config /path/to/clink_env.conf
     """
-    from argparse import ArgumentParser, RawDescriptionHelpFormatter
     description_text = (
         "Stage uvfits data, calibration tables, and metadata for archiving and handle CLINK event publishing/listening.\n\n"
         "Examples:\n"
