@@ -571,6 +571,9 @@ class ClinkListener:
         def on_copy_queued(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
@@ -584,6 +587,9 @@ class ClinkListener:
         def on_copy_started(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.started for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
@@ -597,6 +603,9 @@ class ClinkListener:
         def on_copy_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.completed for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
@@ -610,6 +619,9 @@ class ClinkListener:
         def on_ready_for_purge(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
@@ -623,6 +635,9 @@ class ClinkListener:
         def on_purge_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: purge completed for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
@@ -636,6 +651,9 @@ class ClinkListener:
         def on_purge_deleted(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: purge deleted for SBID {sbid} (dry_run={dry_run})")
+            if not event.data.get("item", {}).get("queue") == "CRACO":
+                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+                return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
