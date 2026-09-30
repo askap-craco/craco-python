@@ -109,12 +109,12 @@ def flag_freqs_string(mask, freqs):
             # End of the current flagged range
             in_flag = False
             end_freq = freqs[i - 1]
-            flag_ranges.append(f"{start_freq-1:.0f}~{end_freq+1:.0f}MHz")
+            flag_ranges.append(f"*:{start_freq-1:.0f}~{end_freq+1:.0f}MHz")
 
     # Handle case where the last frequency is flagged
     if in_flag:
         end_freq = freqs[-1]
-        flag_ranges.append(f"{start_freq-1:.0f}~{end_freq+1:.0f}MHz")
+        flag_ranges.append(f"*:{start_freq-1:.0f}~{end_freq+1:.0f}MHz")
 
     return ','.join(flag_ranges)
 
@@ -143,6 +143,7 @@ def get_flag_freqs(ms):
 
     # Generate string representation of flagged frequency ranges
     flag_string = flag_freqs_string(expanded_mask, ms.freqs[0])
+    logger.info(f"flag frequency for {ms.mspath}: {flag_string}")
     
     return flag_string
 
@@ -154,8 +155,8 @@ def run(fieldms, burstms):
     flagstr = get_flag_freqs(fieldms)
     logger.info(f"Flagging frequencies: {flagstr}")
 
-    flagdata(vis=fieldms, spw=f"*:{flagstr}", mode='manual', action='apply')
-    flagdata(vis=burstms, spw=f"*:{flagstr}", mode='manual', action='apply')
+    flagdata(vis=fieldms, spw=flagstr, mode='manual', action='apply')
+    flagdata(vis=burstms, spw=flagstr, mode='manual', action='apply')
 
 
 if __name__ == "__main__":
