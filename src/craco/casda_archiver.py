@@ -8,6 +8,7 @@ several things should be covered is
 '''
 
 import os
+import stat
 import re
 import glob
 import json
@@ -57,9 +58,45 @@ def metadata_dict2xml(metadata, indent=2):
     items = [" " * indent + f"<{k}>{v}</{k}>" for k, v in metadata.items()]
     return "<metadata>\n" + "\n".join(items) + "\n</metadata>"
 
+def make_user_writable(path: Union[str, os.PathLike]) -> bool:
+    """
+    Ensure the specified path (file or directory) has user write permission (chmod u+w).
+
+    Args:
+        path: Path to the file or directory.
+
+    Returns:
+        bool: True if write permission is confirmed/set, False otherwise.
+    """
+    if path is None:
+        return False
+    path_str = str(path)
+    if not os.path.exists(path_str):
+        logger.warning(f"Path does not exist, cannot set write permission: {path_str}")
+        return False
+    try:
+        current_mode = os.stat(path_str).st_mode
+        if not (current_mode & stat.S_IWUSR):
+            logger.info(f"Adding user write permission to {path_str} (chmod u+w)...")
+            os.chmod(path_str, current_mode | stat.S_IWUSR)
+        return True
+    except Exception as e:
+        logger.warning(f"os.chmod failed on {path_str}: {e}. Trying shell 'chmod u+w'...")
+        try:
+            res = subprocess.run(["chmod", "u+w", path_str], capture_output=True, text=True)
+            if res.returncode != 0:
+                logger.error(f"Failed to set user write permission on {path_str}: {res.stderr.strip()}")
+                return False
+            return True
+        except Exception as err:
+            logger.error(f"Failed to execute chmod u+w on {path_str}: {err}")
+            return False
+
+
 def execute_fixuvfits(uvfitspath):
     try: 
         logger.info(f"fixing {uvfitspath}...")
+        make_user_writable(uvfitspath)
         fix(uvfitspath)
         return 0
     except Exception as error:
@@ -69,6 +106,7 @@ def execute_fixuvfits(uvfitspath):
 class UvfitsCasdaMetadata:
     def __init__(self, uvfitspath):
         self.uvfitspath = os.path.abspath(uvfitspath)
+        self.ensure_writable()
         self._fix_uvfits() # fix uvfits file...
         self.uvsource = uvfits.open(uvfitspath)
         self.hdulist = fits.open(uvfitspath)
@@ -82,18 +120,13 @@ class UvfitsCasdaMetadata:
         ### load calibration files
         self._load_calfile()
 
+    def ensure_writable(self):
+        """Ensure raw uvfits file has user write permission (chmod u+w)."""
+        make_user_writable(self.uvfitspath)
+
     def _fix_uvfits(self,):
-        canwrite = os.access(self.uvfitspath, os.W_OK)
-        logger.info(f"checking uvfits permission with OS.ACCESS - {canwrite}")
-        if not canwrite:
-            cmd = f"chmod +w {self.uvfitspath}"
-            logger.info(f"executing {cmd} to add write permission...")
-            os.system(cmd)
+        self.ensure_writable()
         fixstatus = execute_fixuvfits(self.uvfitspath)
-        if not canwrite:
-            cmd = f"chmod -w {self.uvfitspath}"
-            logger.info(f"removing write permission...")
-            os.system(cmd)
 
     def _format_isotime(self, time, fmt="%Y-%m-%dT%H:%M:%S"):
         assert isinstance(time, Time), f"wrong time type - {type(time)}"
@@ -211,6 +244,7 @@ class UvfitsCasdaMetadata:
             fp.write(casdametaxml)
 
     def prepare_casda_upload(self, casacaltab=True):
+        self.ensure_writable()
         os.makedirs(self.archivefolder, exist_ok=True)
         ### first of all, uvfits itself
         scanfolder = f"{self.archivefolder}/{self.cracoscan}"
@@ -255,8 +289,19 @@ class ScanCasdaMetadata:
         self.cracoscan = tstart # this is cracoscan - timestamp
         self.archivefolder = f"/data/craco/craco/archive/SB{self.sbid}"
 
-    def run_scan_casda_prepare(self):
+    def make_scan_writable(self):
+        """Ensure all raw uvfits files in this scan are user-writable (chmod u+w)."""
+        logger.info(f"Ensuring user write permissions (chmod u+w) for scan {self.cracoscan}...")
         for uvfitspath in self.scandir.uvfits_paths:
+            if not uvfitspath:
+                continue
+            make_user_writable(uvfitspath)
+
+    def run_scan_casda_prepare(self):
+        self.make_scan_writable()
+        for uvfitspath in self.scandir.uvfits_paths:
+            if not uvfitspath:
+                continue
             logging.info(f"looking into {uvfitspath}")
             try:
                 ucm = UvfitsCasdaMetadata(uvfitspath=uvfitspath)
@@ -527,20 +572,35 @@ class ClinkListener:
         self._register_handlers()
 
     def _extract_sbid(self, event) -> Optional[int]:
-        """Extract SBID integer from event subject URN or event payload."""
+        """Extract SBID integer from event payload or subject URN."""
         # 1. Check data payload fields
         if hasattr(event, "data") and isinstance(event.data, dict):
             sb_id = (
                 event.data.get("sbid")
                 or event.data.get("schedulingBlock", {}).get("id")
                 or event.data.get("craco", {}).get("sbid")
+                or event.data.get("item", {}).get("sbid")
             )
-            if sb_id:
+            logger.debug(f"Payload SBID: {sb_id}")
+            if sb_id is not None:
                 try:
                     return int(sb_id)
                 except (ValueError, TypeError) as e:
-                    logger.error(f"Failed to parse integer from payload sbid field '{sb_id}'.")
-                    raise ValueError(f"Failed to parse integer from payload sbid field '{sb_id}'. {e}")
+                    match = re.search(r"(\d+)", str(sb_id))
+                    if match:
+                        logger.info(f"Matched SBID {match.group(1)} from payload sbid field '{sb_id}'.")
+                        return int(match.group(1))
+                    else:
+                        logger.error(f"Failed to parse integer from payload sbid field '{sb_id}'.")
+                        raise ValueError(f"Failed to parse integer from payload sbid field '{sb_id}'. {e}")
+
+            # Check item path / uri in payload (e.g. /data/craco/craco/archive/SB82418)
+            item = event.data.get("item", {})
+            if isinstance(item, dict):
+                item_path = str(item.get("path") or item.get("uri") or "")
+                match = re.search(r"SB0*(\d+)", item_path, re.IGNORECASE) or re.search(r"(\d{5,})", item_path)
+                if match:
+                    return int(match.group(1))
 
         # 2. Check subject URN resource ID
         if hasattr(event, "subject_urn") and event.subject_urn and getattr(event.subject_urn, "resource", None):
@@ -548,20 +608,63 @@ class ClinkListener:
             try:
                 return int(res_id)
             except ValueError:
-                match = re.search(r"(\d+)", res_id)
+                match = re.search(r"SB0*(\d+)", res_id, re.IGNORECASE) or re.search(r"(\d+)", res_id)
                 if match:
                     return int(match.group(1))
-                else:
-                    logger.error(f"Failed to parse integer from URN resource ID '{res_id}'.")
-                    raise ValueError(f"Failed to parse integer from URN resource ID '{res_id}'.")
+                # Not an error; queue-level events have resource IDs like 'CRACO' or 'POST_OBSERVATION_HIGH'
+                logger.debug(f"URN resource ID '{res_id}' contains no integer digits.")
 
         # 3. Fallback: search raw subject string for SBID digits
         if hasattr(event, "subject") and event.subject:
-            match = re.search(r"(\d+)", str(event.subject))
+            subj_str = str(event.subject)
+            match = re.search(r"SB0*(\d+)", subj_str, re.IGNORECASE) or re.search(r"(\d{5,})", subj_str) or re.search(r"(\d+)", subj_str)
             if match:
                 return int(match.group(1))
 
         return None
+
+    def _is_craco_event(self, event, sbid: Optional[int] = None, am: Optional["ArchiveManager"] = None) -> bool:
+        """
+        Determine if a CLINK event belongs to CRACO.
+        Checks:
+        1. Explicit queue field in payload: item.queue == "CRACO"
+        2. "craco" in payload item path or uri
+        3. "craco" in event subject or subject URN
+        4. "craco" in top-level event payload
+        # 5. SBID exists in CRACO archives database
+        """
+        # 1. Explicit queue field in payload item
+        item = event.data.get("item", {}) if isinstance(getattr(event, "data", None), dict) else {}
+        if "craco" in str(item.get("queue") or "").lower():
+            return True
+
+        # 2. Check path or uri in item
+        item_path = str(item.get("path") or item.get("uri") or "").lower()
+        if "craco" in item_path:
+            return True
+
+        # 3. Check event subject or subject URN
+        subj = str(getattr(event, "subject", "") or "").lower()
+        if hasattr(event, "subject_urn") and event.subject_urn:
+            subj = f"{subj} {str(event.subject_urn).lower()}"
+        if "craco" in subj:
+            return True
+
+        # 4. Check craco key in top-level event payload
+        if isinstance(getattr(event, "data", None), dict) and "craco" in event.data:
+            return True
+
+        # 5. Check if SBID exists in archives DB (disabled: unsafe as other telescope
+        # subsystems may share the same SBID for events not intended for CRACO)
+        # if sbid is not None and am is not None:
+        #     try:
+        #         records = am.get_records_by_query(f"SELECT 1 FROM archives WHERE sbid = {int(sbid)} LIMIT 1")
+        #         if records:
+        #             return True
+        #     except Exception as e:
+        #         logger.debug(f"DB check in _is_craco_event note: {e}")
+
+        return False
 
     def _register_handlers(self):
         """Register event handlers for copy and purge events."""
@@ -571,97 +674,109 @@ class ClinkListener:
         def on_copy_queued(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.added_to_queue for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_QUEUED)
+                    logger.info(f"Updated DB status for SBID {sbid} to COPY_QUEUED (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (COPY_QUEUED): {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.started", name="craco.on_copy_started", suppress_exceptions=True)
         def on_copy_started(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.started for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_EXECUTING)
+                    logger.info(f"Updated DB status for SBID {sbid} to COPY_EXECUTING (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (COPY_EXECUTING): {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.copy.completed", name="craco.on_copy_completed", suppress_exceptions=True)
         def on_copy_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: copy.completed for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.COPY_FINISHED)
+                    logger.info(f"Updated DB status for SBID {sbid} to COPY_FINISHED (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (COPY_FINISHED): {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.cpmanager.ready_for_purge", name="craco.on_ready_for_purge", suppress_exceptions=True)
         def on_ready_for_purge(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: ready_for_purge for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
+            logger.info(f"CRACO-relevant purge request received: ready_for_purge for SBID {sbid} (subject: {getattr(event, 'subject', getattr(event, 'subject_urn', 'N/A'))})")
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                    logger.info(f"Updating DB setonix_status to READY_FOR_PURGE ({int(ArchiveStatus.READY_FOR_PURGE)}) for all scans in SBID {sbid}")
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.READY_FOR_PURGE)
+                    logger.info(f"Updated DB status for SBID {sbid} to READY_FOR_PURGE (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (READY_FOR_PURGE): {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.completed", name="craco.on_purge_completed", suppress_exceptions=True)
         def on_purge_completed(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: purge completed for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
+            logger.info(f"CRACO-relevant purge request received: purge completed for SBID {sbid} (subject: {getattr(event, 'subject', getattr(event, 'subject_urn', 'N/A'))})")
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                    logger.info(f"Updating DB setonix_status to PURGED ({int(ArchiveStatus.PURGED)}) for all scans in SBID {sbid}")
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                    logger.info(f"Updated DB status for SBID {sbid} to PURGED (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (PURGED): {e}")
 
         @self.participant.on_event("au.csiro.atnf.askap.datamanager.purge.deleted", name="craco.on_purge_deleted", suppress_exceptions=True)
         def on_purge_deleted(event, dry_run: bool = False, **kwargs):
             sbid = self._extract_sbid(event)
             logger.info(f"Received CLINK event: purge deleted for SBID {sbid} (dry_run={dry_run})")
-            if not event.data.get("item", {}).get("queue") == "CRACO":
-                logger.debug(f"Ignoring non-CRACO queue event for SBID {sbid}")
+            if not self._is_craco_event(event, sbid=sbid, am=am):
+                logger.info(f"Ignoring non-CRACO queue event for SBID {sbid}")
                 return
+            logger.info(f"CRACO-relevant purge request received: purge deleted for SBID {sbid} (subject: {getattr(event, 'subject', getattr(event, 'subject_urn', 'N/A'))})")
             if sbid:
                 if dry_run:
                     logger.info(f"Dry run enabled: Skipping DB update for SBID {sbid}")
                     return
                 try:
-                    am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                    logger.info(f"Updating DB setonix_status to PURGED ({int(ArchiveStatus.PURGED)}) for all scans in SBID {sbid}")
+                    updated = am.update_archive_status(sbid=sbid, scan="SB_ALL", setonix_status=ArchiveStatus.PURGED)
+                    logger.info(f"Updated DB status for SBID {sbid} to PURGED (success={updated})")
                 except Exception as e:
-                    logger.debug(f"DB update note: {e}")
+                    logger.error(f"Failed to update DB for SBID {sbid} (PURGED): {e}")
 
     def start_listening(self):
         """Start blocking consumer loop."""
@@ -1043,6 +1158,8 @@ def main():
     parser.add_argument("--scan", default=None, type=str, help="scan id of the data to be")
     parser.add_argument("--tstart", default=None,type=str, help="scan start time of the data to be archived")
     parser.add_argument("--prepare", action="store_true", help="whether to run prepare, i.e., convert and link data to archive folder")
+    parser.add_argument("--chmod", dest="chmod", action="store_true", default=True, help="ensure raw uvfits files are user-writable (chmod u+w) (default: True)")
+    parser.add_argument("--no-chmod", dest="chmod", action="store_false", help="skip ensuring raw uvfits files are user-writable")
     parser.add_argument("--rsync", action="store_true", help="whether to start rsync job to upload data to given place")
     parser.add_argument("--target", type=str, default="setonix:/scratch/ja3/zwan4817/askapbuffer", help="the target for rsync upload")
     # NEW: clink integration
@@ -1075,6 +1192,8 @@ def main():
 
     for scan in scans:
         scm = ScanCasdaMetadata(sbid=args.sbid, scan=scan.split("/")[0], tstart=scan.split("/")[1])
+        if args.chmod:
+            scm.make_scan_writable()
         if args.prepare:
             scm.run_scan_casda_prepare()
         if args.rsync:

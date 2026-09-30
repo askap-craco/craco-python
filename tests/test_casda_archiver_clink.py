@@ -7,16 +7,22 @@ from unittest.mock import MagicMock
 # Mock missing HPC/astronomy packages if not installed locally
 for mod_name in [
     "astropy", "astropy.io", "astropy.io.fits", "astropy.time",
-    "craft", "craft.uvfits",
+    "craft", "craft.uvfits", "craft.craco",
     "aces", "aces.askapdata", "aces.askapdata.schedblock",
     "casacore", "casacore.tables",
-    "craco.fixuvfits"
+    "craco.fixuvfits",
+    "slack_sdk",
+    "psycopg2", "psycopg2.extras",
+    "sqlalchemy",
+    "clink", "clink.api"
 ]:
     if mod_name not in sys.modules:
         try:
             __import__(mod_name)
         except ImportError:
             sys.modules[mod_name] = MagicMock()
+
+import stat
 
 # Ensure src/ is on python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
@@ -27,7 +33,8 @@ from craco.casda_archiver import (
     parse_metadata_xml,
     get_calibration_files,
     build_ready_for_copy_payload,
-    setup_clink_environment
+    setup_clink_environment,
+    make_user_writable
 )
 
 class TestCasdaArchiverClink(unittest.TestCase):
@@ -149,5 +156,167 @@ class TestCasdaArchiverClink(unittest.TestCase):
         self.assertIn("Subject URN: urn:askap:craco:::archive-folder//data/craco/craco/archive/SB82418", out)
         self.assertIn('"id": "82418"', out)
 
+    def test_make_user_writable_file(self):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test data")
+            tmp_file = f.name
+
+        try:
+            # Set to readonly
+            os.chmod(tmp_file, 0o444)
+            current_mode = os.stat(tmp_file).st_mode
+            self.assertFalse(bool(current_mode & stat.S_IWUSR))
+
+            # Make user writable
+            res = make_user_writable(tmp_file)
+            self.assertTrue(res)
+            updated_mode = os.stat(tmp_file).st_mode
+            self.assertTrue(bool(updated_mode & stat.S_IWUSR))
+        finally:
+            if os.path.exists(tmp_file):
+                os.chmod(tmp_file, 0o644)
+                os.remove(tmp_file)
+
+    def test_make_user_writable_directory(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sub_dir = os.path.join(tmp_dir, "scans", "00", "20260220224148")
+            os.makedirs(sub_dir, exist_ok=True)
+            test_file = os.path.join(sub_dir, "b00.uvfits")
+            with open(test_file, "w") as f:
+                f.write("dummy uvfits")
+
+            try:
+                # Set directory and file to readonly
+                os.chmod(test_file, 0o444)
+                os.chmod(sub_dir, 0o555)
+
+                self.assertFalse(bool(os.stat(sub_dir).st_mode & stat.S_IWUSR))
+                self.assertFalse(bool(os.stat(test_file).st_mode & stat.S_IWUSR))
+
+                # Make parent dir and file writable
+                self.assertTrue(make_user_writable(sub_dir))
+                self.assertTrue(make_user_writable(test_file))
+
+                self.assertTrue(bool(os.stat(sub_dir).st_mode & stat.S_IWUSR))
+                self.assertTrue(bool(os.stat(test_file).st_mode & stat.S_IWUSR))
+            finally:
+                os.chmod(sub_dir, 0o755)
+                os.chmod(test_file, 0o644)
+
+    def test_make_user_writable_nonexistent_and_none(self):
+        self.assertFalse(make_user_writable(None))
+        self.assertFalse(make_user_writable("/nonexistent/dummy/path/file.uvfits"))
+
+    def test_ensure_writable_only_targets_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scan_dir = os.path.join(tmp_dir, "scans", "00", "20260220224148")
+            os.makedirs(scan_dir, exist_ok=True)
+            test_file = os.path.join(scan_dir, "b00.uvfits")
+            with open(test_file, "w") as f:
+                f.write("dummy")
+
+            try:
+                os.chmod(test_file, 0o444)
+                os.chmod(scan_dir, 0o555)
+
+                from craco.casda_archiver import UvfitsCasdaMetadata
+                mock_ucm = MagicMock(spec=UvfitsCasdaMetadata)
+                mock_ucm.uvfitspath = test_file
+                UvfitsCasdaMetadata.ensure_writable(mock_ucm)
+
+                # File should be writable, parent dir should remain unchanged (readonly)
+                self.assertTrue(bool(os.stat(test_file).st_mode & stat.S_IWUSR))
+                self.assertFalse(bool(os.stat(scan_dir).st_mode & stat.S_IWUSR))
+            finally:
+                os.chmod(scan_dir, 0o755)
+                os.chmod(test_file, 0o644)
+
+    def test_cli_chmod_flag_defaults(self):
+        from unittest.mock import patch
+        from craco.casda_archiver import main
+
+        with patch("sys.argv", ["casda_archiver.py", "--sbid", "82418", "--scan", "00", "--tstart", "20260220224148"]), \
+             patch("craco.casda_archiver.ScanCasdaMetadata") as mock_scm_cls:
+            mock_scm = MagicMock()
+            mock_scm_cls.return_value = mock_scm
+            main()
+            mock_scm.make_scan_writable.assert_called_once()
+
+        with patch("sys.argv", ["casda_archiver.py", "--sbid", "82418", "--scan", "00", "--tstart", "20260220224148", "--no-chmod"]), \
+             patch("craco.casda_archiver.ScanCasdaMetadata") as mock_scm_cls:
+            mock_scm = MagicMock()
+            mock_scm_cls.return_value = mock_scm
+            main()
+            mock_scm.make_scan_writable.assert_not_called()
+
+    def test_is_craco_event(self):
+        from craco.casda_archiver import ClinkListener
+        from unittest.mock import patch
+
+        with patch("craco.casda_archiver.setup_clink_environment"), \
+             patch("craco.casda_archiver.ArchiveManager"):
+            listener = MagicMock(spec=ClinkListener)
+            listener._is_craco_event = ClinkListener._is_craco_event.__get__(listener, ClinkListener)
+
+            # 1. queue contains craco (case-insensitive)
+            ev1 = MagicMock()
+            ev1.data = {"item": {"queue": "craco_processing_queue"}}
+            self.assertTrue(listener._is_craco_event(ev1))
+
+            # 2. item path contains craco
+            ev2 = MagicMock()
+            ev2.data = {"item": {"path": "/data/craco/craco/archive/SB82418"}}
+            self.assertTrue(listener._is_craco_event(ev2))
+
+            # 3. subject_urn contains craco
+            ev3 = MagicMock()
+            ev3.data = {}
+            ev3.subject_urn = "urn:askap:datamanager:::purge-item//data/craco/craco/archive/SB82418"
+            self.assertTrue(listener._is_craco_event(ev3))
+
+            # 4. Non-CRACO event
+            ev4 = MagicMock()
+            ev4.data = {"item": {"queue": "OTHER", "path": "/askapingest/ruby/askap-scheduling-blocks/88017"}}
+            ev4.subject_urn = "urn:askap:datamanager:::purge-item//askapingest/ruby/askap-scheduling-blocks/88017"
+            ev4.subject = None
+            self.assertFalse(listener._is_craco_event(ev4))
+
+            # 5. DB fallback check is disabled for safety (subsystems share SBIDs)
+            # mock_am = MagicMock()
+            # mock_am.get_records_by_query.return_value = [{"sbid": 82418}]
+            # ev5 = MagicMock()
+            # ev5.data = {}
+            # ev5.subject_urn = None
+            # ev5.subject = None
+            # self.assertTrue(listener._is_craco_event(ev5, sbid=82418, am=mock_am))
+
+    def test_extract_sbid_queue_events(self):
+        from craco.casda_archiver import ClinkListener
+        from unittest.mock import patch
+
+        with patch("craco.casda_archiver.setup_clink_environment"), \
+             patch("craco.casda_archiver.ArchiveManager"):
+            listener = MagicMock(spec=ClinkListener)
+            listener._extract_sbid = ClinkListener._extract_sbid.__get__(listener, ClinkListener)
+
+            # Queue-level URN with no digits should return None without error
+            ev_queue = MagicMock()
+            ev_queue.data = {}
+            ev_queue.subject_urn = MagicMock()
+            ev_queue.subject_urn.resource.id = "POST_OBSERVATION_HIGH"
+            ev_queue.subject = None
+            self.assertIsNone(listener._extract_sbid(ev_queue))
+
+            # Queue-level URN for CRACO with item path containing SBID
+            ev_craco_queue = MagicMock()
+            ev_craco_queue.data = {"item": {"path": "/data/craco/craco/archive/SB82418", "queue": "CRACO"}}
+            ev_craco_queue.subject_urn = MagicMock()
+            ev_craco_queue.subject_urn.resource.id = "CRACO"
+            ev_craco_queue.subject = None
+            self.assertEqual(listener._extract_sbid(ev_craco_queue), 82418)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
