@@ -1051,8 +1051,9 @@ class ArchiveManager:
 
     # check skadi_status
     def _check_skadi_status(self, sbid, scan):
-        scandir = ScanDir(sbid=sbid, scan=scan)
-        try: uvfitscount = scandir.uvfits_count
+        try: 
+            scandir = ScanDir(sbid=sbid, scan=scan)
+            uvfitscount = scandir.uvfits_count
         except:
             logger.info(f"cannot get uvfits count for sbid={sbid}, scan={scan}...")
             uvfitscount = 0
