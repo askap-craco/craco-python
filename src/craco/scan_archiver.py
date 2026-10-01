@@ -156,6 +156,7 @@ def update_database_with_tsp():
 
     scan_dir = os.environ['SCAN_DIR']
     sbid, scanid, tstart = parse_scandir_env(scan_dir)
+    sbid = int(sbid.replace("SB", "")) # get rid of the SB prefix for the database update
 
     cmd = f"""scan_archive_update_db.py -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
 
