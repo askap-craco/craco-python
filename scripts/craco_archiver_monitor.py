@@ -5,6 +5,8 @@ import os
 from craco.casda_archiver import ArchiveManager, ScanCasdaMetadata, ClinkPublisher
 from craco.datadirs import SchedDir
 
+from craco.mattermost_messager import MattermostPostManager
+
 import logging
 logging.basicConfig(
     level = logging.INFO,
@@ -41,23 +43,29 @@ def find_sbids():
     return sbids
 
 
-def run_sbid(sbid, clink_credential_path,dryrun=True):
+def run_sbid(sbid, clink_credential_path,dryrun=True, mattermost=False):
     """
     Run the archiver for a given SBID
     """
     scheddir = SchedDir(sbid=sbid)
     scans = scheddir.scans
 
+    if mattermost:
+        mm = MattermostPostManager()
+        mm.post_message(f"Starting archiving preparation for SBID {sbid}")
+
     ### prepare for the archiving...
-    try:
-        for scan in scans:
-            logger.info(f"Preparing scan {scan} for archiving...")
+    for scan in scans:
+        logger.info(f"Preparing scan {scan} for archiving...")
+        try:
             scm = ScanCasdaMetadata(sbid=sbid, scan=scan.split("/")[0], tstart=scan.split("/")[1])
+            if mattermost:
+                mm.post_message(f"Preparing SBID {sbid} - scan {scan} for archiving...")
             scm.run_scan_casda_prepare()
-        ### if everything goes fine for all scans, we then go to emit_clink part
-    except Exception as e:
-        logger.error(f"Error preparing scan {scan} for archiving: {e}")
-        return
+        except Exception as e:
+            logger.error(f"Error preparing scan {scan} for archiving: {e}")
+            ### at this stage, there is not too many things you can do, so just log the error and continue...
+            # return
 
     ### make clink for the sbid...
     publisher = ClinkPublisher(config_path=clink_credential_path)
@@ -69,8 +77,11 @@ def run_sbid(sbid, clink_credential_path,dryrun=True):
         include_file_size = True,
     )
 
+    if mattermost:
+        mm.post_message(f"Clink event emitted for SBID {sbid}. Archiving preparation completed.")
 
-def run(dryrun=True):
+
+def run(dryrun=True, mattermost=True):
     """
     Run the archiver monitor script
     """
@@ -84,20 +95,25 @@ def run(dryrun=True):
         raise ValueError("CLINK_CREDENTIAL_PATH is not set or invalid. Please set the environment variable to a valid path.")
 
     ### find sbids that needs to be archived...
-    sbids = find_sbids()
+    # sbids = find_sbids()
+    sbids = [74228]
     logger.info(f"SBIDs to be archived: {sbids}")
 
     if len(sbids) == 0:
         logger.info("No SBIDs to be archived.")
         return
+    else:
+        if mattermost:
+            mm = MattermostPostManager()
+            mm.post_message(f"Found {len(sbids)} SBIDs to be archived: {sbids}")
 
     ### run the archiver for each sbid...
     for sbid in sbids:
         logger.info(f"Running archiver for SBID {sbid}...")
-        run_sbid(sbid, clink_credential_path, dryrun=dryrun)
+        run_sbid(sbid, clink_credential_path, dryrun=dryrun, mattermost=mattermost)
 
 if __name__ == "__main__":
-    run()
+    run(mattermost=True)
     # import argparse
 
     # parser = argparse.ArgumentParser(description="CRACO Archiver Monitor")
