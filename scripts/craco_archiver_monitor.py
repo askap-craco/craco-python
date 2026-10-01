@@ -95,8 +95,7 @@ def run(dryrun=True, mattermost=True):
         raise ValueError("CLINK_CREDENTIAL_PATH is not set or invalid. Please set the environment variable to a valid path.")
 
     ### find sbids that needs to be archived...
-    # sbids = find_sbids()
-    sbids = [74228]
+    sbids = find_sbids()
     logger.info(f"SBIDs to be archived: {sbids}")
 
     if len(sbids) == 0:
@@ -113,7 +112,7 @@ def run(dryrun=True, mattermost=True):
         run_sbid(sbid, clink_credential_path, dryrun=dryrun, mattermost=mattermost)
 
 if __name__ == "__main__":
-    run(mattermost=True)
+    run(dryrun=False, mattermost=True)
     # import argparse
 
     # parser = argparse.ArgumentParser(description="CRACO Archiver Monitor")
