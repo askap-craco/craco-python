@@ -320,9 +320,11 @@ def exit_function():
         
         archive_location  = get_param_with_default(obsparams, 'craco.archive.location', '')
         log.info('craco.archive.location location is %s', archive_location)
-        if archive_location != '':
+        # if archive_location != '':
+        if True: # for testing...
             scan_archiver.keep_with_tsp()
-            scan_archiver.run_with_tsp(archive_location)
+            # scan_archiver.run_with_tsp(archive_location)
+            scan_archiver.update_database_with_tsp()
 
 if __name__ == '__main__':
     _main()

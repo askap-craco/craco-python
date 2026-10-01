@@ -139,9 +139,38 @@ def keep_with_tsp():
         log.info(f"Queued keep scan job - with command - {cmd}")
 
 
+def update_database_with_tsp():
+    """
+    this is used for updating the database for further casda archiving
+    """
+    log.info("Queuing up update database job")
+    ARCHIVE_TS_SOCKET = "/data/craco/craco/tmpdir/queues/archive"
+    TMPDIR = "/data/craco/craco/tmpdir"
+
+    environment = {
+            "TS_SOCKET": ARCHIVE_TS_SOCKET,
+            "TMPDIR": TMPDIR,
+        }
+    ecopy = os.environ.copy()
+    ecopy.update(environment)
+
+    scan_dir = os.environ['SCAN_DIR']
+    sbid, scanid, tstart = parse_scandir_env(scan_dir)
+
+    cmd = f"""scan_archive_update_db.py -sbid {sbid} -scanid {scanid} -tstart {tstart}"""
+
+    S.run(
+        [f"tsp {cmd}"], shell=True, capture_output=True,
+        text=True, env=ecopy,
+    )
+    
+    log.info(f"Queued archive database update job - with command - {cmd}")
+
 def run_with_tsp(destination_str, exclude_uvfits:bool = False):
     '''
     Launches the archive_scan job via TSP. Excludes uvfits if exclude_uvfits is True
+
+    ### THIS IS FOR THE ACACIA ARCHIVING... THIS HAS BEEN DEPRECATED...
     '''
     log.info(f"Queuing up archive scan")
 
