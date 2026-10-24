@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--dec", type=float, help="source dec in degree", required=True)
     parser.add_argument("--summary", type=str, help="source summary that will appear in the end", default="")
     parser.add_argument("--workdir", type=str, help="working directory", default="./")
+    parser.add_argument("--snrcut", type=float, help="SNR cut for source detection", default=8.0)
 
     args = parser.parse_args()
 
@@ -33,7 +34,7 @@ def main():
 
     )
 
-    srcposcorr.correct_src_coord()
+    srcposcorr.correct_src_coord(snrcut=args.snrcut)
     srcposcorr.plot_burst_field()
 
 if __name__ == "__main__":

@@ -466,14 +466,14 @@ class CorrSrcPos:
         plt.close()
         
     
-    def correct_src_coord(self, dump=True):
+    def correct_src_coord(self, snrcut=8.0, dump=True):
         # get catalogues...
         self._get_racs(); self._get_ref()
         # get offsets
         self._compare_all_surveys(nbootstrap=1000)
         self._plot_offsets()
         ### get source nearby the target...
-        self._select_sources(snrcut=8.)
+        self._select_sources(snrcut=snrcut)
         ### start to apply the offset...
         self.ra_offset = np.mean(self.craco_racs_ra_offset) + np.mean(self.racs_ref_ra_offset)
         self.dec_offset = np.mean(self.craco_racs_dec_offset) + np.mean(self.racs_ref_dec_offset)
