@@ -75,9 +75,14 @@ class VisViewMeta:
                     data['DATA'][i][...,2] = -1
 
 
-        data['UU'] = uvw_out[0,:]
-        data['VV'] = uvw_out[1,:]
-        data['WW'] = uvw_out[2,:]
+        if isinstance(data, np.ndarray):
+            data['UU'] = uvw_out[0,:]
+            data['VV'] = uvw_out[1,:]
+            data['WW'] = uvw_out[2,:]   
+        else:
+            data['UU'] = uvw_out[0,0]
+            data['VV'] = uvw_out[1,0]
+            data['WW'] = uvw_out[2,0]
 
         return data
     
