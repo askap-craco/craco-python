@@ -1251,14 +1251,14 @@ class CalJob:
         query the database to check if the calibration has finished...
         theoretically, we will not use this one
         """
-        self.cur.execute(f"""select sbid, status from calibration where sbid={self.sbid}""")
+        self.cur.execute(f"""select sbid, status, valid from calibration where sbid={self.sbid}""")
         query_result = self.cur.fetchall()
 
         if len(query_result) == 0: 
             done = False # nothing in the database... nothing has been ran...
         else:
-            _, status = query_result[0]
-            if status == 0: done = True
+            _, status, valid = query_result[0]
+            if status == 0 and valid: done = True
             else: done = False
         return done
 
